@@ -8,4 +8,4 @@
 - Add deletion behavior only for an approved business requirement; no global soft delete.
 - Add fields and tables only after business approval.
 
-Sprint 0 deliberately defines no business models.
+Sprint 1 identity/access records use UUIDs, explicit lifecycle statuses, organization-scoped uniqueness, foreign keys, and archival/disable operations instead of hard deletion. Normalized email is globally unique. Audit logs are append-only, and multi-record mutations are transactional.

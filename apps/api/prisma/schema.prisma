@@ -7,4 +7,175 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Sprint 0 intentionally has no business models.
+enum OrganizationStatus {
+  active
+  disabled
+}
+
+enum UserStatus {
+  invited
+  active
+  disabled
+}
+
+enum MembershipStatus {
+  active
+  disabled
+}
+
+enum RecordStatus {
+  active
+  archived
+}
+
+model Organization {
+  id                String                   @id @default(uuid()) @db.Uuid
+  name              String
+  slug              String                   @unique
+  timezone          String
+  defaultCurrency   String
+  status            OrganizationStatus       @default(active)
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  memberships       OrganizationMembership[]
+  departments       Department[]
+  departmentMembers DepartmentMembership[]
+  roles             Role[]
+  userRoles         UserRole[]
+  auditLogs         AuditLog[]
+}
+
+model User {
+  id                    String                   @id @default(uuid()) @db.Uuid
+  email                 String                   @unique
+  displayName           String
+  phone                 String?
+  status                UserStatus               @default(invited)
+  externalAuthId        String?                  @unique
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  organizationMembers   OrganizationMembership[]
+  departmentMembers     DepartmentMembership[]
+  roles                 UserRole[]                @relation("UserRoles")
+  assignedRoles         UserRole[]                @relation("AssignedRoles")
+  auditLogs             AuditLog[]
+}
+
+model OrganizationMembership {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @db.Uuid
+  userId         String           @db.Uuid
+  status         MembershipStatus @default(active)
+  joinedAt       DateTime         @default(now())
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  user           User             @relation(fields: [userId], references: [id])
+
+  @@unique([organizationId, userId])
+  @@index([userId, status])
+}
+
+model Department {
+  id             String                 @id @default(uuid()) @db.Uuid
+  organizationId String                 @db.Uuid
+  code           String
+  name           String
+  description    String?
+  status         RecordStatus           @default(active)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  organization   Organization           @relation(fields: [organizationId], references: [id])
+  members        DepartmentMembership[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, status])
+}
+
+model DepartmentMembership {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  departmentId   String       @db.Uuid
+  userId         String       @db.Uuid
+  isPrimary      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  department     Department   @relation(fields: [departmentId], references: [id])
+  user           User         @relation(fields: [userId], references: [id])
+
+  @@unique([departmentId, userId])
+  @@index([organizationId, userId])
+}
+
+model Permission {
+  id          String           @id @default(uuid()) @db.Uuid
+  code        String           @unique
+  name        String
+  description String
+  createdAt   DateTime         @default(now())
+  roles       RolePermission[]
+}
+
+model Role {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @db.Uuid
+  code           String
+  name           String
+  description    String?
+  isSystem       Boolean          @default(false)
+  status         RecordStatus     @default(active)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  permissions    RolePermission[]
+  users          UserRole[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, status])
+}
+
+model RolePermission {
+  roleId       String     @db.Uuid
+  permissionId String     @db.Uuid
+  createdAt    DateTime   @default(now())
+  role         Role       @relation(fields: [roleId], references: [id])
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([roleId, permissionId])
+}
+
+model UserRole {
+  id               String   @id @default(uuid()) @db.Uuid
+  organizationId   String   @db.Uuid
+  userId           String   @db.Uuid
+  roleId           String   @db.Uuid
+  createdAt        DateTime @default(now())
+  assignedByUserId String?  @db.Uuid
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  user             User     @relation("UserRoles", fields: [userId], references: [id])
+  role             Role     @relation(fields: [roleId], references: [id])
+  assignedBy       User?    @relation("AssignedRoles", fields: [assignedByUserId], references: [id])
+
+  @@unique([organizationId, userId, roleId])
+  @@index([organizationId, userId])
+}
+
+model AuditLog {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  actorUserId    String?      @db.Uuid
+  action         String
+  entityType     String
+  entityId       String       @db.Uuid
+  beforeData     Json?
+  afterData      Json?
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  actor          User?        @relation(fields: [actorUserId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, actorUserId])
+  @@index([organizationId, action])
+  @@index([organizationId, entityType])
+}

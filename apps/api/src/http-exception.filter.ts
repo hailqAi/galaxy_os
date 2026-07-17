@@ -5,6 +5,7 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 type HttpRequest = { url: string };
 type HttpResponse = {
@@ -20,11 +21,16 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const status =
       exception instanceof HttpException
         ? exception.getStatus()
-        : HttpStatus.INTERNAL_SERVER_ERROR;
+        : exception instanceof Prisma.PrismaClientKnownRequestError &&
+            exception.code === 'P2002'
+          ? HttpStatus.CONFLICT
+          : HttpStatus.INTERNAL_SERVER_ERROR;
     const detail =
       exception instanceof HttpException
         ? exception.getResponse()
-        : 'Internal server error';
+        : status === HttpStatus.CONFLICT
+          ? 'A record with this unique value already exists'
+          : 'Internal server error';
     const message =
       typeof detail === 'string'
         ? detail

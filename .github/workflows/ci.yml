@@ -8,6 +8,20 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: galaxy_os
+          POSTGRES_USER: galaxy
+          POSTGRES_PASSWORD: galaxy_local
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U galaxy -d galaxy_os"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       DATABASE_URL: postgresql://galaxy:galaxy_local@localhost:5432/galaxy_os?schema=public
     steps:
@@ -28,6 +42,8 @@ jobs:
       - run: python -m venv services/document-ai/.venv
       - run: services/document-ai/.venv/bin/pip install -r services/document-ai/requirements-dev.txt
       - run: pnpm --filter @galaxy/api prisma:generate
+      - run: pnpm --filter @galaxy/api prisma:deploy
+      - run: pnpm --filter @galaxy/api prisma:seed
       - run: pnpm env:check
       - run: pnpm lint
       - run: pnpm typecheck

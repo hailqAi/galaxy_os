@@ -25,17 +25,14 @@ async function bootstrap() {
     }),
   );
   app.enableShutdownHooks();
+  app.enableCors({ origin: 'http://localhost:3000' });
 
   const swagger = new DocumentBuilder()
     .setTitle('Galaxy OS ERP API')
     .setDescription('Internal REST API for Galaxy Centre operations')
     .setVersion('0.1.0')
     .build();
-  SwaggerModule.setup(
-    'api/docs',
-    app,
-    SwaggerModule.createDocument(app, swagger),
-  );
+  SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swagger));
 
   await app.listen(environment.API_PORT);
 }

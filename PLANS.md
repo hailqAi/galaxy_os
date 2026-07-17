@@ -2,77 +2,82 @@
 
 ## Objective
 
-Deliver Sprint 0: a verified monorepo foundation for Galaxy OS.
+Deliver Sprint 1 organization-scoped identity and access management for Galaxy OS without choosing a production identity provider.
 
 ## Scope
 
-- pnpm workspace and shared TypeScript/formatting defaults
-- Vietnamese Next.js ERP shell
-- NestJS REST API with health, database readiness, Swagger, validation, logging, Prisma, and graceful shutdown
-- PostgreSQL and Redis development services
-- inactive FastAPI document-service health placeholder
-- focused tests, CI, and Sprint 0 documentation
+- Organization, user, organization membership, department membership, role, permission, user-role, role-permission, and append-only audit data
+- Deterministic Galaxy Centre seed data and one explicitly enabled local development administrator
+- NestJS CurrentActor boundary, development auth, organization-scoped permission enforcement, focused CRUD endpoints, Swagger, validation, and audit transactions
+- Vietnamese Settings pages for organization, departments, users, roles, permissions, and audit visibility
+- Focused security, API, and frontend tests plus operating documentation
 
 ## Out of scope
 
-Business modules, authentication, Redis application use, document processing, external integrations, mobile applications, and every Sprint 1+ feature.
+Passwords, login, tokens, OAuth, SSO, production identity-provider integration, Redis application use, mobile, document processing, integrations, and all Sprint 2+ business domains.
 
-## Assumptions
+## Existing implementation to reuse
 
-- Node.js 22 and pnpm 10 are the supported JavaScript toolchain.
-- Docker Compose supplies local PostgreSQL and Redis; applications run directly through pnpm.
-- Sprint 0 has no business entities, so Prisma contains no models.
+- NestJS global `/api/v1` prefix, strict validation pipe, error filter, Swagger, Prisma service, and environment validation
+- Next.js App Router shell, responsive navigation, Tailwind, native `fetch`, and Vitest
+- Existing pnpm verification and Prisma commands
 
-## Existing implementation
+No shared `packages/` directory or reusable identity implementation exists, so none will be invented.
 
-Only a generated Python `venv/` is tracked. It is not application code and will be removed in favor of reproducible dependency definitions.
+## Data and migration
 
-## Files affected
+Add the approved UUID models and enums to `apps/api/prisma/schema.prisma`, create one named Sprint 1 migration through Prisma, review its SQL, and add an idempotent seed. Constraints enforce unique slugs, normalized emails, organization memberships, department codes/memberships, role codes, role permissions, and user roles. Partial unique SQL enforces one primary department per organization. No existing migration will be rewritten and no shared data will be reset.
 
-Create the root workspace files, `apps/web`, `apps/api`, `services/document-ai`, `database`, `.github/workflows/ci.yml`, and the documentation explicitly listed in the Sprint 0 specification. Remove tracked `venv/`.
+## Security model
 
-## Database impact
-
-Add an empty PostgreSQL Prisma schema and documented migration workflow. No business tables or seed data.
-
-## Security impact
-
-Validate API environment values, validate all HTTP input through Nest's global validation pipe, expose no secrets, and document backend authorization requirements for later sprints.
+- Resolve a `CurrentActor` only from the enabled non-production development-auth boundary; clients never supply organization scope.
+- Reject production startup whenever development auth is enabled.
+- Require active user, organization, and organization membership before protected access.
+- Resolve effective permissions from active organization roles in the API and require explicit permission decorators.
+- Scope every relevant query and mutation to the actor organization.
+- Protect the last active system administrator, system role codes, and the `system_admin` role.
+- Validate cross-organization department and role assignments transactionally.
+- Write append-only audit records in the same transaction as important mutations.
 
 ## Implementation steps
 
-1. Establish the minimal root workspace and repository hygiene.
-2. Add and verify the web application shell.
-3. Add and verify the API and Prisma connectivity.
-4. Add and verify the inactive document service.
-5. Add Docker Compose, CI, and required documentation.
-6. Run full checks and runtime smoke tests.
-7. Review the complete diff with Ponytail, remove excess, rerun checks, and record exact results.
+1. Update and validate the Prisma schema, migration, seed, and required environment variables.
+2. Add the minimal CurrentActor/development-auth and permission guard boundary.
+3. Add focused organization, department, user, role, permission, and audit endpoints with scoped Prisma queries, pagination, Swagger, and mutation audits.
+4. Add focused unit/service and API integration tests for required authorization and integrity behavior.
+5. Extend the existing web shell with Vietnamese Settings navigation, one shared API helper, permission-aware actions, accessible forms, and practical loading/error/empty states.
+6. Add focused frontend tests and update only Sprint 1 documentation.
+7. Run the full suite, review the entire uncommitted diff for Ponytail simplification and correctness, remove confirmed excess/fix confirmed findings, rerun the full suite, and record exact results.
 
-## Verification commands
+## Expected files
+
+Modify existing environment, Prisma, API bootstrap/module/package, web shell/style/package, test, and required documentation files. Create one Prisma migration, one seed, focused Sprint 1 Nest modules/controllers/services/DTOs/access files, focused Settings routes/components/API helper/tests, and `docs/sprints/sprint-1-identity-access.md`. Add no dependency unless verification proves the installed stack insufficient.
+
+## Verification
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm env:check
+pnpm --filter @galaxy/api prisma:validate
+pnpm --filter @galaxy/api prisma:generate
+pnpm --filter @galaxy/api prisma:migrate -- --name sprint_1_identity_access
+pnpm --filter @galaxy/api prisma:seed
+pnpm --filter @galaxy/api test
+pnpm --filter @galaxy/web test
 pnpm lint
 pnpm typecheck
 pnpm test
 pnpm build
+pnpm format:check
 docker compose config
-docker compose up -d postgres redis
-pnpm --filter @galaxy/api prisma:generate
-pnpm --filter @galaxy/api prisma:deploy
-python -m venv services/document-ai/.venv
-services/document-ai/.venv/bin/pip install -r services/document-ai/requirements-dev.txt
-services/document-ai/.venv/bin/pytest services/document-ai
+docker compose ps
+pnpm --filter @galaxy/api prisma:status
 ```
 
-Runtime endpoints will also be checked locally when their required services can start.
+When infrastructure is available, verify the required web routes, `/api/v1/health`, `/api/v1/ready`, protected Sprint 1 endpoints, and `/docs`. Failed or unavailable commands will be recorded exactly rather than claimed as passed.
 
 ## Rollback
 
-Before commit, discard the uncommitted Sprint 0 files and restore the tracked `venv/` from Git. Database containers and named volumes are independent local development state and are not removed automatically.
+Before commit, Sprint 1 application changes can be discarded without touching the existing user-owned generated file. A locally applied migration is reversed only through a reviewed forward migration or by recreating an explicitly disposable local database; shared data is never reset.
 
 ## Completion criteria
 
-All applicable Sprint 0 acceptance criteria pass, failures or unavailable tooling are recorded accurately, the final diff passes Ponytail review, and `PROJECT_STATUS.md` contains the exact final verification results.
+All requested Sprint 1 models, seed data, scoped endpoints, security protections, audit behavior, and usable Settings pages exist; focused and full checks pass or exact environmental blockers are recorded; the complete diff passes Ponytail and correctness review; no unused dependency or Sprint 2 code remains; and `PROJECT_STATUS.md` contains actual final results.

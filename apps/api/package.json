@@ -11,7 +11,9 @@
     "prisma:generate": "node --env-file-if-exists=../../.env node_modules/prisma/build/index.js generate --schema prisma/schema.prisma",
     "prisma:validate": "node --env-file-if-exists=../../.env node_modules/prisma/build/index.js validate --schema prisma/schema.prisma",
     "prisma:migrate": "node --env-file-if-exists=../../.env node_modules/prisma/build/index.js migrate dev --schema prisma/schema.prisma",
-    "prisma:deploy": "node --env-file-if-exists=../../.env node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma"
+    "prisma:deploy": "node --env-file-if-exists=../../.env node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma",
+    "prisma:status": "node --env-file-if-exists=../../.env node_modules/prisma/build/index.js migrate status --schema prisma/schema.prisma",
+    "prisma:seed": "node --env-file-if-exists=../../.env prisma/seed.mjs"
   },
   "dependencies": {
     "@nestjs/common": "11.1.28",

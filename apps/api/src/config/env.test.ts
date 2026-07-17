@@ -7,4 +7,14 @@ describe('readEnvironment', () => {
       readEnvironment({ DATABASE_URL: 'redis://localhost:6379' }),
     ).toThrow();
   });
+
+  it('rejects development authentication in production', () => {
+    expect(() =>
+      readEnvironment({
+        DATABASE_URL: 'postgresql://localhost/galaxy',
+        NODE_ENV: 'production',
+        ALLOW_DEV_AUTH: 'true',
+      }),
+    ).toThrow('Development authentication cannot be enabled in production');
+  });
 });

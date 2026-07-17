@@ -2,60 +2,60 @@
 
 ## Current sprint
 
-Sprint 0 — Galaxy OS Foundation on branch `feat/sprint-0-foundation`.
+Sprint 1 — Organization, departments, users, roles, permissions, and audit logs on branch `feat/sprint-1-identity-access`.
 
 ## Completed work
 
-- Root pnpm workspace, strict TypeScript base, formatting, environment check, and repository hygiene
-- Vietnamese Next.js ERP shell with accessible navigation and health route
-- NestJS API with `/api/v1`, environment validation, structured JSON logs, base error responses, Swagger, liveness, database readiness, graceful shutdown, and Prisma
-- Empty PostgreSQL Prisma foundation and safe migration workflow
-- PostgreSQL and Redis Docker Compose services with health checks and named volumes
-- Inactive FastAPI document-service health/readiness placeholder and test
-- Focused tests, GitHub Actions CI, architecture/business/decision/sprint documentation
-- Tracked generated root `venv/` removed; local environments are now ignored and reproducible
-- Complete uncommitted diff reviewed under Ponytail full; optional Uvicorn extras and generated TypeScript build metadata removed
-- Confirmed reviews resolved: duplicate root Prisma dependencies removed, Prisma schema owned by the API, unnecessary Next standalone config and Python package marker deleted, and the API now loads the optional root `.env` with Node's standard library
+- UUID PostgreSQL identity/access schema, reviewed migrations, partial unique primary-department constraint, and deterministic idempotent Galaxy Centre seed
+- Galaxy Centre organization; 11 approved departments; 16 current Sprint 1 permissions; 11 approved system roles; and a local administrator seeded from `DEV_AUTH_USER_EMAIL`
+- NestJS `CurrentActor` development-auth boundary, explicit permission guards, organization-scoped queries, strict DTO validation, transaction-coupled append-only audits, and safe conflict responses
+- Protected `/me`, organization, department, user, role, permission, and audit-log API endpoints with Swagger at `/docs`
+- Last-active-administrator protection, system-role protections, cross-organization assignment checks, disabled user/membership denial, and no user/department/role/audit hard-delete API routes
+- Vietnamese Settings pages for organization, departments, users, roles, and audit logs with permission-aware controls and accessible native forms
+- Focused service, guard, API integration, and web behavior tests; CI now starts PostgreSQL, deploys migrations, and seeds before verification
+- Required Sprint 1 documentation, local development-auth instructions, migration/seed procedure, and audit behavior documentation
 
 ## Work in progress
 
 None.
 
-## Blocked items
-
-Docker Desktop WSL integration is not enabled in this environment. Therefore PostgreSQL and Redis startup, Compose validation, Prisma deployment to a live database, and a successful live `/api/v1/ready` response could not be verified here. No operating-system packages were installed.
-
 ## Verification results — 2026-07-17
 
 Passed:
 
-- `pnpm install --frozen-lockfile`
-- `pnpm env:check` (Node v20.20.2, Linux)
+- `pnpm --filter @galaxy/api prisma:validate`
 - `pnpm --filter @galaxy/api prisma:generate`
-- `pnpm --filter @galaxy/api prisma:validate` using the root `.env`
+- `pnpm --filter @galaxy/api prisma:migrate --name sprint_1_identity_access` (created and applied `20260717155135_sprint_1_identity_access`)
+- `pnpm --filter @galaxy/api prisma:deploy`
+- `pnpm --filter @galaxy/api prisma:seed` (rerun successfully)
+- `pnpm --filter @galaxy/api prisma:status` (two migrations, database schema up to date)
+- `docker compose config` and `docker compose ps` (PostgreSQL and Redis healthy)
+- `pnpm --filter @galaxy/api test` (21 tests: 6 integration, 15 focused unit/API tests)
+- `pnpm --filter @galaxy/web test` (5 tests)
 - `pnpm lint`
 - `pnpm typecheck`
-- `pnpm test` (web: 1, API: 4, document service: 1)
+- `pnpm test` (API: 21, web: 5, document service: 1)
 - `pnpm build`
 - `pnpm format:check`
-- Web runtime: `/` 200 and `/health` 200
-- API runtime without PostgreSQL: `/api/v1/health` 200, `/api/docs` 200, `/api/v1/ready` 503 with the consistent error response
-- `pnpm --filter @galaxy/api start` without inline variables loaded the root `.env`; `/api/v1/health` returned 200
-- Secret-pattern scan of repository files returned no findings
 - `git diff --check`
+- Runtime checks: web `/`, all five Settings pages, API `/api/v1/health`, `/api/v1/ready`, protected Sprint 1 lists, and `/docs` returned 200
+- Security runtime checks: final system-admin disable returned 403; request-supplied `organizationId` was rejected with 400; production startup with `ALLOW_DEV_AUTH=true` rejected configuration
 
-Failed or unavailable:
+Resolved during implementation:
 
-- `docker compose config`: Docker command unavailable; WSL integration must be enabled
-- Live PostgreSQL/Redis health checks, `prisma:deploy`, and database-ready 200 response: blocked by the same Docker availability issue
-- Initial sandboxed Next build, Prisma generation, API endpoint tests, and FastAPI TestClient runs were blocked by sandbox process/network restrictions; each passed when rerun with the required local execution permission
-- One intermediate format check failed because Next.js regenerated `next-env.d.ts`; the generated file is now excluded and the final format check passed
-- The first post-review Prisma generation failed after root duplicates were removed because the root-level schema resolved packages from the wrong workspace; moving the schema to its owning API package fixed the cause, and final generation and validation passed
+- The first API integration run exposed Vitest’s lack of emitted Nest constructor metadata. Explicit Nest injection tokens now make real HTTP integration tests reliable without adding a dependency.
+- The integration audit list exposed raw query-string pagination in the same harness; the controller now safely coerces page values before Prisma use.
+
+## Ponytail and correctness review
+
+Complete. No dependency was added. Confirmed necessary code retained: direct Prisma transactions for assignment replacement/audit atomicity, explicit injection tokens for Vitest integration reliability, and test-only cleanup deletes. Removed ordinary organization status mutation because Sprint 1 has no organization-disable workflow. Added safe unique-conflict handling instead of exposing a 500.
+
+## Remaining limitations
+
+- Development authentication is local-only and intentionally has no production identity provider, passwords, tokens, OAuth, or SSO.
+- Sprint 1 operates with the seeded Galaxy Centre organization, although the schema supports future multi-organization membership.
+- No Sprint 2 customers, projects, or other business-domain functionality has been started.
 
 ## Next recommended sprint
 
-First enable Docker Desktop WSL integration and finish the four blocked Sprint 0 runtime checks. Then begin Sprint 1: organization, departments, users, roles, permissions, and audit logs under a separately approved plan.
-
-## Known technical debt
-
-No intentional application-code debt. The only remaining gap is the environment-blocked Docker/database verification above.
+Sprint 2: customers, contacts, leads, opportunities, projects, project members, tasks, and milestones, reusing the Sprint 1 `CurrentActor`, organization scope, RBAC, audit, migration, and Settings patterns.

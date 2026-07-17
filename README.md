@@ -1,6 +1,6 @@
 # Galaxy OS
 
-Galaxy OS is Galaxy Centre's internal operating platform for project-led ERP work across design, purchasing, production, logistics, installation, finance, warranty, and after-sales service. Sprint 0 contains foundation code only.
+Galaxy OS is Galaxy Centre's internal operating platform for project-led ERP work. Sprint 1 adds organization-scoped users, departments, roles, permissions, and audit logs without implementing production login.
 
 ## Architecture
 
@@ -33,7 +33,7 @@ pnpm --filter @galaxy/api prisma:generate
 pnpm env:check
 ```
 
-The checked-in `.env.example` values are local defaults, not production credentials.
+The checked-in `.env.example` values are local defaults, not production credentials. Set `ALLOW_DEV_AUTH=true` only for local development, then restart the API. Production startup rejects that setting. `DEV_AUTH_USER_EMAIL` selects only the seeded administrator; requests cannot select an organization.
 
 ## Develop
 
@@ -51,7 +51,7 @@ pnpm --filter @galaxy/web dev
 pnpm --filter @galaxy/api dev
 ```
 
-Web: <http://localhost:3000>. Web health: <http://localhost:3000/health>. API health: <http://localhost:3001/api/v1/health>. API readiness: <http://localhost:3001/api/v1/ready>. Swagger: <http://localhost:3001/api/docs>.
+Web: <http://localhost:3000>. Web health: <http://localhost:3000/health>. API health: <http://localhost:3001/api/v1/health>. API readiness: <http://localhost:3001/api/v1/ready>. Swagger: <http://localhost:3001/docs>.
 
 The document placeholder is optional and outside the ERP runtime:
 
@@ -76,9 +76,12 @@ With PostgreSQL healthy and `DATABASE_URL` loaded from `.env`:
 ```bash
 pnpm --filter @galaxy/api prisma:migrate -- --name <short_description>
 pnpm --filter @galaxy/api prisma:deploy
+pnpm --filter @galaxy/api prisma:seed
 ```
 
 Create migrations only through Prisma, review generated SQL, never rewrite an applied migration, and never run `migrate reset` against shared data. See [database/README.md](database/README.md).
+
+The deterministic seed creates Galaxy Centre, approved departments, the role/permission catalog, and the local administrator from `DEV_AUTH_USER_EMAIL` (default `admin@galaxy.local`). It is safe to rerun and creates no passwords or production credentials.
 
 ## Troubleshooting
 

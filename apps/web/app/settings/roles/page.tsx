@@ -1,0 +1,194 @@
+'use client';
+
+import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { api } from '../../lib/api';
+
+type Permission = { id: string; code: string; description: string };
+type Role = {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  isSystem: boolean;
+  status: string;
+  permissions: { permissionId: string }[];
+};
+
+export default function RolesPage() {
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [catalog, setCatalog] = useState<Permission[]>([]);
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [message, setMessage] = useState('Đang tải…');
+  const load = useCallback(
+    () =>
+      Promise.all([
+        api<{ items: Role[] }>('/roles?pageSize=100'),
+        api<Permission[]>('/permissions'),
+        api<{ permissions: string[] }>('/me/permissions'),
+      ])
+        .then(([roleData, permissionData, actor]) => {
+          setRoles(roleData.items);
+          setCatalog(permissionData);
+          setPermissions(actor.permissions);
+          setMessage('');
+        })
+        .catch((error: Error) => setMessage(error.message)),
+    [],
+  );
+  useEffect(() => {
+    void load();
+  }, [load]);
+  async function create(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    try {
+      await api('/roles', {
+        method: 'POST',
+        body: JSON.stringify(Object.fromEntries(new FormData(form))),
+      });
+      form.reset();
+      await load();
+      setMessage('Đã tạo vai trò.');
+    } catch (error) {
+      setMessage((error as Error).message);
+    }
+  }
+  async function save(event: FormEvent<HTMLFormElement>, role: Role) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    try {
+      await api(`/roles/${role.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: data.get('name'),
+          description: data.get('description') || undefined,
+        }),
+      });
+      if (role.code !== 'system_admin') {
+        await api(`/roles/${role.id}/permissions`, {
+          method: 'PUT',
+          body: JSON.stringify({ permissionIds: data.getAll('permissionId') }),
+        });
+      }
+      await load();
+      setMessage('Đã cập nhật vai trò.');
+    } catch (error) {
+      setMessage((error as Error).message);
+    }
+  }
+  async function archive(id: string) {
+    if (!confirm('Lưu trữ vai trò này?')) return;
+    try {
+      await api(`/roles/${id}/archive`, { method: 'POST' });
+      await load();
+    } catch (error) {
+      setMessage((error as Error).message);
+    }
+  }
+  return (
+    <div className="grid gap-6">
+      <div className="panel">
+        <h2 className="text-xl font-semibold">Vai trò và quyền</h2>
+        <p className="mt-2 text-sm text-black/60">
+          Vai trò hệ thống được đánh dấu và không thể lưu trữ hoặc đổi mã.
+        </p>
+        <p className="mt-3" role="status">
+          {message}
+        </p>
+        {permissions.includes('role.create') && (
+          <form
+            className="mt-4 flex flex-wrap items-end gap-3"
+            onSubmit={create}
+          >
+            <label>
+              Mã vai trò
+              <input name="code" pattern="[a-z0-9_]+" required />
+            </label>
+            <label>
+              Tên vai trò
+              <input name="name" required />
+            </label>
+            <button className="primary" type="submit">
+              Tạo vai trò
+            </button>
+          </form>
+        )}
+      </div>
+      {roles.map((role) => (
+        <form
+          className="panel"
+          key={role.id}
+          onSubmit={(event) => void save(event, role)}
+        >
+          <div className="flex justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-brass">
+                {role.isSystem ? 'Vai trò hệ thống' : 'Vai trò tùy chỉnh'}
+              </p>
+              <p className="text-sm text-black/60">
+                {role.code} · {role.status}
+              </p>
+            </div>
+            {!role.isSystem &&
+              role.status === 'active' &&
+              permissions.includes('role.update') && (
+                <button onClick={() => void archive(role.id)} type="button">
+                  Lưu trữ
+                </button>
+              )}
+          </div>
+          <div className="mt-4 grid gap-4">
+            <label>
+              Tên
+              <input
+                defaultValue={role.name}
+                disabled={!permissions.includes('role.update')}
+                name="name"
+                required
+              />
+            </label>
+            <label>
+              Mô tả
+              <textarea
+                defaultValue={role.description}
+                disabled={!permissions.includes('role.update')}
+                name="description"
+              />
+            </label>
+            <fieldset
+              disabled={
+                !permissions.includes('role.update') ||
+                role.code === 'system_admin'
+              }
+            >
+              <legend className="font-medium">Quyền hiện tại</legend>
+              <div className="mt-2 grid gap-2 md:grid-cols-2">
+                {catalog.map((permission) => (
+                  <label
+                    className="flex grid-cols-none items-center gap-2 font-normal"
+                    key={permission.id}
+                  >
+                    <input
+                      defaultChecked={role.permissions.some(
+                        ({ permissionId }) => permissionId === permission.id,
+                      )}
+                      name="permissionId"
+                      type="checkbox"
+                      value={permission.id}
+                    />
+                    {permission.code}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            {permissions.includes('role.update') && (
+              <button className="primary" type="submit">
+                Lưu vai trò
+              </button>
+            )}
+          </div>
+        </form>
+      ))}
+    </div>
+  );
+}
