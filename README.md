@@ -25,15 +25,15 @@ Do not install JavaScript or Python project dependencies globally.
 ## Install
 
 ```bash
-cp .env.example .env
+cp .env.example .env.local
 pnpm install --frozen-lockfile
 python3 -m venv services/document-ai/.venv
 services/document-ai/.venv/bin/pip install -r services/document-ai/requirements-dev.txt
-pnpm --filter @galaxy/api prisma:generate
+pnpm db:generate
 pnpm env:check
 ```
 
-The checked-in `.env.example` values are local defaults, not production credentials. Set `ALLOW_DEV_AUTH=true` only for local development, then restart the API. Production startup rejects that setting. `DEV_AUTH_USER_EMAIL` selects only the seeded administrator; requests cannot select an organization.
+The ignored root `.env.local` is the single local-development environment file used by the API and Prisma commands. The checked-in `.env.example` values are safe local examples, not production credentials. Set `ALLOW_DEV_AUTH=true` only for local development, then restart `pnpm dev` after any environment change. Production startup rejects `NODE_ENV=production` with development authentication enabled. `DEV_AUTH_USER_EMAIL` selects only the seeded administrator; requests cannot select an organization.
 
 ## Develop
 
@@ -71,12 +71,13 @@ pnpm format:check
 
 ## Database migrations
 
-With PostgreSQL healthy and `DATABASE_URL` loaded from `.env`:
+With PostgreSQL healthy and `DATABASE_URL` loaded from `.env.local`:
 
 ```bash
-pnpm --filter @galaxy/api prisma:migrate -- --name <short_description>
-pnpm --filter @galaxy/api prisma:deploy
-pnpm --filter @galaxy/api prisma:seed
+pnpm db:generate
+pnpm db:migrate -- --name <short_description>
+pnpm db:status
+pnpm db:seed
 ```
 
 Create migrations only through Prisma, review generated SQL, never rewrite an applied migration, and never run `migrate reset` against shared data. See [database/README.md](database/README.md).
@@ -86,9 +87,9 @@ The deterministic seed creates Galaxy Centre, approved departments, the role/per
 ## Troubleshooting
 
 - `docker: command not found` in WSL: enable this distro under Docker Desktop → Settings → Resources → WSL Integration, then reopen the shell.
-- Port already in use: change `POSTGRES_PORT`, `REDIS_PORT`, or `API_PORT` in `.env`.
+- Port already in use: change `POSTGRES_PORT`, `REDIS_PORT`, or `API_PORT` in `.env.local`, then restart the affected process.
 - API readiness returns 503: check `docker compose ps`, then confirm `DATABASE_URL` matches the Compose values.
-- Prisma Client missing: run `pnpm --filter @galaxy/api prisma:generate`.
+- Prisma Client missing: run `pnpm db:generate`.
 - Stale Next output: remove `apps/web/.next` and rebuild; it is generated and ignored.
 
 ## Repository structure

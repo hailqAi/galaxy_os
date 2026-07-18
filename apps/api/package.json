@@ -2,18 +2,18 @@
   "name": "@galaxy/api",
   "private": true,
   "scripts": {
-    "dev": "nest start --watch",
+    "dev": "node --env-file-if-exists=../../.env.local node_modules/@nestjs/cli/bin/nest.js start --watch",
     "lint": "eslint src test",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build": "nest build",
     "start": "node dist/main.js",
-    "prisma:generate": "node --env-file-if-exists=../../.env node_modules/prisma/build/index.js generate --schema prisma/schema.prisma",
-    "prisma:validate": "node --env-file-if-exists=../../.env node_modules/prisma/build/index.js validate --schema prisma/schema.prisma",
-    "prisma:migrate": "node --env-file-if-exists=../../.env node_modules/prisma/build/index.js migrate dev --schema prisma/schema.prisma",
-    "prisma:deploy": "node --env-file-if-exists=../../.env node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma",
-    "prisma:status": "node --env-file-if-exists=../../.env node_modules/prisma/build/index.js migrate status --schema prisma/schema.prisma",
-    "prisma:seed": "node --env-file-if-exists=../../.env prisma/seed.mjs"
+    "prisma:generate": "node --env-file-if-exists=../../.env.local node_modules/prisma/build/index.js generate --schema prisma/schema.prisma",
+    "prisma:validate": "node --env-file-if-exists=../../.env.local node_modules/prisma/build/index.js validate --schema prisma/schema.prisma",
+    "prisma:migrate": "node --env-file-if-exists=../../.env.local node_modules/prisma/build/index.js migrate dev --schema prisma/schema.prisma",
+    "prisma:deploy": "node --env-file-if-exists=../../.env.local node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma",
+    "prisma:status": "node --env-file-if-exists=../../.env.local node_modules/prisma/build/index.js migrate status --schema prisma/schema.prisma",
+    "prisma:seed": "node --env-file-if-exists=../../.env.local prisma/seed.mjs"
   },
   "dependencies": {
     "@nestjs/common": "11.1.28",

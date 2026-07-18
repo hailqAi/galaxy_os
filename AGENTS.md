@@ -3,8 +3,8 @@
 ## Layout and commands
 
 - `apps/web`: Next.js UI; `apps/api`: NestJS API; `database`: Prisma; `services/document-ai`: inactive FastAPI placeholder.
-- Setup: `pnpm install --frozen-lockfile`, create the document-service `.venv`, install `requirements-dev.txt`, then run API `prisma:generate`.
-- Develop: `docker compose up -d postgres redis`, then `pnpm dev`.
+- Setup: `pnpm install --frozen-lockfile`, create the document-service `.venv`, install `requirements-dev.txt`, then run `pnpm db:generate`.
+- Develop: copy `.env.example` to the ignored `.env.local`, run `docker compose up -d postgres redis`, `pnpm db:migrate`, `pnpm db:seed`, then `pnpm dev`.
 - Verify: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and `pnpm format:check`.
 
 ## Working rules

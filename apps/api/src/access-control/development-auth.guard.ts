@@ -33,7 +33,7 @@ export class DevelopmentAuthGuard implements CanActivate {
       throw new UnauthorizedException('Development authentication is disabled');
     }
     const user = await this.prisma.user.findUnique({
-      where: { email: environment.DEV_AUTH_USER_EMAIL.trim().toLowerCase() },
+      where: { email: environment.DEV_AUTH_USER_EMAIL },
       include: {
         organizationMembers: {
           where: { status: 'active', organization: { status: 'active' } },

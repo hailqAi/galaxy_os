@@ -1,15 +1,11 @@
 import { ConsoleLogger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { AppModule } from './app.module';
 import { readEnvironment } from './config/env';
 import { HttpExceptionFilter } from './http-exception.filter';
 
 async function bootstrap() {
-  const envFile = resolve(__dirname, '../../../.env');
-  if (existsSync(envFile)) process.loadEnvFile(envFile);
   const environment = readEnvironment();
   const app = await NestFactory.create(AppModule, {
     logger: new ConsoleLogger({ json: true }),

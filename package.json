@@ -11,6 +11,10 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test && services/document-ai/.venv/bin/pytest services/document-ai",
     "build": "pnpm -r --if-present build",
+    "db:generate": "pnpm --filter @galaxy/api prisma:generate",
+    "db:migrate": "pnpm --filter @galaxy/api prisma:migrate",
+    "db:status": "pnpm --filter @galaxy/api prisma:status",
+    "db:seed": "pnpm --filter @galaxy/api prisma:seed",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "env:check": "node scripts/check-environment.mjs"

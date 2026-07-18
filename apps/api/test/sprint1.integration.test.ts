@@ -2,7 +2,15 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import { AppModule } from '../src/app.module';
 
 process.env.DATABASE_URL ??=
@@ -19,9 +27,9 @@ describe.sequential('Sprint 1 API integration', () => {
   const restrictedEmail = `restricted-${Date.now()}@galaxy.local`;
 
   beforeAll(async () => {
-    process.env.ALLOW_DEV_AUTH = 'true';
-    process.env.NODE_ENV = 'test';
-    process.env.DEV_AUTH_USER_EMAIL = 'admin@galaxy.local';
+    vi.stubEnv('ALLOW_DEV_AUTH', 'true');
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('DEV_AUTH_USER_EMAIL', 'admin@galaxy.local');
     const organization = await prisma.organization.findUniqueOrThrow({
       where: { slug: 'galaxy-centre' },
     });
@@ -70,8 +78,11 @@ describe.sequential('Sprint 1 API integration', () => {
     await app.init();
   });
 
-  afterAll(async () => {
+  afterEach(() => {
     process.env.DEV_AUTH_USER_EMAIL = 'admin@galaxy.local';
+  });
+
+  afterAll(async () => {
     if (createdUserId) {
       await prisma.userRole.deleteMany({ where: { userId: createdUserId } });
       await prisma.organizationMembership.deleteMany({
@@ -107,6 +118,10 @@ describe.sequential('Sprint 1 API integration', () => {
     await prisma.$disconnect();
   });
 
+  afterAll(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('gets the current actor and organization', async () => {
     const me = await request(app.getHttpServer()).get('/api/v1/me').expect(200);
     expect(me.body.organizationId).toBe(organizationId);
@@ -123,7 +138,6 @@ describe.sequential('Sprint 1 API integration', () => {
       .post('/api/v1/departments')
       .send({ code: 'BLOCKED', name: 'Blocked' })
       .expect(403);
-    process.env.DEV_AUTH_USER_EMAIL = 'admin@galaxy.local';
   });
 
   it('creates a department with permission using the actor organization', async () => {

@@ -11,7 +11,12 @@ const environmentSchema = z
       .enum(['true', 'false'])
       .default('false')
       .transform((value) => value === 'true'),
-    DEV_AUTH_USER_EMAIL: z.string().email().default('admin@galaxy.local'),
+    DEV_AUTH_USER_EMAIL: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .email()
+      .default('admin@galaxy.local'),
   })
   .refine(
     (environment) =>

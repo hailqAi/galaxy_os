@@ -81,3 +81,7 @@ Before commit, Sprint 1 application changes can be discarded without touching th
 ## Completion criteria
 
 All requested Sprint 1 models, seed data, scoped endpoints, security protections, audit behavior, and usable Settings pages exist; focused and full checks pass or exact environmental blockers are recorded; the complete diff passes Ponytail and correctness review; no unused dependency or Sprint 2 code remains; and `PROJECT_STATUS.md` contains actual final results.
+
+## Local environment bug fix
+
+Use the ignored root `.env.local` through Node's native environment-file support for API development and Prisma commands. Keep development authentication opt-in and rejected in production; verify migration, seed, normal `pnpm dev`, and protected endpoints before closing the bug.
