@@ -19,6 +19,7 @@ import {
   CreateUserDto,
   SetUserDepartmentsDto,
   SetUserRolesDto,
+  UpdateMembershipDto,
   UpdateUserDto,
 } from './users.dto';
 import { UsersService } from './users.service';
@@ -62,7 +63,22 @@ export class UsersController {
   ) {
     return this.users.disable(actor, id);
   }
-  @Put(':id/departments') @RequirePermission('user.update') departments(
+  @Get(':id/membership') @RequirePermission('membership.read') membership(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.users.getMembership(actor, id);
+  }
+  @Patch(':id/membership')
+  @RequirePermission('membership.update')
+  updateMembership(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() data: UpdateMembershipDto,
+  ) {
+    return this.users.updateMembership(actor, id, data);
+  }
+  @Put(':id/departments') @RequirePermission('membership.update') departments(
     @Actor() actor: CurrentActor,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() data: SetUserDepartmentsDto,

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -13,18 +14,66 @@ import {
   CreateUserDto,
   SetUserDepartmentsDto,
   SetUserRolesDto,
+  UpdateMembershipDto,
   UpdateUserDto,
 } from './users.dto';
 
-const userInclude = (organizationId: string) =>
+const safeUserSelect = {
+  id: true,
+  email: true,
+  displayName: true,
+  phone: true,
+  status: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.UserSelect;
+
+const userSelect = (organizationId: string) =>
   ({
+    ...safeUserSelect,
     organizationMembers: { where: { organizationId } },
     departmentMembers: {
       where: { organizationId },
       include: { department: true },
     },
-    roles: { where: { organizationId }, include: { role: true } },
-  }) satisfies Prisma.UserInclude;
+    roles: {
+      where: { organizationId },
+      include: {
+        role: {
+          include: { permissions: { include: { permission: true } } },
+        },
+      },
+    },
+  }) satisfies Prisma.UserSelect;
+
+const withEffectivePermissions = <
+  T extends {
+    status: string;
+    organizationMembers: { status: string }[];
+    roles: {
+      role: {
+        status: string;
+        permissions: { permission: { code: string } }[];
+      };
+    }[];
+  },
+>(
+  user: T,
+) => ({
+  ...user,
+  effectivePermissions: [
+    ...new Set(
+      user.status === 'active' &&
+      user.organizationMembers.some(({ status }) => status === 'active')
+        ? user.roles
+            .filter(({ role }) => role.status === 'active')
+            .flatMap(({ role }) =>
+              role.permissions.map(({ permission }) => permission.code),
+            )
+        : [],
+    ),
+  ].sort(),
+});
 
 @Injectable()
 export class UsersService {
@@ -51,14 +100,19 @@ export class UsersService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.user.findMany({
         where,
-        include: userInclude(actor.organizationId),
+        select: userSelect(actor.organizationId),
         orderBy: { displayName: 'asc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
       this.prisma.user.count({ where }),
     ]);
-    return { items, total, page, pageSize };
+    return {
+      items: items.map(withEffectivePermissions),
+      total,
+      page,
+      pageSize,
+    };
   }
 
   async get(actor: CurrentActor, id: string) {
@@ -67,30 +121,50 @@ export class UsersService {
         id,
         organizationMembers: { some: { organizationId: actor.organizationId } },
       },
-      include: userInclude(actor.organizationId),
+      select: userSelect(actor.organizationId),
     });
     if (!user) throw new NotFoundException('User not found');
-    return user;
+    return withEffectivePermissions(user);
   }
 
   create(actor: CurrentActor, input: CreateUserDto) {
     const email = input.email.trim().toLowerCase();
     return this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({ data: { ...input, email } });
-      await tx.organizationMembership.create({
+      const existing = await tx.user.findUnique({
+        where: { email },
+        select: safeUserSelect,
+      });
+      if (existing?.status === 'disabled')
+        throw new ConflictException('Disabled user account cannot be added');
+      const user =
+        existing ??
+        (await tx.user.create({
+          data: { ...input, email },
+          select: safeUserSelect,
+        }));
+      const membership = await tx.organizationMembership.create({
         data: { organizationId: actor.organizationId, userId: user.id },
       });
+      if (!existing)
+        await this.audit.write(tx, actor, {
+          action: 'user.create',
+          entityType: 'User',
+          entityId: user.id,
+          afterData: user,
+        });
       await this.audit.write(tx, actor, {
-        action: 'user.create',
-        entityType: 'User',
-        entityId: user.id,
-        afterData: user,
+        action: 'membership.create',
+        entityType: 'OrganizationMembership',
+        entityId: membership.id,
+        afterData: membership,
       });
       return user;
     });
   }
 
   update(actor: CurrentActor, id: string, input: UpdateUserDto) {
+    if (input.status && input.status !== 'active')
+      throw new BadRequestException('Use the protected disable action');
     return this.prisma.$transaction(async (tx) => {
       const before = await tx.user.findFirst({
         where: {
@@ -99,11 +173,19 @@ export class UsersService {
             some: { organizationId: actor.organizationId },
           },
         },
+        select: safeUserSelect,
       });
       if (!before) throw new NotFoundException('User not found');
+      if (
+        (await tx.organizationMembership.count({ where: { userId: id } })) > 1
+      )
+        throw new ConflictException(
+          'Shared user identity cannot be edited from organization settings',
+        );
       const after = await tx.user.update({
         where: { id },
         data: { ...input, email: input.email?.trim().toLowerCase() },
+        select: safeUserSelect,
       });
       await this.audit.write(tx, actor, {
         action: 'user.update',
@@ -125,8 +207,24 @@ export class UsersService {
             some: { organizationId: actor.organizationId },
           },
         },
+        select: safeUserSelect,
       });
       if (!before) throw new NotFoundException('User not found');
+      const beforeMembership =
+        await tx.organizationMembership.findUniqueOrThrow({
+          where: {
+            organizationId_userId: {
+              organizationId: actor.organizationId,
+              userId: id,
+            },
+          },
+        });
+      if (
+        (await tx.organizationMembership.count({ where: { userId: id } })) > 1
+      )
+        throw new ConflictException(
+          'Disable the organization membership instead of a shared user account',
+        );
       if (await this.isLastActiveAdmin(tx, actor.organizationId, id))
         throw new ForbiddenException(
           'The final active system administrator cannot be disabled',
@@ -134,6 +232,7 @@ export class UsersService {
       const after = await tx.user.update({
         where: { id },
         data: { status: 'disabled' },
+        select: safeUserSelect,
       });
       await tx.organizationMembership.update({
         where: {
@@ -144,6 +243,10 @@ export class UsersService {
         },
         data: { status: 'disabled' },
       });
+      const afterMembership = {
+        ...beforeMembership,
+        status: 'disabled' as const,
+      };
       await this.audit.write(tx, actor, {
         action: 'user.disable',
         entityType: 'User',
@@ -151,8 +254,61 @@ export class UsersService {
         beforeData: before,
         afterData: after,
       });
+      await this.audit.write(tx, actor, {
+        action: 'membership.update',
+        entityType: 'OrganizationMembership',
+        entityId: beforeMembership.id,
+        beforeData: beforeMembership,
+        afterData: afterMembership,
+      });
       return after;
     });
+  }
+
+  async getMembership(actor: CurrentActor, userId: string) {
+    return this.requireMembership(this.prisma, actor.organizationId, userId);
+  }
+
+  updateMembership(
+    actor: CurrentActor,
+    userId: string,
+    input: UpdateMembershipDto,
+  ) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        const before = await this.requireMembership(
+          tx,
+          actor.organizationId,
+          userId,
+        );
+        if (
+          input.status === 'disabled' &&
+          before.status === 'active' &&
+          (await this.isLastActiveAdmin(tx, actor.organizationId, userId))
+        )
+          throw new ForbiddenException(
+            'The final active system administrator membership cannot be disabled',
+          );
+        const after = await tx.organizationMembership.update({
+          where: {
+            organizationId_userId: {
+              organizationId: actor.organizationId,
+              userId,
+            },
+          },
+          data: { status: input.status },
+        });
+        await this.audit.write(tx, actor, {
+          action: 'membership.update',
+          entityType: 'OrganizationMembership',
+          entityId: after.id,
+          beforeData: before,
+          afterData: after,
+        });
+        return after;
+      },
+      { isolationLevel: 'Serializable' },
+    );
   }
 
   setDepartments(
@@ -167,7 +323,7 @@ export class UsersService {
       throw new BadRequestException('Duplicate department assignment');
     return this.prisma.$transaction(
       async (tx) => {
-        await this.requireMembership(tx, actor.organizationId, userId);
+        await this.requireMembership(tx, actor.organizationId, userId, true);
         const valid = await tx.department.count({
           where: {
             id: { in: ids },
@@ -192,17 +348,47 @@ export class UsersService {
             userId,
           })),
         });
-        await this.audit.write(tx, actor, {
-          action: 'user.departments.update',
-          entityType: 'User',
-          entityId: userId,
-          beforeData: before,
-          afterData: input.departments,
-        });
-        return tx.departmentMembership.findMany({
+        const after = await tx.departmentMembership.findMany({
           where: { organizationId: actor.organizationId, userId },
           include: { department: true },
         });
+        for (const membership of after.filter(
+          ({ departmentId }) =>
+            !before.some((item) => item.departmentId === departmentId),
+        ))
+          await this.audit.write(tx, actor, {
+            action: 'department.membership.add',
+            entityType: 'DepartmentMembership',
+            entityId: membership.id,
+            afterData: membership,
+          });
+        for (const membership of before.filter(
+          ({ departmentId }) =>
+            !after.some((item) => item.departmentId === departmentId),
+        ))
+          await this.audit.write(tx, actor, {
+            action: 'department.membership.remove',
+            entityType: 'DepartmentMembership',
+            entityId: membership.id,
+            beforeData: membership,
+          });
+        for (const membership of before.filter(({ departmentId, isPrimary }) =>
+          after.some(
+            (item) =>
+              item.departmentId === departmentId &&
+              item.isPrimary !== isPrimary,
+          ),
+        ))
+          await this.audit.write(tx, actor, {
+            action: 'department.membership.update',
+            entityType: 'DepartmentMembership',
+            entityId: membership.id,
+            beforeData: membership,
+            afterData: after.find(
+              ({ departmentId }) => departmentId === membership.departmentId,
+            ),
+          });
+        return after;
       },
       { isolationLevel: 'Serializable' },
     );
@@ -211,7 +397,7 @@ export class UsersService {
   setRoles(actor: CurrentActor, userId: string, input: SetUserRolesDto) {
     return this.prisma.$transaction(
       async (tx) => {
-        await this.requireMembership(tx, actor.organizationId, userId);
+        await this.requireMembership(tx, actor.organizationId, userId, true);
         const roles = await tx.role.findMany({
           where: {
             id: { in: input.roleIds },
@@ -280,11 +466,14 @@ export class UsersService {
     tx: Prisma.TransactionClient,
     organizationId: string,
     userId: string,
+    active = false,
   ) {
     const membership = await tx.organizationMembership.findUnique({
       where: { organizationId_userId: { organizationId, userId } },
     });
-    if (!membership) throw new NotFoundException('User membership not found');
+    if (!membership || (active && membership.status !== 'active'))
+      throw new NotFoundException('Active user membership not found');
+    return membership;
   }
 
   private async isLastActiveAdmin(

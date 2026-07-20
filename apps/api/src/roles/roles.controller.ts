@@ -50,14 +50,14 @@ export class RolesController {
   ) {
     return this.roles.update(actor, id, data);
   }
-  @Put(':id/permissions') @RequirePermission('role.update') permissions(
+  @Put(':id/permissions') @RequirePermission('permission.assign') permissions(
     @Actor() actor: CurrentActor,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() data: SetRolePermissionsDto,
   ) {
     return this.roles.setPermissions(actor, id, data);
   }
-  @Post(':id/archive') @RequirePermission('role.update') archive(
+  @Post(':id/archive') @RequirePermission('role.archive') archive(
     @Actor() actor: CurrentActor,
     @Param('id', ParseUUIDPipe) id: string,
   ) {

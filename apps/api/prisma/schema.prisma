@@ -46,31 +46,33 @@ model Organization {
 }
 
 model User {
-  id                    String                   @id @default(uuid()) @db.Uuid
-  email                 String                   @unique
-  displayName           String
-  phone                 String?
-  status                UserStatus               @default(invited)
-  externalAuthId        String?                  @unique
-  createdAt             DateTime                 @default(now())
-  updatedAt             DateTime                 @updatedAt
-  organizationMembers   OrganizationMembership[]
-  departmentMembers     DepartmentMembership[]
-  roles                 UserRole[]                @relation("UserRoles")
-  assignedRoles         UserRole[]                @relation("AssignedRoles")
-  auditLogs             AuditLog[]
+  id                  String                   @id @default(uuid()) @db.Uuid
+  email               String                   @unique
+  displayName         String
+  phone               String?
+  status              UserStatus               @default(invited)
+  externalAuthId      String?                  @unique
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  organizationMembers OrganizationMembership[]
+  departmentMembers   DepartmentMembership[]
+  roles               UserRole[]               @relation("UserRoles")
+  assignedRoles       UserRole[]               @relation("AssignedRoles")
+  auditLogs           AuditLog[]
 }
 
 model OrganizationMembership {
-  id             String           @id @default(uuid()) @db.Uuid
-  organizationId String           @db.Uuid
-  userId         String           @db.Uuid
-  status         MembershipStatus @default(active)
-  joinedAt       DateTime         @default(now())
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  organization   Organization     @relation(fields: [organizationId], references: [id])
-  user           User             @relation(fields: [userId], references: [id])
+  id                String                 @id @default(uuid()) @db.Uuid
+  organizationId    String                 @db.Uuid
+  userId            String                 @db.Uuid
+  status            MembershipStatus       @default(active)
+  joinedAt          DateTime               @default(now())
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  organization      Organization           @relation(fields: [organizationId], references: [id])
+  user              User                   @relation(fields: [userId], references: [id])
+  departmentMembers DepartmentMembership[] @relation("DepartmentOrganizationMembership")
+  roles             UserRole[]             @relation("RoleOrganizationMembership")
 
   @@unique([organizationId, userId])
   @@index([userId, status])
@@ -86,22 +88,25 @@ model Department {
   createdAt      DateTime               @default(now())
   updatedAt      DateTime               @updatedAt
   organization   Organization           @relation(fields: [organizationId], references: [id])
-  members        DepartmentMembership[]
+  members        DepartmentMembership[] @relation("DepartmentMembers")
 
   @@unique([organizationId, code])
+  @@unique([organizationId, id])
   @@index([organizationId, status])
 }
 
 model DepartmentMembership {
-  id             String       @id @default(uuid()) @db.Uuid
-  organizationId String       @db.Uuid
-  departmentId   String       @db.Uuid
-  userId         String       @db.Uuid
-  isPrimary      Boolean      @default(false)
-  createdAt      DateTime     @default(now())
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  department     Department   @relation(fields: [departmentId], references: [id])
-  user           User         @relation(fields: [userId], references: [id])
+  id             String                 @id @default(uuid()) @db.Uuid
+  organizationId String                 @db.Uuid
+  departmentId   String                 @db.Uuid
+  userId         String                 @db.Uuid
+  isPrimary      Boolean                @default(false)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  organization   Organization           @relation(fields: [organizationId], references: [id])
+  department     Department             @relation("DepartmentMembers", fields: [organizationId, departmentId], references: [organizationId, id])
+  user           User                   @relation(fields: [userId], references: [id])
+  membership     OrganizationMembership @relation("DepartmentOrganizationMembership", fields: [organizationId, userId], references: [organizationId, userId])
 
   @@unique([departmentId, userId])
   @@index([organizationId, userId])
@@ -131,6 +136,7 @@ model Role {
   users          UserRole[]
 
   @@unique([organizationId, code])
+  @@unique([organizationId, id])
   @@index([organizationId, status])
 }
 
@@ -145,16 +151,17 @@ model RolePermission {
 }
 
 model UserRole {
-  id               String   @id @default(uuid()) @db.Uuid
-  organizationId   String   @db.Uuid
-  userId           String   @db.Uuid
-  roleId           String   @db.Uuid
-  createdAt        DateTime @default(now())
-  assignedByUserId String?  @db.Uuid
-  organization     Organization @relation(fields: [organizationId], references: [id])
-  user             User     @relation("UserRoles", fields: [userId], references: [id])
-  role             Role     @relation(fields: [roleId], references: [id])
-  assignedBy       User?    @relation("AssignedRoles", fields: [assignedByUserId], references: [id])
+  id               String                 @id @default(uuid()) @db.Uuid
+  organizationId   String                 @db.Uuid
+  userId           String                 @db.Uuid
+  roleId           String                 @db.Uuid
+  createdAt        DateTime               @default(now())
+  assignedByUserId String?                @db.Uuid
+  organization     Organization           @relation(fields: [organizationId], references: [id])
+  user             User                   @relation("UserRoles", fields: [userId], references: [id])
+  role             Role                   @relation(fields: [organizationId, roleId], references: [organizationId, id])
+  assignedBy       User?                  @relation("AssignedRoles", fields: [assignedByUserId], references: [id])
+  membership       OrganizationMembership @relation("RoleOrganizationMembership", fields: [organizationId, userId], references: [organizationId, userId])
 
   @@unique([organizationId, userId, roleId])
   @@index([organizationId, userId])

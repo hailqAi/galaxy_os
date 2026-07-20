@@ -58,4 +58,28 @@ describe('access control', () => {
       new DevelopmentAuthGuard(reflector, prisma).canActivate(context()),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
+
+  it('rejects ambiguous development organization membership', async () => {
+    process.env.ALLOW_DEV_AUTH = 'true';
+    process.env.NODE_ENV = 'test';
+    process.env.DATABASE_URL = 'postgresql://localhost/test';
+    const reflector = {
+      getAllAndOverride: vi.fn().mockReturnValue(false),
+    } as unknown as Reflector;
+    const prisma = {
+      user: {
+        findUnique: vi.fn().mockResolvedValue({
+          status: 'active',
+          organizationMembers: [
+            { organizationId: 'a' },
+            { organizationId: 'b' },
+          ],
+          roles: [],
+        }),
+      },
+    } as unknown as PrismaService;
+    await expect(
+      new DevelopmentAuthGuard(reflector, prisma).canActivate(context()),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
 });

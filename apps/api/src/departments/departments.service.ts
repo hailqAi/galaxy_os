@@ -16,6 +16,14 @@ export class DepartmentsService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.department.findMany({
         where,
+        include: {
+          members: {
+            include: {
+              user: { select: { id: true, displayName: true, email: true } },
+            },
+          },
+          _count: { select: { members: true } },
+        },
         orderBy: { name: 'asc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -28,6 +36,14 @@ export class DepartmentsService {
   async get(actor: CurrentActor, id: string) {
     const item = await this.prisma.department.findFirst({
       where: { id, organizationId: actor.organizationId },
+      include: {
+        members: {
+          include: {
+            user: { select: { id: true, displayName: true, email: true } },
+          },
+        },
+        _count: { select: { members: true } },
+      },
     });
     if (!item) throw new NotFoundException('Department not found');
     return item;

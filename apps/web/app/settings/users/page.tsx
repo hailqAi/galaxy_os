@@ -11,12 +11,14 @@ type User = {
   displayName: string;
   phone?: string;
   status: string;
+  organizationMembers: { id: string; status: string }[];
   departmentMembers: {
     departmentId: string;
     isPrimary: boolean;
     department: Department;
   }[];
   roles: { roleId: string; role: Role }[];
+  effectivePermissions: string[];
 };
 
 export default function UsersPage() {
@@ -74,25 +76,30 @@ export default function UsersPage() {
     const departmentIds = data.getAll('departmentId').map(String);
     const primary = String(data.get('primary') ?? '');
     try {
-      const updates: Promise<unknown>[] = [
-        api(`/users/${user.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({
-            displayName: data.get('displayName'),
-            email: data.get('email'),
-            phone: data.get('phone') || undefined,
+      const updates: Promise<unknown>[] = [];
+      if (permissions.includes('user.update'))
+        updates.push(
+          api(`/users/${user.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              displayName: data.get('displayName'),
+              email: data.get('email'),
+              phone: data.get('phone') || undefined,
+            }),
           }),
-        }),
-        api(`/users/${user.id}/departments`, {
-          method: 'PUT',
-          body: JSON.stringify({
-            departments: departmentIds.map((departmentId) => ({
-              departmentId,
-              isPrimary: departmentId === primary,
-            })),
+        );
+      if (permissions.includes('membership.update'))
+        updates.push(
+          api(`/users/${user.id}/departments`, {
+            method: 'PUT',
+            body: JSON.stringify({
+              departments: departmentIds.map((departmentId) => ({
+                departmentId,
+                isPrimary: departmentId === primary,
+              })),
+            }),
           }),
-        }),
-      ];
+        );
       if (permissions.includes('role.assign'))
         updates.push(
           api(`/users/${user.id}/roles`, {
@@ -115,6 +122,21 @@ export default function UsersPage() {
       await api(`/users/${id}/disable`, { method: 'POST' });
       await load();
       setMessage('Đã vô hiệu hóa người dùng.');
+    } catch (error) {
+      setMessage((error as Error).message);
+    }
+  }
+  async function setMembership(user: User) {
+    const status = user.organizationMembers[0]?.status;
+    try {
+      await api(`/users/${user.id}/membership`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          status: status === 'active' ? 'disabled' : 'active',
+        }),
+      });
+      await load();
+      setMessage('Đã cập nhật tư cách thành viên tổ chức.');
     } catch (error) {
       setMessage((error as Error).message);
     }
@@ -167,8 +189,10 @@ export default function UsersPage() {
             <div className="flex flex-wrap justify-between gap-3">
               <div>
                 <h3 className="font-semibold">{user.displayName}</h3>
+                <p className="text-sm text-black/60">Danh tính: {user.email}</p>
                 <p className="text-sm text-black/60">
-                  {user.email} · {user.status}
+                  Tài khoản: {user.status} · Thành viên tổ chức:{' '}
+                  {user.organizationMembers[0]?.status ?? 'Không có'}
                 </p>
                 <p className="mt-1 text-sm">
                   Phòng chính:{' '}
@@ -182,10 +206,25 @@ export default function UsersPage() {
                     Vô hiệu hóa
                   </button>
                 )}
+              {permissions.includes('membership.update') && (
+                <button onClick={() => void setMembership(user)} type="button">
+                  {user.organizationMembers[0]?.status === 'active'
+                    ? 'Vô hiệu hóa thành viên'
+                    : 'Kích hoạt thành viên'}
+                </button>
+              )}
             </div>
-            {permissions.includes('user.update') && (
+            <div className="mt-4">
+              <h4 className="font-medium">Quyền hiệu lực (chỉ đọc)</h4>
+              <p className="mt-1 text-sm text-black/60">
+                {user.effectivePermissions.join(', ') || 'Không có quyền'}
+              </p>
+            </div>
+            {(permissions.includes('user.update') ||
+              permissions.includes('membership.update') ||
+              permissions.includes('role.assign')) && (
               <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <label>
+                <label hidden={!permissions.includes('user.update')}>
                   Họ tên
                   <input
                     defaultValue={user.displayName}
@@ -193,7 +232,7 @@ export default function UsersPage() {
                     required
                   />
                 </label>
-                <label>
+                <label hidden={!permissions.includes('user.update')}>
                   Email
                   <input
                     defaultValue={user.email}
@@ -202,11 +241,11 @@ export default function UsersPage() {
                     type="email"
                   />
                 </label>
-                <label>
+                <label hidden={!permissions.includes('user.update')}>
                   Số điện thoại
                   <input defaultValue={user.phone} name="phone" />
                 </label>
-                <fieldset>
+                <fieldset disabled={!permissions.includes('membership.update')}>
                   <legend className="font-medium">Phòng ban</legend>
                   {departments.map((department) => (
                     <div

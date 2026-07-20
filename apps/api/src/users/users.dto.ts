@@ -23,7 +23,7 @@ export class UpdateUserDto {
   @IsOptional() @IsEmail() email?: string;
   @IsOptional() @IsString() @Length(1, 120) displayName?: string;
   @IsOptional() @IsString() @Length(1, 30) phone?: string;
-  @IsOptional() @IsIn(['invited', 'active']) status?: 'invited' | 'active';
+  @IsOptional() @IsIn(['active']) status?: 'active';
 }
 
 class DepartmentAssignmentDto {
@@ -40,4 +40,8 @@ export class SetUserDepartmentsDto {
 
 export class SetUserRolesDto {
   @IsArray() @ArrayUnique() @IsUUID('4', { each: true }) roleIds!: string[];
+}
+
+export class UpdateMembershipDto {
+  @IsIn(['active', 'disabled']) status!: 'active' | 'disabled';
 }

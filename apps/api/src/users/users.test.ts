@@ -16,11 +16,14 @@ describe('UsersService security rules', () => {
   it('normalizes email and writes the audit in one transaction', async () => {
     const tx = {
       user: {
+        findUnique: vi.fn().mockResolvedValue(null),
         create: vi
           .fn()
           .mockResolvedValue({ id: 'u', email: 'person@example.com' }),
       },
-      organizationMembership: { create: vi.fn() },
+      organizationMembership: {
+        create: vi.fn().mockResolvedValue({ id: 'm' }),
+      },
     };
     const prisma = {
       $transaction: (run: (client: typeof tx) => unknown) => run(tx),
@@ -30,10 +33,12 @@ describe('UsersService security rules', () => {
       email: ' Person@Example.COM ',
       displayName: 'Person',
     });
-    expect(tx.user.create).toHaveBeenCalledWith({
-      data: { email: 'person@example.com', displayName: 'Person' },
-    });
-    expect(audit.write).toHaveBeenCalledOnce();
+    expect(tx.user.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { email: 'person@example.com', displayName: 'Person' },
+      }),
+    );
+    expect(audit.write).toHaveBeenCalledTimes(2);
   });
 
   it('rejects multiple primary departments before writing', async () => {
@@ -51,7 +56,7 @@ describe('UsersService security rules', () => {
   it('rejects a role from another organization', async () => {
     const tx = {
       organizationMembership: {
-        findUnique: vi.fn().mockResolvedValue({ id: 'm' }),
+        findUnique: vi.fn().mockResolvedValue({ id: 'm', status: 'active' }),
       },
       role: { findMany: vi.fn().mockResolvedValue([]) },
     };
@@ -68,7 +73,7 @@ describe('UsersService security rules', () => {
   it('rejects a department from another organization', async () => {
     const tx = {
       organizationMembership: {
-        findUnique: vi.fn().mockResolvedValue({ id: 'm' }),
+        findUnique: vi.fn().mockResolvedValue({ id: 'm', status: 'active' }),
       },
       department: { count: vi.fn().mockResolvedValue(0) },
     };
@@ -94,6 +99,10 @@ describe('UsersService security rules', () => {
       },
       userRole: {
         count: vi.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(1),
+      },
+      organizationMembership: {
+        count: vi.fn().mockResolvedValue(1),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: 'm' }),
       },
     };
     const prisma = {

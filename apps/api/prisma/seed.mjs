@@ -31,11 +31,15 @@ const permissions = [
   'user.create',
   'user.update',
   'user.disable',
+  'membership.read',
+  'membership.update',
   'role.read',
   'role.create',
   'role.update',
+  'role.archive',
   'role.assign',
   'permission.read',
+  'permission.assign',
   'audit.read',
 ];
 const roles = [
@@ -104,6 +108,7 @@ async function seed() {
                   'department.update',
                   'user.create',
                   'user.update',
+                  'membership.update',
                   'role.assign',
                 ].includes(permission.code),
             )

@@ -26,7 +26,14 @@ export class RolesService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.role.findMany({
         where,
-        include: { permissions: { include: { permission: true } } },
+        include: {
+          permissions: { include: { permission: true } },
+          users: {
+            include: {
+              user: { select: { id: true, displayName: true, email: true } },
+            },
+          },
+        },
         orderBy: { name: 'asc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -39,7 +46,14 @@ export class RolesService {
   async get(actor: CurrentActor, id: string) {
     const role = await this.prisma.role.findFirst({
       where: { id, organizationId: actor.organizationId },
-      include: { permissions: { include: { permission: true } } },
+      include: {
+        permissions: { include: { permission: true } },
+        users: {
+          include: {
+            user: { select: { id: true, displayName: true, email: true } },
+          },
+        },
+      },
     });
     if (!role) throw new NotFoundException('Role not found');
     return role;

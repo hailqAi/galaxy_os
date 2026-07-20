@@ -40,7 +40,7 @@ export class DevelopmentAuthGuard implements CanActivate {
           include: {
             organization: true,
           },
-          take: 1,
+          take: 2,
         },
         roles: {
           where: { role: { status: 'active' } },
@@ -53,7 +53,12 @@ export class DevelopmentAuthGuard implements CanActivate {
       },
     });
     const membership = user?.organizationMembers[0];
-    if (!user || user.status !== 'active' || !membership)
+    if (
+      !user ||
+      user.status !== 'active' ||
+      !membership ||
+      user.organizationMembers.length !== 1
+    )
       throw new UnauthorizedException('Active user membership required');
     const permissions = new Set(
       user.roles

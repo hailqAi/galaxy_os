@@ -12,6 +12,9 @@ type Role = {
   isSystem: boolean;
   status: string;
   permissions: { permissionId: string }[];
+  users: {
+    user: { id: string; displayName: string; email: string };
+  }[];
 };
 
 export default function RolesPage() {
@@ -64,7 +67,10 @@ export default function RolesPage() {
           description: data.get('description') || undefined,
         }),
       });
-      if (role.code !== 'system_admin') {
+      if (
+        role.code !== 'system_admin' &&
+        permissions.includes('permission.assign')
+      ) {
         await api(`/roles/${role.id}/permissions`, {
           method: 'PUT',
           body: JSON.stringify({ permissionIds: data.getAll('permissionId') }),
@@ -131,7 +137,7 @@ export default function RolesPage() {
             </div>
             {!role.isSystem &&
               role.status === 'active' &&
-              permissions.includes('role.update') && (
+              permissions.includes('role.archive') && (
                 <button onClick={() => void archive(role.id)} type="button">
                   Lưu trữ
                 </button>
@@ -157,7 +163,7 @@ export default function RolesPage() {
             </label>
             <fieldset
               disabled={
-                !permissions.includes('role.update') ||
+                !permissions.includes('permission.assign') ||
                 role.code === 'system_admin'
               }
             >
@@ -181,6 +187,13 @@ export default function RolesPage() {
                 ))}
               </div>
             </fieldset>
+            <div>
+              <h4 className="font-medium">Thành viên được gán</h4>
+              <p className="mt-1 text-sm text-black/60">
+                {role.users.map(({ user }) => user.displayName).join(', ') ||
+                  'Chưa có thành viên'}
+              </p>
+            </div>
             {permissions.includes('role.update') && (
               <button className="primary" type="submit">
                 Lưu vai trò

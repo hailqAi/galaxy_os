@@ -9,6 +9,11 @@ type Department = {
   name: string;
   description?: string;
   status: string;
+  _count: { members: number };
+  members: {
+    isPrimary: boolean;
+    user: { id: string; displayName: string; email: string };
+  }[];
 };
 
 export default function DepartmentsPage() {
@@ -85,6 +90,7 @@ export default function DepartmentsPage() {
                 <th>Mã</th>
                 <th>Tên</th>
                 <th>Trạng thái</th>
+                <th>Thành viên</th>
                 <th>Thao tác</th>
               </tr>
             </thead>
@@ -118,6 +124,15 @@ export default function DepartmentsPage() {
                   </td>
                   <td>
                     {item.status === 'active' ? 'Hoạt động' : 'Đã lưu trữ'}
+                  </td>
+                  <td>
+                    <p>{item._count.members} thành viên</p>
+                    {item.members.map((member) => (
+                      <p className="text-xs text-black/60" key={member.user.id}>
+                        {member.user.displayName}
+                        {member.isPrimary ? ' · Phòng chính' : ''}
+                      </p>
+                    ))}
                   </td>
                   <td>
                     {item.status === 'active' &&

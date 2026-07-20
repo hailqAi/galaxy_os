@@ -75,7 +75,7 @@ With PostgreSQL healthy and `DATABASE_URL` loaded from `.env.local`:
 
 ```bash
 pnpm db:generate
-pnpm db:migrate -- --name <short_description>
+pnpm db:migrate --name <short_description>
 pnpm db:status
 pnpm db:seed
 ```

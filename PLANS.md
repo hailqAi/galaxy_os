@@ -58,7 +58,7 @@ Modify existing environment, Prisma, API bootstrap/module/package, web shell/sty
 ```bash
 pnpm --filter @galaxy/api prisma:validate
 pnpm --filter @galaxy/api prisma:generate
-pnpm --filter @galaxy/api prisma:migrate -- --name sprint_1_identity_access
+pnpm db:migrate --name <short_description>
 pnpm --filter @galaxy/api prisma:seed
 pnpm --filter @galaxy/api test
 pnpm --filter @galaxy/web test
@@ -81,6 +81,10 @@ Before commit, Sprint 1 application changes can be discarded without touching th
 ## Completion criteria
 
 All requested Sprint 1 models, seed data, scoped endpoints, security protections, audit behavior, and usable Settings pages exist; focused and full checks pass or exact environmental blockers are recorded; the complete diff passes Ponytail and correctness review; no unused dependency or Sprint 2 code remains; and `PROJECT_STATUS.md` contains actual final results.
+
+## Sprint 1 completion audit — 2026-07-20
+
+The completion audit added explicit organization-membership status management, per-member effective permissions, department and role member visibility, the missing membership/archive/permission-assignment catalogue keys, direct API authorization coverage, and department-membership timestamps. Sprint 1 is complete; Sprint 2 remains out of scope.
 
 ## Local environment bug fix
 
