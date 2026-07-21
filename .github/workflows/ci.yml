@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: galaxy_os
+          POSTGRES_USER: galaxy
+          POSTGRES_PASSWORD: galaxy_local
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U galaxy -d galaxy_os"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://galaxy:galaxy_local@localhost:5432/galaxy_os?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: services/document-ai/requirements-dev.txt
+      - run: pnpm install --frozen-lockfile
+      - run: python -m venv services/document-ai/.venv
+      - run: services/document-ai/.venv/bin/pip install -r services/document-ai/requirements-dev.txt
+      - run: pnpm --filter @galaxy/api prisma:generate
+      - run: pnpm --filter @galaxy/api prisma:deploy
+      - run: pnpm --filter @galaxy/api prisma:seed
+      - run: pnpm env:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build

@@ -1,0 +1,45 @@
+{
+  "name": "@galaxy/api",
+  "private": true,
+  "scripts": {
+    "dev": "node --env-file-if-exists=../../.env.local node_modules/@nestjs/cli/bin/nest.js start --watch",
+    "lint": "eslint src test scripts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "admin:reset-password": "node --env-file-if-exists=../../.env.local scripts/reset-admin-password.mjs",
+    "prisma:generate": "node --env-file-if-exists=../../.env.local node_modules/prisma/build/index.js generate --schema prisma/schema.prisma",
+    "prisma:validate": "node --env-file-if-exists=../../.env.local node_modules/prisma/build/index.js validate --schema prisma/schema.prisma",
+    "prisma:migrate": "node --env-file-if-exists=../../.env.local node_modules/prisma/build/index.js migrate dev --schema prisma/schema.prisma",
+    "prisma:deploy": "node --env-file-if-exists=../../.env.local node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma",
+    "prisma:status": "node --env-file-if-exists=../../.env.local node_modules/prisma/build/index.js migrate status --schema prisma/schema.prisma",
+    "prisma:seed": "node --env-file-if-exists=../../.env.local prisma/seed.mjs"
+  },
+  "dependencies": {
+    "@nestjs/common": "11.1.28",
+    "@nestjs/core": "11.1.28",
+    "@nestjs/platform-express": "11.1.28",
+    "@nestjs/swagger": "11.2.3",
+    "@prisma/client": "6.19.0",
+    "bcryptjs": "^3.0.3",
+    "class-transformer": "0.5.1",
+    "class-validator": "0.14.2",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "zod": "4.1.12"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.1",
+    "@nestjs/cli": "11.0.14",
+    "@nestjs/testing": "11.1.28",
+    "@types/node": "20.19.24",
+    "@types/supertest": "6.0.3",
+    "eslint": "9.39.1",
+    "prisma": "6.19.0",
+    "supertest": "7.1.4",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.46.3",
+    "vitest": "3.2.6"
+  }
+}
