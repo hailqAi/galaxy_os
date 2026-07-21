@@ -1,4 +1,10 @@
-import { Controller, Get, Inject, Query } from '@nestjs/common';
+import {
+  Controller,
+  ForbiddenException,
+  Get,
+  Inject,
+  Query,
+} from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { IsDateString, IsOptional, IsString, IsUUID } from 'class-validator';
 import { Actor, RequirePermission } from '../access-control/access.decorators';
@@ -12,6 +18,24 @@ class AuditQuery extends PageQuery {
   @IsOptional() @IsString() entityType?: string;
   @IsOptional() @IsDateString() from?: string;
   @IsOptional() @IsDateString() to?: string;
+}
+
+@ApiTags('system audit')
+@Controller('system/audit-logs')
+export class SystemAuditController {
+  constructor(@Inject(AuditService) private readonly audit: AuditService) {}
+  @Get() @RequirePermission('system.audit.read') list(
+    @Actor() actor: CurrentActor,
+    @Query() query: AuditQuery,
+  ) {
+    if (actor.administrationScope !== 'SYSTEM')
+      throw new ForbiddenException('System Administrator required');
+    return this.audit.listSystem({
+      ...query,
+      page: Number(query.page),
+      pageSize: Number(query.pageSize),
+    });
+  }
 }
 
 @ApiTags('audit')

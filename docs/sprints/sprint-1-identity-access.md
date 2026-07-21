@@ -2,15 +2,21 @@
 
 ## Delivered boundary
 
-Sprint 1 owns Galaxy Centre organization data, departments, user profiles and memberships, organization roles, the controlled permission catalog, effective permission enforcement, and append-only audit logs. It does not own passwords, login, tokens, OAuth, SSO, or production identity-provider integration.
+Sprint 1 owns hierarchical organizational administration, SYSTEM/ORGANIZATION/DEPARTMENT/SELF assignments, protected and custom roles, settings, custom fields, access preview, email/password login, hashed credentials, revocable database sessions, personal profiles, password recovery, delegated administration, and append-only audit logs. CRM and every Sprint 2 business domain remain out of scope.
 
 ## Authorization
 
-The API resolves `CurrentActor`, verifies active user/organization/membership state, resolves the unique union of permissions from active organization roles, and scopes relevant queries to the actor organization. Department membership grants no permission. Backend guards are authoritative; Settings action visibility is usability only. Cross-organization assignments are rejected. The final active `system_admin` account or membership cannot be disabled and cannot lose that role; system role codes cannot be renamed and system roles cannot be archived.
+The API resolves `CurrentActor`, verifies active user/organization/membership state, ignores inactive/expired roles and scopes, returns permission source metadata, and combines capability, assignment scope, target policy, delegation ceiling, protected-resource rules, and organization isolation. Organizational units have parent, type, manager, order, status, cycle checks, and tenant foreign keys. See [security and permissions](../architecture/security-and-permissions.md) and the [pre-change gap analysis](sprint-1-enterprise-gap-analysis.md).
+
+## Authentication and sessions
+
+Login normalizes the immutable email identifier, verifies a bcrypt hash, applies a five-attempt/15-minute temporary lock, requires one active organization membership, and creates a 32-byte opaque token. Only its SHA-256 hash is stored. The browser receives the token in an HttpOnly, SameSite=Lax cookie that is Secure in production. Sessions expire, may be revoked, and are rejected for disabled users, memberships, or organizations. Password changes revoke all sessions and require a clean login.
+
+Avatars use generated filenames under `AVATAR_STORAGE_PATH`, accept JPEG/PNG/WebP magic signatures up to `AVATAR_MAX_BYTES`, and are served through an authenticated endpoint. Local filesystem persistence must be replaced only when deployment uses shared or ephemeral storage.
 
 ## Development authentication
 
-Copy `.env.example`, set `ALLOW_DEV_AUTH=true`, optionally change `DEV_AUTH_USER_EMAIL`, run the seed, and restart the API. The configured email must resolve to exactly one active organization membership; ambiguous membership is rejected rather than selecting a tenant implicitly. Requests cannot select identity or organization. `ALLOW_DEV_AUTH=true` is rejected when `NODE_ENV=production`. A production provider later replaces this resolver and supplies the same `CurrentActor` shape with an explicit active organization.
+Real login works with `ALLOW_DEV_AUTH=false`. For a local credential, set an ignored `DEV_SEED_PASSWORD` and run the idempotent seed. Development auth may still be explicitly enabled outside production, but each request must carry the explicit configured selector; the flag alone never recreates a logged-out actor. It resolves the same user, membership, roles, permissions, and organization scope and never bypasses authorization.
 
 ## Local procedure
 
@@ -30,4 +36,4 @@ Swagger is at <http://localhost:3001/docs>. Settings begin at <http://localhost:
 
 ## Audit behavior
 
-Organization, department, user, organization-membership, role, role-permission, department-membership, and role-assignment mutations write audit data in the same transaction. Department membership add/remove actions are recorded separately. The API provides filtered, paginated read access only; no update or delete route exists. Audit data excludes credentials, external authentication identifiers, and request headers.
+Organization, unit, user, membership, settings, custom-field, role, permission, scope, password, session, and access-profile mutations write audit data. Rejected self, protected-target, tier, and delegation attempts are recorded. Audit data excludes credentials, password hashes, raw reset/session tokens, cookies, integration secrets, and request headers.

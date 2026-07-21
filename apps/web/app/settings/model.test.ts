@@ -1,21 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import {
-  can,
-  departmentAssignments,
-  organizationInput,
-  settingsLinks,
-} from './model';
+import { can, departmentAssignments, organizationInput } from './model';
 
 describe('settings behavior', () => {
-  it('includes every Sprint 1 settings destination', () => {
-    expect(settingsLinks.map(([href]) => href)).toEqual([
-      '/settings/organization',
-      '/settings/departments',
-      '/settings/users',
-      '/settings/roles',
-      '/settings/audit-logs',
-    ]);
-  });
   it('shows actions only with their permission', () =>
     expect(can(['user.read'], 'user.create')).toBe(false));
   it('rejects an invalid organization currency', () =>

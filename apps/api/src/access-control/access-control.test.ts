@@ -46,6 +46,7 @@ describe('access control', () => {
       getAllAndOverride: vi.fn().mockReturnValue(false),
     } as unknown as Reflector;
     const prisma = {
+      session: { findUnique: vi.fn().mockResolvedValue(null) },
       user: {
         findUnique: vi.fn().mockResolvedValue({
           status: 'disabled',
@@ -67,6 +68,7 @@ describe('access control', () => {
       getAllAndOverride: vi.fn().mockReturnValue(false),
     } as unknown as Reflector;
     const prisma = {
+      session: { findUnique: vi.fn().mockResolvedValue(null) },
       user: {
         findUnique: vi.fn().mockResolvedValue({
           status: 'active',

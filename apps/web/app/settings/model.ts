@@ -1,11 +1,3 @@
-export const settingsLinks = [
-  ['/settings/organization', 'Tổ chức'],
-  ['/settings/departments', 'Phòng ban'],
-  ['/settings/users', 'Người dùng'],
-  ['/settings/roles', 'Vai trò'],
-  ['/settings/audit-logs', 'Nhật ký'],
-] as const;
-
 export const can = (permissions: string[], permission: string) =>
   permissions.includes(permission);
 

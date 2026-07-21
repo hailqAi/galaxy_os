@@ -21,7 +21,32 @@ async function bootstrap() {
     }),
   );
   app.enableShutdownHooks();
-  app.enableCors({ origin: 'http://localhost:3000' });
+  app.use(
+    (
+      _request: unknown,
+      response: { setHeader(name: string, value: string): void },
+      next: () => void,
+    ) => {
+      response.setHeader('Cache-Control', 'no-store');
+      response.setHeader(
+        'Content-Security-Policy',
+        "default-src 'none'; frame-ancestors 'none'",
+      );
+      response.setHeader('X-Content-Type-Options', 'nosniff');
+      response.setHeader('Referrer-Policy', 'no-referrer');
+      response.setHeader(
+        'Permissions-Policy',
+        'camera=(), microphone=(), geolocation=()',
+      );
+      if (environment.NODE_ENV === 'production')
+        response.setHeader(
+          'Strict-Transport-Security',
+          'max-age=31536000; includeSubDomains',
+        );
+      next();
+    },
+  );
+  app.enableCors({ origin: environment.WEB_ORIGIN, credentials: true });
 
   const swagger = new DocumentBuilder()
     .setTitle('Galaxy OS ERP API')

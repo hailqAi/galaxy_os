@@ -1,8 +1,14 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { CurrentActor } from '../access-control/current-actor';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma.service';
 import { UpdateOrganizationDto } from './organizations.dto';
+import { CreateOrganizationDto } from './organizations.dto';
 
 @Injectable()
 export class OrganizationsService {
@@ -38,5 +44,32 @@ export class OrganizationsService {
       });
       return after;
     });
+  }
+
+  listSystem(actor: CurrentActor) {
+    this.systemOnly(actor);
+    return this.prisma.organization.findMany({
+      orderBy: { name: 'asc' },
+      include: { _count: { select: { memberships: true, departments: true } } },
+    });
+  }
+
+  createSystem(actor: CurrentActor, data: CreateOrganizationDto) {
+    this.systemOnly(actor);
+    return this.prisma.$transaction(async (tx) => {
+      const organization = await tx.organization.create({ data });
+      await this.audit.write(tx, actor, {
+        action: 'system.organization.create',
+        entityType: 'Organization',
+        entityId: organization.id,
+        afterData: organization,
+      });
+      return organization;
+    });
+  }
+
+  private systemOnly(actor: CurrentActor) {
+    if (actor.administrationScope !== 'SYSTEM')
+      throw new ForbiddenException('System Administrator required');
   }
 }

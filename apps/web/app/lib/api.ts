@@ -4,7 +4,13 @@ export const apiUrl =
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiUrl}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: {
+      ...(init?.body instanceof FormData
+        ? {}
+        : { 'Content-Type': 'application/json' }),
+      ...init?.headers,
+    },
+    credentials: 'include',
     cache: 'no-store',
   });
   if (!response.ok) {
@@ -19,3 +25,25 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   }
   return response.json() as Promise<T>;
 }
+
+export type Actor = {
+  userId: string;
+  email: string;
+  displayName: string;
+  avatarUrl: string | null;
+  status: string;
+  lastLoginAt: string | null;
+  mustChangePassword: boolean;
+  organization: { id: string; name: string };
+  membership: { id: string; status: string; joinedAt: string };
+  departments: { id: string; name: string; isPrimary: boolean }[];
+  roles: { id: string; name: string }[];
+  permissions: string[];
+  administrationScope:
+    | 'SYSTEM'
+    | 'SELF'
+    | 'MANAGED_DEPARTMENTS'
+    | 'ORGANIZATION';
+  managedDepartmentIds: string[];
+  administrationTier: number;
+};

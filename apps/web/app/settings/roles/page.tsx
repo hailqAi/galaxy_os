@@ -10,6 +10,11 @@ type Role = {
   name: string;
   description?: string;
   isSystem: boolean;
+  category: string;
+  maximumScope: string;
+  administrationTier: number;
+  isProtected: boolean;
+  isDelegable: boolean;
   status: string;
   permissions: { permissionId: string }[];
   users: {
@@ -22,14 +27,17 @@ export default function RolesPage() {
   const [catalog, setCatalog] = useState<Permission[]>([]);
   const [permissions, setPermissions] = useState<string[]>([]);
   const [message, setMessage] = useState('Đang tải…');
+  const [permissionSearch, setPermissionSearch] = useState('');
   const load = useCallback(
     () =>
-      Promise.all([
-        api<{ items: Role[] }>('/roles?pageSize=100'),
-        api<Permission[]>('/permissions'),
-        api<{ permissions: string[] }>('/me/permissions'),
-      ])
-        .then(([roleData, permissionData, actor]) => {
+      api<{ permissions: string[] }>('/me/permissions')
+        .then(async (actor) => {
+          const [roleData, permissionData] = await Promise.all([
+            api<{ items: Role[] }>('/roles?pageSize=100'),
+            actor.permissions.includes('permission.read')
+              ? api<Permission[]>('/permissions')
+              : Promise.resolve([]),
+          ]);
           setRoles(roleData.items);
           setCatalog(permissionData);
           setPermissions(actor.permissions);
@@ -96,7 +104,8 @@ export default function RolesPage() {
       <div className="panel">
         <h2 className="text-xl font-semibold">Vai trò và quyền</h2>
         <p className="mt-2 text-sm text-black/60">
-          Vai trò hệ thống được đánh dấu và không thể lưu trữ hoặc đổi mã.
+          Vai trò hệ thống được bảo vệ. Quyền được nhóm theo mô-đun và luôn bị
+          giới hạn bởi phạm vi cùng trần ủy quyền.
         </p>
         <p className="mt-3" role="status">
           {message}
@@ -113,6 +122,23 @@ export default function RolesPage() {
             <label>
               Tên vai trò
               <input name="name" required />
+            </label>
+            <label>
+              Phân loại
+              <select name="category" defaultValue="CUSTOM">
+                <option>CUSTOM</option>
+                <option>DEPARTMENT</option>
+                <option>STANDARD</option>
+                <option>EXECUTIVE</option>
+              </select>
+            </label>
+            <label>
+              Phạm vi tối đa
+              <select name="maximumScope" defaultValue="DEPARTMENT">
+                <option>SELF</option>
+                <option>DEPARTMENT</option>
+                <option>ORGANIZATION</option>
+              </select>
             </label>
             <button className="primary" type="submit">
               Tạo vai trò
@@ -132,7 +158,10 @@ export default function RolesPage() {
                 {role.isSystem ? 'Vai trò hệ thống' : 'Vai trò tùy chỉnh'}
               </p>
               <p className="text-sm text-black/60">
-                {role.code} · {role.status}
+                {role.code} · {role.category} · {role.maximumScope} · cấp{' '}
+                {role.administrationTier} ·{' '}
+                {role.isDelegable ? 'có thể ủy quyền' : 'không ủy quyền'} ·{' '}
+                {role.status}
               </p>
             </div>
             {!role.isSystem &&
@@ -168,23 +197,40 @@ export default function RolesPage() {
               }
             >
               <legend className="font-medium">Quyền hiện tại</legend>
+              <label className="mt-2 block">
+                Tìm quyền
+                <input
+                  type="search"
+                  value={permissionSearch}
+                  onChange={(event) => setPermissionSearch(event.target.value)}
+                />
+              </label>
               <div className="mt-2 grid gap-2 md:grid-cols-2">
-                {catalog.map((permission) => (
-                  <label
-                    className="flex grid-cols-none items-center gap-2 font-normal"
-                    key={permission.id}
-                  >
-                    <input
-                      defaultChecked={role.permissions.some(
-                        ({ permissionId }) => permissionId === permission.id,
-                      )}
-                      name="permissionId"
-                      type="checkbox"
-                      value={permission.id}
-                    />
-                    {permission.code}
-                  </label>
-                ))}
+                {catalog
+                  .filter((permission) =>
+                    permission.code.includes(
+                      permissionSearch.trim().toLowerCase(),
+                    ),
+                  )
+                  .map((permission) => (
+                    <label
+                      className="flex grid-cols-none items-center gap-2 font-normal"
+                      key={permission.id}
+                    >
+                      <input
+                        defaultChecked={role.permissions.some(
+                          ({ permissionId }) => permissionId === permission.id,
+                        )}
+                        name="permissionId"
+                        type="checkbox"
+                        value={permission.id}
+                      />
+                      <span>
+                        <strong>{permission.code.split('.')[0]}</strong> ·{' '}
+                        {permission.code}
+                      </span>
+                    </label>
+                  ))}
               </div>
             </fieldset>
             <div>

@@ -37,6 +37,13 @@ export class RolesController {
   ) {
     return this.roles.create(actor, data);
   }
+  @Post(':id/clone') @RequirePermission('role.create') clone(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() data: CreateRoleDto,
+  ) {
+    return this.roles.clone(actor, id, data);
+  }
   @Get(':id') @RequirePermission('role.read') get(
     @Actor() actor: CurrentActor,
     @Param('id', ParseUUIDPipe) id: string,

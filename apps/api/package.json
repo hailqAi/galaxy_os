@@ -3,11 +3,12 @@
   "private": true,
   "scripts": {
     "dev": "node --env-file-if-exists=../../.env.local node_modules/@nestjs/cli/bin/nest.js start --watch",
-    "lint": "eslint src test",
+    "lint": "eslint src test scripts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build": "nest build",
     "start": "node dist/main.js",
+    "admin:reset-password": "node --env-file-if-exists=../../.env.local scripts/reset-admin-password.mjs",
     "prisma:generate": "node --env-file-if-exists=../../.env.local node_modules/prisma/build/index.js generate --schema prisma/schema.prisma",
     "prisma:validate": "node --env-file-if-exists=../../.env.local node_modules/prisma/build/index.js validate --schema prisma/schema.prisma",
     "prisma:migrate": "node --env-file-if-exists=../../.env.local node_modules/prisma/build/index.js migrate dev --schema prisma/schema.prisma",
@@ -21,6 +22,7 @@
     "@nestjs/platform-express": "11.1.28",
     "@nestjs/swagger": "11.2.3",
     "@prisma/client": "6.19.0",
+    "bcryptjs": "^3.0.3",
     "class-transformer": "0.5.1",
     "class-validator": "0.14.2",
     "reflect-metadata": "0.2.2",
@@ -38,6 +40,6 @@
     "supertest": "7.1.4",
     "typescript": "5.9.3",
     "typescript-eslint": "8.46.3",
-    "vitest": "3.2.4"
+    "vitest": "3.2.6"
   }
 }

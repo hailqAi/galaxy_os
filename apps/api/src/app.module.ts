@@ -9,18 +9,25 @@ import { OrganizationsModule } from './organizations/organizations.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { RolesModule } from './roles/roles.module';
 import { UsersModule } from './users/users.module';
+import { AuthModule } from './auth/auth.module';
+import { MeService } from './me.service';
+import { SettingsModule } from './settings/settings.module';
+import { CustomFieldsModule } from './custom-fields/custom-fields.module';
 
 @Module({
   imports: [
     AccessControlModule,
+    AuthModule,
     AuditModule,
     OrganizationsModule,
     DepartmentsModule,
     UsersModule,
     RolesModule,
     PermissionsModule,
+    SettingsModule,
+    CustomFieldsModule,
   ],
   controllers: [HealthController, MeController],
-  providers: [PrismaService],
+  providers: [PrismaService, MeService],
 })
 export class AppModule {}

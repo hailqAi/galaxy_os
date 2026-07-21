@@ -76,4 +76,38 @@ export class AuditService {
         pageSize: query.pageSize,
       }));
   }
+
+  listSystem(query: {
+    page: number;
+    pageSize: number;
+    actor?: string;
+    action?: string;
+    entityType?: string;
+  }) {
+    const where: Prisma.AuditLogWhereInput = {
+      actorUserId: query.actor,
+      action: query.action,
+      entityType: query.entityType,
+    };
+    return this.prisma
+      .$transaction([
+        this.prisma.auditLog.findMany({
+          where,
+          include: {
+            organization: { select: { id: true, name: true } },
+            actor: { select: { id: true, displayName: true, email: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          skip: (query.page - 1) * query.pageSize,
+          take: query.pageSize,
+        }),
+        this.prisma.auditLog.count({ where }),
+      ])
+      .then(([items, total]) => ({
+        items,
+        total,
+        page: query.page,
+        pageSize: query.pageSize,
+      }));
+  }
 }

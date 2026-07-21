@@ -28,6 +28,63 @@ enum RecordStatus {
   archived
 }
 
+enum AdministrationScope {
+  SYSTEM
+  SELF
+  MANAGED_DEPARTMENTS
+  ORGANIZATION
+}
+
+enum AssignmentScope {
+  SYSTEM
+  ORGANIZATION
+  DEPARTMENT
+  SELF
+}
+
+enum OrganizationalUnitType {
+  BOARD
+  DIVISION
+  DEPARTMENT
+  TEAM
+  OTHER
+}
+
+enum RoleCategory {
+  SYSTEM
+  ORGANIZATION
+  EXECUTIVE
+  DEPARTMENT
+  STANDARD
+  CUSTOM
+}
+
+enum SettingScope {
+  SYSTEM
+  ORGANIZATION
+}
+
+enum CustomFieldEntityType {
+  USER
+  ORGANIZATION_MEMBER
+  DEPARTMENT
+  ROLE
+}
+
+enum CustomFieldDataType {
+  TEXT
+  LONG_TEXT
+  NUMBER
+  BOOLEAN
+  DATE
+  DATETIME
+  SINGLE_SELECT
+  MULTI_SELECT
+  EMAIL
+  PHONE
+  URL
+}
+
 model Organization {
   id                String                   @id @default(uuid()) @db.Uuid
   name              String
@@ -43,15 +100,20 @@ model Organization {
   roles             Role[]
   userRoles         UserRole[]
   auditLogs         AuditLog[]
+  settings          OrganizationSetting[]
+  customFields      CustomFieldDefinition[]
 }
 
 model User {
   id                  String                   @id @default(uuid()) @db.Uuid
   email               String                   @unique
+  normalizedEmail     String                   @unique
   displayName         String
+  avatarKey           String?
   phone               String?
   status              UserStatus               @default(invited)
   externalAuthId      String?                  @unique
+  lastLoginAt         DateTime?
   createdAt           DateTime                 @default(now())
   updatedAt           DateTime                 @updatedAt
   organizationMembers OrganizationMembership[]
@@ -59,40 +121,125 @@ model User {
   roles               UserRole[]               @relation("UserRoles")
   assignedRoles       UserRole[]               @relation("AssignedRoles")
   auditLogs           AuditLog[]
+  credential          PasswordCredential?
+  sessions            Session[]
+  passwordResetTokens PasswordResetToken[]
+  grantedManagement   ManagedDepartment[]      @relation("ManagedDepartmentCreator")
+  createdRoles        Role[]                   @relation("RoleCreator")
+  createdCustomFields CustomFieldDefinition[]  @relation("CustomFieldCreator")
+  customData          Json                     @default("{}")
+}
+
+model PasswordCredential {
+  userId             String    @id @db.Uuid
+  passwordHash       String
+  mustChangePassword Boolean   @default(true)
+  passwordChangedAt  DateTime?
+  failedLoginCount   Int       @default(0)
+  lockedUntil        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  user               User      @relation(fields: [userId], references: [id])
+}
+
+model Session {
+  id                       String                 @id @default(uuid()) @db.Uuid
+  userId                   String                 @db.Uuid
+  organizationMembershipId String                 @db.Uuid
+  tokenHash                String                 @unique
+  expiresAt                DateTime
+  revokedAt                DateTime?
+  createdAt                DateTime               @default(now())
+  lastSeenAt               DateTime               @default(now())
+  user                     User                   @relation(fields: [userId], references: [id])
+  organizationMembership   OrganizationMembership @relation(fields: [organizationMembershipId], references: [id])
+
+  @@index([userId, expiresAt])
+  @@index([organizationMembershipId, expiresAt])
+}
+
+model PasswordResetToken {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  revokedAt   DateTime?
+  requestedAt DateTime  @default(now())
+  requestIp   String?
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, expiresAt])
 }
 
 model OrganizationMembership {
-  id                String                 @id @default(uuid()) @db.Uuid
-  organizationId    String                 @db.Uuid
-  userId            String                 @db.Uuid
-  status            MembershipStatus       @default(active)
-  joinedAt          DateTime               @default(now())
-  createdAt         DateTime               @default(now())
-  updatedAt         DateTime               @updatedAt
-  organization      Organization           @relation(fields: [organizationId], references: [id])
-  user              User                   @relation(fields: [userId], references: [id])
-  departmentMembers DepartmentMembership[] @relation("DepartmentOrganizationMembership")
-  roles             UserRole[]             @relation("RoleOrganizationMembership")
+  id                  String                 @id @default(uuid()) @db.Uuid
+  organizationId      String                 @db.Uuid
+  userId              String                 @db.Uuid
+  status              MembershipStatus       @default(active)
+  joinedAt            DateTime               @default(now())
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  administrationScope AdministrationScope    @default(SELF)
+  organization        Organization           @relation(fields: [organizationId], references: [id])
+  user                User                   @relation(fields: [userId], references: [id])
+  departmentMembers   DepartmentMembership[] @relation("DepartmentOrganizationMembership")
+  roles               UserRole[]             @relation("RoleOrganizationMembership")
+  sessions            Session[]
+  managedDepartments  ManagedDepartment[]
+  managedUnits        Department[]           @relation("DepartmentManager")
+  customData          Json                   @default("{}")
 
   @@unique([organizationId, userId])
+  @@unique([organizationId, id])
   @@index([userId, status])
 }
 
 model Department {
-  id             String                 @id @default(uuid()) @db.Uuid
-  organizationId String                 @db.Uuid
-  code           String
-  name           String
-  description    String?
-  status         RecordStatus           @default(active)
-  createdAt      DateTime               @default(now())
-  updatedAt      DateTime               @updatedAt
-  organization   Organization           @relation(fields: [organizationId], references: [id])
-  members        DepartmentMembership[] @relation("DepartmentMembers")
+  id                  String                  @id @default(uuid()) @db.Uuid
+  organizationId      String                  @db.Uuid
+  code                String
+  name                String
+  description         String?
+  parentId            String?                 @db.Uuid
+  unitType            OrganizationalUnitType  @default(DEPARTMENT)
+  managerMembershipId String?                 @db.Uuid
+  displayOrder        Int                     @default(0)
+  status              RecordStatus            @default(active)
+  customData          Json                    @default("{}")
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  organization        Organization            @relation(fields: [organizationId], references: [id])
+  members             DepartmentMembership[]  @relation("DepartmentMembers")
+  managers            ManagedDepartment[]
+  parent              Department?             @relation("DepartmentHierarchy", fields: [organizationId, parentId], references: [organizationId, id])
+  children            Department[]            @relation("DepartmentHierarchy")
+  manager             OrganizationMembership? @relation("DepartmentManager", fields: [organizationId, managerMembershipId], references: [organizationId, id])
+  scopedRoles         UserRole[]
 
   @@unique([organizationId, code])
   @@unique([organizationId, id])
   @@index([organizationId, status])
+  @@index([organizationId, parentId, displayOrder])
+}
+
+model ManagedDepartment {
+  id              String                 @id @default(uuid()) @db.Uuid
+  organizationId  String                 @db.Uuid
+  managerId       String                 @db.Uuid
+  departmentId    String                 @db.Uuid
+  status          RecordStatus           @default(active)
+  createdAt       DateTime               @default(now())
+  createdByUserId String?                @db.Uuid
+  expiresAt       DateTime?
+  includeChildren Boolean                @default(false)
+  manager         OrganizationMembership @relation(fields: [organizationId, managerId], references: [organizationId, id])
+  department      Department             @relation(fields: [organizationId, departmentId], references: [organizationId, id])
+  createdBy       User?                  @relation("ManagedDepartmentCreator", fields: [createdByUserId], references: [id])
+
+  @@unique([managerId, departmentId])
+  @@index([organizationId, managerId, status])
 }
 
 model DepartmentMembership {
@@ -117,23 +264,34 @@ model Permission {
   code        String           @unique
   name        String
   description String
+  module      String           @default("general")
+  isProtected Boolean          @default(false)
+  isDelegable Boolean          @default(true)
   createdAt   DateTime         @default(now())
   roles       RolePermission[]
 }
 
 model Role {
-  id             String           @id @default(uuid()) @db.Uuid
-  organizationId String           @db.Uuid
-  code           String
-  name           String
-  description    String?
-  isSystem       Boolean          @default(false)
-  status         RecordStatus     @default(active)
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
-  organization   Organization     @relation(fields: [organizationId], references: [id])
-  permissions    RolePermission[]
-  users          UserRole[]
+  id                 String           @id @default(uuid()) @db.Uuid
+  organizationId     String           @db.Uuid
+  code               String
+  name               String
+  description        String?
+  category           RoleCategory     @default(CUSTOM)
+  maximumScope       AssignmentScope  @default(DEPARTMENT)
+  isSystem           Boolean          @default(false)
+  isProtected        Boolean          @default(false)
+  isDelegable        Boolean          @default(true)
+  administrationTier Int              @default(0)
+  createdByUserId    String?          @db.Uuid
+  customData         Json             @default("{}")
+  status             RecordStatus     @default(active)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  organization       Organization     @relation(fields: [organizationId], references: [id])
+  permissions        RolePermission[]
+  users              UserRole[]
+  createdBy          User?            @relation("RoleCreator", fields: [createdByUserId], references: [id])
 
   @@unique([organizationId, code])
   @@unique([organizationId, id])
@@ -155,6 +313,10 @@ model UserRole {
   organizationId   String                 @db.Uuid
   userId           String                 @db.Uuid
   roleId           String                 @db.Uuid
+  scopeType        AssignmentScope        @default(SELF)
+  departmentId     String?                @db.Uuid
+  status           RecordStatus           @default(active)
+  expiresAt        DateTime?
   createdAt        DateTime               @default(now())
   assignedByUserId String?                @db.Uuid
   organization     Organization           @relation(fields: [organizationId], references: [id])
@@ -162,9 +324,63 @@ model UserRole {
   role             Role                   @relation(fields: [organizationId, roleId], references: [organizationId, id])
   assignedBy       User?                  @relation("AssignedRoles", fields: [assignedByUserId], references: [id])
   membership       OrganizationMembership @relation("RoleOrganizationMembership", fields: [organizationId, userId], references: [organizationId, userId])
+  department       Department?            @relation(fields: [organizationId, departmentId], references: [organizationId, id])
 
-  @@unique([organizationId, userId, roleId])
+  @@unique([organizationId, userId, roleId, scopeType, departmentId])
   @@index([organizationId, userId])
+  @@index([organizationId, departmentId, status])
+}
+
+model SystemSetting {
+  id              String   @id @default(uuid()) @db.Uuid
+  key             String   @unique
+  value           Json
+  description     String?
+  isDelegable     Boolean  @default(false)
+  updatedByUserId String?  @db.Uuid
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model OrganizationSetting {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  key            String
+  value          Json
+  description    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
+}
+
+model CustomFieldDefinition {
+  id                   String                @id @default(uuid()) @db.Uuid
+  scope                SettingScope
+  organizationId       String?               @db.Uuid
+  entityType           CustomFieldEntityType
+  key                  String
+  label                String
+  description          String?
+  dataType             CustomFieldDataType
+  required             Boolean               @default(false)
+  defaultValue         Json?
+  options              Json?
+  validation           Json?
+  visibilityPermission String?
+  editPermission       String?
+  sortOrder            Int                   @default(0)
+  status               RecordStatus          @default(active)
+  createdByUserId      String?               @db.Uuid
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  organization         Organization?         @relation(fields: [organizationId], references: [id])
+  createdBy            User?                 @relation("CustomFieldCreator", fields: [createdByUserId], references: [id])
+
+  @@unique([scope, organizationId, entityType, key])
+  @@index([scope, organizationId, entityType, status, sortOrder])
 }
 
 model AuditLog {
