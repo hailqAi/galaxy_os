@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { connection } from 'next/server';
 import type { ReactNode } from 'react';
 import './globals.css';
 import PortalShell from './portal-shell';
@@ -8,9 +9,10 @@ export const metadata: Metadata = {
   description: 'Hệ thống vận hành Galaxy Centre',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: ReactNode }>) {
+  await connection();
   return (
     <html lang="vi">
       <body>

@@ -1,5 +1,203 @@
 # Project status
 
+## Internet deployment preparation — 2026-07-22
+
+- Added production-only Next and Nest start commands bound to
+  `127.0.0.1:3000` and `127.0.0.1:3001`, loopback health checks, browser-bundle
+  leakage checks, and one systemd target with dependency ordering, restart on
+  failure, secure environment loading, and clean stop behavior. The existing
+  Docker Compose services remain private on loopback.
+- Consolidated public URL handling on `APP_PUBLIC_ORIGIN`. Production rejects
+  HTTP or path-bearing origins, `ALLOW_DEV_AUTH=true`, missing proxy trust,
+  malformed/wildcard trusted hosts, and a browser API URL other than
+  same-origin `/api/v1`. Reset mail uses only the validated public origin.
+- Host/Origin enforcement now covers the closed same-origin API forwarder and
+  protected routes. Forwarded host/protocol/client-IP values are ignored by
+  default and accepted only for the documented loopback proxy deployment;
+  ambiguous or non-HTTPS production proxy headers fail closed. Next Server
+  Actions use the same exact host allowlist and a 100 KB body ceiling.
+- Production cookies remain HttpOnly, Secure, SameSite=Lax, path `/`, and
+  host-only. Login/logout/reset remain server-session operations, reset and
+  password changes revoke sessions, credentials are redacted from errors and
+  logs, and account-wide password lockout was removed to prevent trivial
+  targeted denial of service while retaining per-client login throttling and
+  audited failures.
+- Added safe placeholder-only Cloudflare Tunnel and Caddy examples plus
+  deployment guidance for DDNS, router rules, Windows firewall, WSL
+  portproxy/IP changes, certificate prerequisites, HSTS timing, service
+  health/restart, rollback, and the explicitly non-production public-IP
+  diagnostic. No public IP, LAN/WSL address, domain, credential, or token was
+  committed.
+- Verification passed: `git diff --check`, lint, strict typecheck, format
+  check, API 58/58, web 44/44, document service 1/1, controlled HTTPS
+  production build, static client-artifact scan, and loopback production smoke
+  tests for both health endpoints, the same-origin API path, trusted forwarded
+  headers, and untrusted Host rejection. The production processes stopped
+  cleanly. Internet reachability was not claimed or tested.
+- Cloudflare/dashboard and router/firewall changes remain manual. The current
+  DMZ and public TCP 3000 mapping must be removed before deployment. No Sprint
+  2 work was started, and nothing was committed or pushed.
+
+## Development Host allowlist and Login verification — 2026-07-22
+
+- `DEV_ALLOWED_ORIGINS` is now the single development allowlist consumed by
+  both Next's `allowedDevOrigins` and request Host validation. Entries support
+  comma-separated HTTP(S) URLs, hostnames, IPv4 addresses, and optional ports;
+  normalization trims, deduplicates, lowercases hostnames, and removes ports.
+  Wildcards, malformed entries, malformed Host headers, and unconfigured Hosts
+  fail closed. Development defaults remain only `localhost` and `127.0.0.1`;
+  production accepts only the hostname from `APP_PUBLIC_ORIGIN`.
+- Next now loads the ignored repository-root `.env.local`, matching the API's
+  environment location. The current WSL Host and loopback returned HTTP 200;
+  an unconfigured Host returned HTTP 400. Fake credentials reached NestJS
+  through `/api/v1/auth/login` and returned the required generic HTTP 401.
+- Browser API calls remain same-origin `/api/v1`; the internal API remains
+  `http://127.0.0.1:3001/api/v1`. Proxy tests verify body, status, safe headers,
+  `Set-Cookie`, and no-store behavior. API authentication/session integration
+  passed with `ALLOW_DEV_AUTH=false`.
+- Diff, lint, typecheck, focused tests, full tests (API 56/56, web 40/40,
+  document service 1/1), production build, and formatting passed. The five
+  Playwright Login checks could not launch because the host lacks `libnss3.so`;
+  installing browser libraries requires unavailable sudo authorization. No
+  credential was reset or disclosed, no Sprint 2 work was started, and nothing
+  was committed or pushed.
+
+## Emergency CSP, Login, same-origin API, and LAN repair — 2026-07-22
+
+- Root cause: the sole web CSP in `apps/web/next.config.ts` used static
+  `script-src 'self'`, blocking Next.js inline bootstrap, `self.__next_r`
+  initialization, hydration, Login submission, and password-toggle handlers.
+  The unhydrated form then posted natively to the browser-visible
+  `localhost:3001`, which both violated `form-action 'self'` and could not work
+  from another LAN device.
+- Web CSP now has one owner in `proxy.ts`. Development permits the minimum
+  Next runtime exceptions (`unsafe-inline`, `unsafe-eval`, and development
+  WebSockets) without forced HTTPS. Production dynamically renders all pages,
+  creates a cryptographically random per-request nonce, applies it before
+  rendering and to the response CSP, uses `strict-dynamic`, and excludes
+  `unsafe-eval`.
+- Browser API calls now use relative `/api/v1`. A closed Next.js route handler
+  forwards allowlisted Galaxy OS paths to server-only
+  `http://127.0.0.1:3001/api/v1`, preserves method/body/status/safe headers and
+  `Set-Cookie`, enforces no-store, and returns a generic 502 on connection
+  failure. NestJS binds to `127.0.0.1:3001`; browser CORS was removed.
+- Login remains a controlled POST form with a same-origin native fallback,
+  field validation, exact generic invalid/server messages, an accessible live
+  alert, repeat-submit prevention, safe redirects, and no credential URL or
+  browser storage. Password visibility is local state with an explicit
+  `type="button"`, accurate label, `aria-pressed`, keyboard support, and value
+  preservation.
+- Next development binds `0.0.0.0:3000`. Host acceptance and Next development
+  origins use `APP_PUBLIC_ORIGIN` and `DEV_ALLOWED_ORIGINS`; only port 3000
+  needs trusted-LAN exposure. Windows firewall and WSL NAT portproxy remain
+  explicit operator configuration.
+- Browser regression passed 5/5 in development. Production browser execution
+  passed with no CSP, `self.__next_r`, or hydration errors; two HTTP requests
+  had distinct nonces and rendered scripts carried the matching nonce. Focused
+  web unit/proxy/CSP tests passed 25/25. Authentication passed 10/10 three
+  consecutive times with `ALLOW_DEV_AUTH=false`; the full suite passed API
+  56/56, web 25/25, and document service 1/1. Lint (two existing image
+  advisories), typecheck, production build, format, diff, Prisma
+  generate/validate/status, and local header/network checks passed.
+- Ponytail review found no removable complexity. The external Codex review was
+  blocked because it would disclose the private uncommitted diff to an
+  untrusted service; local correctness/security review instead fixed
+  production use of development hosts, stale Login messages, CurrentActor 401
+  classification, nested secret-bearing return paths, and cross-origin BFF
+  mutations. All checks were rerun afterward.
+- The credential previously exposed in a URL remains compromised and must be
+  rotated by the operator using the hidden-input reset workflow. No credential
+  was copied into code, tests, logs, or documentation. No Sprint 2 work was
+  started and nothing was committed or pushed.
+
+## Critical Login credential exposure remediation — 2026-07-21
+
+### Incident and root cause
+
+- A plaintext password was exposed through a browser-native GET Login request
+  and must be rotated. No credential or secret-bearing request is reproduced
+  here.
+- The Login form relied on its hydrated React submit handler but omitted an
+  explicit HTML method. Before hydration or when client JavaScript failed, the
+  browser defaulted to GET and serialized the named controls into the URL. That
+  bypassed the API call, visible error handling, session creation, and redirect.
+- A second confirmed redirect-loop cause scoped the session cookie to the API
+  path, so Next middleware could not receive it on protected page requests.
+
+### Remediation
+
+- Login is now a controlled accessible form with an explicit POST fallback to
+  the Login API. Hydrated submission prevents the native request and sends a
+  JSON body with `credentials: include`; credentials are never copied into
+  navigation state or browser storage. Repeated submission is disabled and a
+  failed attempt clears the password field.
+- `POST /api/v1/auth/login` remains the only authentication endpoint. It
+  accepts a length-bounded validated body, normalizes email, rejects all query
+  parameters, returns the same Vietnamese 401 response for unknown, inactive,
+  locked, or invalid accounts, applies the existing IP/account protections,
+  updates login state, creates an opaque hash-only server session, and writes
+  secret-free success/failure audits. GET Login API requests do not
+  authenticate.
+- The session cookie is HttpOnly, SameSite=Lax, Secure in production, has an
+  explicit expiry and root path, and has no Domain. API JSON contains no token.
+  The root path lets same-host Next middleware receive the cookie; deployments
+  must keep web and API on a shared cookie host or use a reviewed same-origin
+  proxy.
+- Login now distinguishes the required generic invalid-credential message from
+  the required safe network/server message, exposes it through an alert, clears
+  it on resubmission, and keeps it out of the URL. Required email, email format,
+  and required password errors are field-associated and visible. Session-expired
+  state is a safe query flag.
+- Successful Login reloads the current actor, sends mandatory-password-change
+  users to `/account/change-password`, validates relative permission-compatible
+  `returnTo`, rejects external and secret-bearing return paths, otherwise enters
+  the authorized portal, and refreshes protected routing.
+- Login GET accepts only `returnTo`, `reason`, and `sessionExpired`; middleware
+  removes other fields before rendering. Central API redaction now covers
+  credential-equivalent object fields, URL values, error stacks, exception
+  response paths, and audit serialization. Authentication request bodies are
+  not logged.
+- Logout remains POST-only, revokes the server session, clears the exact cookie,
+  clears frontend actor state after confirmed revocation, refreshes no-store
+  routes, and redirects to Login. Old cookies return 401 and protected routing
+  prevents cached server data from being restored.
+
+### Regression and verification
+
+- Added/expanded web regression coverage for POST-only JSON submission, URL
+  secrecy, native fallback safety, Enter-compatible form submission, password
+  input behavior, generic visible errors, safe redirects, authenticated Login
+  redirect, forced password change, and protected routing.
+- Added/expanded API coverage for GET/query rejection, generic failures,
+  session creation/current actor, HttpOnly/Secure/root-path cookie behavior,
+  hash-only storage, audit secrecy, logout cookie clearing/revocation, old-cookie
+  denial, and centralized application-log redaction.
+- Authentication integration passed 12/12 three consecutive times. Focused web
+  Login/middleware passed 11/11 three consecutive times. Full verification
+  passed API 56/56, web 19/19, and document service
+  1/1, plus diff check, format, Prisma generate/validate/status, and production
+  build. Lint and typecheck passed; lint retains two unrelated non-failing Next
+  image advisories.
+- Ponytail review found no removable complexity. Codex review found one nested
+  secret-bearing `returnTo` path; middleware now removes it before rendering.
+  Local correctness/security review also verified complete Login-query
+  rejection, error-stack redaction, and fail-closed frontend logout behavior.
+
+### Rotation status and remaining risk
+
+- Rotation is mandatory and pending operator execution of the approved hidden-
+  input `pnpm admin:reset-password` command. Automating an undisclosed password
+  would leave no operator able to use it. The command forces password change,
+  revokes sessions/reset tokens, and clears failed-login state. The compromised
+  password must not be used again.
+- Browser-developer-tools verification with the operator-known replacement
+  password remains pending. Automated integration verifies the same POST,
+  cookie, current-actor, forced-change, logout, and old-session denial flow.
+- Shared-host cookie deployment must be verified outside localhost. The existing
+  process-local Login limiter remains development-only and must move to shared
+  storage before multi-instance deployment. No Sprint 2 work was started and
+  nothing was committed or pushed.
+
 ## Sprint 1 security audit — 2026-07-21
 
 ### Assessment and threat model
@@ -265,3 +463,9 @@ Complete. No dependency was added. Confirmed necessary code retained: direct Pri
 ## Next recommended sprint
 
 Sprint 2: customers, contacts, leads, opportunities, projects, project members, tasks, and milestones, reusing the Sprint 1 `CurrentActor`, organization scope, RBAC, audit, migration, and Settings patterns.
+
+## Node TLS edge — 2026-07-22
+
+- Added the standalone `@galaxy/edge` TypeScript workspace package: HTTP ACME/redirect service, optional Node TLS 1.2+ termination, strict Host validation, local readiness with upstream status, HTTP/WebSocket proxying, fixed forwarding headers, safe 502 handling, structured metadata-only logs, and graceful shutdown.
+- Added the ignored edge environment contract, runtime-path ignores, root edge scripts, and hardened non-root `infra/systemd/galaxy-edge.service` template. Router, Windows portproxy, certificates, secrets, and Sprint 2 remain untouched.
+- `pnpm install` and `pnpm edge:check` passed; the socket tests required permission to bind temporary loopback listeners in the managed verification sandbox.

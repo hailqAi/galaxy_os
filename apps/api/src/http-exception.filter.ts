@@ -6,6 +6,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { redact } from './security-redaction';
 
 type HttpRequest = { url: string };
 type HttpResponse = {
@@ -40,7 +41,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       statusCode: status,
       error: HttpStatus[status] ?? 'Error',
       message,
-      path: request.url,
+      path: redact(request.url),
       timestamp: new Date().toISOString(),
     });
   }

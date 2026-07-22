@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { CurrentActor } from '../access-control/current-actor';
 import { PrismaService } from '../prisma.service';
+import { redact } from '../security-redaction';
 
 type AuditInput = {
   action: string;
@@ -15,7 +16,7 @@ type AuditInput = {
 const json = (value: unknown) =>
   value === undefined
     ? undefined
-    : (JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue);
+    : (redact(JSON.parse(JSON.stringify(value))) as Prisma.InputJsonValue);
 
 @Injectable()
 export class AuditService {

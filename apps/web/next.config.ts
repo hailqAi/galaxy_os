@@ -1,15 +1,24 @@
+import { loadEnvConfig } from '@next/env';
 import type { NextConfig } from 'next';
+import { resolve } from 'node:path';
+import {
+  developmentHosts,
+  publicHosts,
+  validateProductionEnvironment,
+} from './host-config';
 
-const apiOrigin = new URL(
-  process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1',
-).origin;
+loadEnvConfig(
+  resolve(process.cwd(), '../..'),
+  process.env.NODE_ENV !== 'production',
+  console,
+  true,
+);
+validateProductionEnvironment();
+
 const headers = [
   { key: 'Cache-Control', value: 'no-store' },
-  {
-    key: 'Content-Security-Policy',
-    value: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ${apiOrigin}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`,
-  },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
+  { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'Referrer-Policy', value: 'no-referrer' },
   {
     key: 'Permissions-Policy',
@@ -18,6 +27,17 @@ const headers = [
 ];
 
 const config: NextConfig = {
+  poweredByHeader: false,
+  allowedDevOrigins: developmentHosts(),
+  experimental: {
+    serverActions: {
+      allowedOrigins:
+        process.env.NODE_ENV === 'production'
+          ? publicHosts()
+          : developmentHosts(),
+      bodySizeLimit: '100kb',
+    },
+  },
   async headers() {
     return [{ source: '/(.*)', headers }];
   },

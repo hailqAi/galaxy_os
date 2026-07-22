@@ -9,6 +9,12 @@ Galaxy OS is Galaxy Centre's internal operating platform. Sprint 1 provides hier
 - `services/document-ai`: inactive FastAPI health placeholder reserved for Sprint 14
 - PostgreSQL: system of record; Redis: local infrastructure only, unused by application code
 
+Browsers use the same-origin `/api/v1` path on the web application. Next.js
+forwards only approved Galaxy OS API paths to the private server-only
+`INTERNAL_API_URL` (default `http://127.0.0.1:3001/api/v1`) and preserves
+session cookies. Keep browser-facing `NEXT_PUBLIC_API_URL=/api/v1`; never put
+the internal API URL in a `NEXT_PUBLIC_` variable.
+
 See [system context](docs/architecture/system-context.md), [data principles](docs/architecture/data-principles.md), and [roadmap](docs/roadmap.md).
 
 ## Prerequisites on WSL
@@ -51,9 +57,19 @@ pnpm --filter @galaxy/web dev
 pnpm --filter @galaxy/api dev
 ```
 
-Web: <http://localhost:3000>. Web health: <http://localhost:3000/health>. API health: <http://localhost:3001/api/v1/health>. API readiness: <http://localhost:3001/api/v1/ready>. Swagger: <http://localhost:3001/docs>.
+Web: <http://localhost:3000>. Web health: <http://localhost:3000/health>.
+The API and Swagger remain loopback-only on port 3001; normal browser traffic
+uses <http://localhost:3000/api/v1/health> and the other same-origin API paths.
 
-Mailpit receives local password-reset mail on SMTP port 1025; inspect it at <http://localhost:8025>. Production must configure the trusted `APP_BASE_URL`, SMTP settings, and `EMAIL_FROM`. Reset tokens are hashed, expiring, single-use, and revoke all sessions when consumed.
+Mailpit receives local password-reset mail on SMTP port 1025; inspect it at <http://localhost:8025>. Production must configure the trusted `APP_PUBLIC_ORIGIN`, SMTP settings, and `EMAIL_FROM`. Reset tokens are hashed, expiring, single-use, and revoke all sessions when consumed.
+
+## Internet deployment
+
+Do not expose the development server or public ports 3000/3001. The supported
+production server, Cloudflare Tunnel recommendation, Caddy/DDNS alternative,
+systemd persistence, router/firewall changes, temporary non-production
+connectivity diagnostic, and rollback steps are in
+[Internet deployment](docs/internet-deployment.md).
 
 Administration combines effective permissions with `SYSTEM`, `ORGANIZATION`, `DEPARTMENT`, or `SELF` role-assignment scope. Department authority additionally requires an explicit active managed-unit assignment; ordinary membership is never authority. A shared backend target policy enforces tenant/unit scope, protected/equal authority, assignment-scope ceilings, and delegable permission subsets.
 
@@ -62,6 +78,38 @@ Administration combines effective permissions with `SYSTEM`, `ORGANIZATION`, `DE
 Users administration lives at `/settings/users`. Its server-paginated summary list returns only concise identity, status, role/department summaries, and allowed actions. View, Edit, and Create use separate routes; capabilities, sessions, and audit history load only when their detail tab or drawer is opened. Disabling is the retention-safe removal policy and revokes active sessions; Sprint 1 intentionally exposes no hard-delete route.
 
 Open <http://localhost:3000/login>. Protected web routes validate `/api/v1/me` before rendering, preserve only safe relative return paths, and redirect unauthorized deep links to `/forbidden`. Cookie-authenticated mutations use `SameSite=Lax` plus origin validation; cross-origin local requests send credentials explicitly.
+
+The Login form has a same-origin POST fallback when JavaScript is unavailable.
+Development CSP permits only the inline/eval/WebSocket exceptions required by
+the Next.js development runtime. Production uses a unique per-request nonce,
+dynamic rendering, and no `unsafe-eval`; local HTTP does not enable HSTS,
+Secure cookies, or `upgrade-insecure-requests`.
+
+## Trusted private LAN access
+
+The web development server listens on `0.0.0.0:3000`; NestJS listens on
+`127.0.0.1:3001`. Set `APP_PUBLIC_ORIGIN` to the URL users will open and add
+the corresponding hostname or IP to comma-separated `DEV_ALLOWED_ORIGINS`.
+Only TCP port 3000 should be exposed to the trusted private LAN. Never expose
+PostgreSQL, Redis, or port 3001 for this architecture.
+
+Run PowerShell as Administrator to allow the web port on the Private profile:
+
+```powershell
+New-NetFirewallRule -DisplayName "Galaxy OS Web 3000" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 3000 -Profile Private
+```
+
+If WSL uses NAT and the LAN cannot reach it directly, obtain the WSL address
+with `wsl hostname -I`, then run this in Administrator PowerShell (replace the
+placeholder with that address):
+
+```powershell
+netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=3000 connectaddress=<WSL_IP> connectport=3000
+```
+
+Another trusted device then opens `http://<WINDOWS_LAN_IP>:3000`. Windows
+firewall/portproxy changes are operator actions; this repository does not make
+them automatically.
 
 The document placeholder is optional and outside the ERP runtime:
 
@@ -113,6 +161,13 @@ The default protected account is `admin@galaxy.local`, role `system_admin`, scop
 - API readiness returns 503: check `docker compose ps`, then confirm `DATABASE_URL` matches the Compose values.
 - Prisma Client missing: run `pnpm db:generate`.
 - Stale Next output: remove `apps/web/.next` and rebuild; it is generated and ignored.
+- Browser tests need Chromium and its host libraries: run
+  `pnpm --filter @galaxy/web exec playwright install chromium`, then
+  `pnpm --filter @galaxy/web test:browser`.
+
+Any password previously exposed in a Login URL is compromised and must be
+rotated with the documented hidden-input reset command after this flow is
+repaired. Never reuse or record that password.
 
 ## Repository structure
 

@@ -58,7 +58,7 @@ export class EmailService {
   }
 
   passwordReset(email: string, rawToken: string) {
-    const link = `${readEnvironment().APP_BASE_URL}/reset-password?token=${encodeURIComponent(rawToken)}`;
+    const link = `${readEnvironment().APP_PUBLIC_ORIGIN}/reset-password?token=${encodeURIComponent(rawToken)}`;
     return this.send(
       email,
       'Reset your Galaxy OS password',

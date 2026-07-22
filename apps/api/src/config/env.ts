@@ -27,9 +27,12 @@ const environmentSchema = z
       .min(1024)
       .max(2_097_152)
       .default(2_097_152),
-    WEB_ORIGIN: z.string().url().default('http://localhost:3000'),
+    APP_PUBLIC_ORIGIN: z.string().url().default('http://localhost:3000'),
+    TRUST_PROXY: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((value) => value === 'true'),
     PASSWORD_BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(14).default(12),
-    APP_BASE_URL: z.string().url().default('http://localhost:3000'),
     PASSWORD_RESET_TTL_MINUTES: z.coerce
       .number()
       .int()
@@ -57,18 +60,27 @@ const environmentSchema = z
   .refine(
     (environment) =>
       environment.NODE_ENV !== 'production' ||
-      (environment.WEB_ORIGIN.startsWith('https://') &&
-        environment.APP_BASE_URL.startsWith('https://')),
+      (environment.APP_PUBLIC_ORIGIN.startsWith('https://') &&
+        new URL(environment.APP_PUBLIC_ORIGIN).origin ===
+          environment.APP_PUBLIC_ORIGIN),
     {
-      message: 'Production web and application URLs must use HTTPS',
-      path: ['WEB_ORIGIN'],
+      message: 'Production APP_PUBLIC_ORIGIN must use HTTPS',
+      path: ['APP_PUBLIC_ORIGIN'],
+    },
+  )
+  .refine(
+    (environment) =>
+      environment.NODE_ENV !== 'production' || environment.TRUST_PROXY,
+    {
+      message: 'TRUST_PROXY must be enabled in production',
+      path: ['TRUST_PROXY'],
     },
   )
   .refine(
     (environment) =>
       environment.NODE_ENV !== 'production' ||
       (!['localhost', '127.0.0.1'].includes(environment.SMTP_HOST) &&
-        !environment.APP_BASE_URL.includes('localhost') &&
+        !environment.APP_PUBLIC_ORIGIN.includes('localhost') &&
         !environment.EMAIL_FROM.endsWith('@galaxy.local')),
     {
       message:

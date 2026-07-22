@@ -1,0 +1,7 @@
+[Unit]
+Description=Galaxy OS production services
+Requires=galaxy-os-api.service galaxy-os-web.service
+After=galaxy-os-api.service galaxy-os-web.service
+
+[Install]
+WantedBy=default.target

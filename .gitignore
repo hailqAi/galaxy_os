@@ -1,11 +1,17 @@
 .env
 .env.local
+.env.production
 !.env.example
 .next/
 coverage/
+playwright-report/
+test-results/
 dist/
 node_modules/
 *.log
+infra/cloudflare/*.json
+infra/cloudflare/*.pem
+infra/cloudflare/config.yml
 *.tsbuildinfo
 __pycache__/
 .pytest_cache/
@@ -14,3 +20,5 @@ __pycache__/
 venv/
 *.pyc
 .local/
+.runtime/
+.env.edge

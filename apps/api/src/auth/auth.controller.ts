@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Inject,
   Param,
@@ -30,9 +31,11 @@ export class AuthController {
 
   @Public() @Post('login') async login(
     @Body() input: LoginDto,
-    @Req() request: { ip?: string },
+    @Req() request: { ip?: string; query?: Record<string, unknown> },
     @Res({ passthrough: true }) response: CookieResponse,
   ) {
+    if (Object.keys(request.query ?? {}).length)
+      throw new BadRequestException('Login query parameters are not allowed');
     const result = await this.auth.login(
       input.email,
       input.password,
@@ -43,7 +46,7 @@ export class AuthController {
       httpOnly: true,
       sameSite: 'lax',
       secure: env.NODE_ENV === 'production',
-      path: '/api/v1',
+      path: '/',
       expires: result.expiresAt,
     });
     return { authenticated: true };
@@ -59,7 +62,7 @@ export class AuthController {
       httpOnly: true,
       sameSite: 'lax',
       secure: env.NODE_ENV === 'production',
-      path: '/api/v1',
+      path: '/',
     });
     return { authenticated: false };
   }
@@ -80,7 +83,7 @@ export class AuthController {
       httpOnly: true,
       sameSite: 'lax',
       secure: env.NODE_ENV === 'production',
-      path: '/api/v1',
+      path: '/',
     });
     return { changed: true, loginRequired: true };
   }

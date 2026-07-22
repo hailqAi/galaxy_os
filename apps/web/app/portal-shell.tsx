@@ -37,7 +37,7 @@ export default function PortalShell({ children }: { children: ReactNode }) {
     .join('')
     .toUpperCase();
   async function logout() {
-    await api('/auth/logout', { method: 'POST' }).catch(() => undefined);
+    await api('/auth/logout', { method: 'POST' });
     setActor(undefined);
     router.replace('/login');
     router.refresh();
