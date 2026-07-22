@@ -1,5 +1,13 @@
-export const apiUrl =
-  process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1';
+export const apiUrl = '/api/v1';
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiUrl}${path}`, {
@@ -17,10 +25,11 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     const body = (await response.json().catch(() => null)) as {
       message?: string | string[];
     } | null;
-    throw new Error(
+    throw new ApiError(
       Array.isArray(body?.message)
         ? body.message.join(', ')
         : (body?.message ?? `HTTP ${response.status}`),
+      response.status,
     );
   }
   return response.json() as Promise<T>;

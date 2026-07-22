@@ -1,15 +1,22 @@
-import { ConsoleLogger, ValidationPipe } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { readEnvironment } from './config/env';
 import { HttpExceptionFilter } from './http-exception.filter';
+import { SecurityLogger } from './security-redaction';
 
 async function bootstrap() {
   const environment = readEnvironment();
   const app = await NestFactory.create(AppModule, {
-    logger: new ConsoleLogger({ json: true }),
+    logger: new SecurityLogger({ json: true }),
   });
+  if (environment.TRUST_PROXY)
+    (
+      app.getHttpAdapter().getInstance() as {
+        set(name: string, value: string): void;
+      }
+    ).set('trust proxy', 'loopback');
 
   app.setGlobalPrefix('api/v1');
   app.useGlobalFilters(new HttpExceptionFilter());
@@ -46,8 +53,6 @@ async function bootstrap() {
       next();
     },
   );
-  app.enableCors({ origin: environment.WEB_ORIGIN, credentials: true });
-
   const swagger = new DocumentBuilder()
     .setTitle('Galaxy OS ERP API')
     .setDescription('Internal REST API for Galaxy Centre operations')
@@ -55,7 +60,7 @@ async function bootstrap() {
     .build();
   SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swagger));
 
-  await app.listen(environment.API_PORT);
+  await app.listen(environment.API_PORT, '127.0.0.1');
 }
 
 void bootstrap();

@@ -15,7 +15,8 @@ import { PrismaService } from '../prisma.service';
 import { UserManagementPolicy } from '../access-control/user-management.policy';
 import { EmailService } from './email.service';
 
-const invalid = () => new UnauthorizedException('Invalid email or password');
+const invalid = () =>
+  new UnauthorizedException('Email hoặc mật khẩu không đúng.');
 const tokenHash = (token: string) =>
   createHash('sha256').update(token).digest('hex');
 const forgotAttempts = new Map<string, number[]>();
@@ -31,12 +32,11 @@ export class AuthService {
   ) {}
 
   async login(emailInput: string, password: string, requestIp = 'unknown') {
-    this.checkRate(
-      loginAttempts,
-      `ip:${requestIp}`,
-      30,
-      'Too many login attempts',
-    );
+    try {
+      this.checkRate(loginAttempts, `ip:${requestIp}`, 30, 'rate limited');
+    } catch {
+      throw invalid();
+    }
     const normalizedEmail = emailInput.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({
       where: { normalizedEmail },
@@ -49,17 +49,14 @@ export class AuthService {
       },
     });
     const credential = user?.credential;
-    const locked =
-      credential?.lockedUntil && credential.lockedUntil > new Date();
     if (
       !user ||
       user.status !== 'active' ||
       !credential ||
-      locked ||
       Buffer.byteLength(password) > 72 ||
       !(await compare(password, credential.passwordHash).catch(() => false))
     ) {
-      if (user && credential && !locked) {
+      if (user && credential) {
         const membership = user.organizationMembers[0];
         await this.failedLogin(
           user.id,
@@ -471,8 +468,7 @@ export class AuthService {
         where: { userId },
         data: {
           failedLoginCount,
-          lockedUntil:
-            failedLoginCount >= 5 ? new Date(Date.now() + 15 * 60_000) : null,
+          lockedUntil: null,
         },
       });
       if (membershipId && organizationId && email && displayName)

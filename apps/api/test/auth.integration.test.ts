@@ -2,6 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { Test } from '@nestjs/testing';
 import { hash } from 'bcryptjs';
+import { randomBytes } from 'node:crypto';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module';
@@ -14,8 +15,8 @@ process.env.PASSWORD_BCRYPT_ROUNDS = '4';
 describe.sequential('real authentication and personal account', () => {
   const prisma = new PrismaClient();
   const email = `auth-${Date.now()}@galaxy.local`;
-  const oldPassword = 'Temporary password 123';
-  const newPassword = 'Permanent passphrase 456';
+  const oldPassword = randomBytes(24).toString('base64url');
+  const newPassword = randomBytes(24).toString('base64url');
   let app: INestApplication;
   let userId: string;
   let cookie: string;
@@ -88,27 +89,46 @@ describe.sequential('real authentication and personal account', () => {
       .expect(401);
     const invalid = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
-      .send({ email, password: 'wrong password' })
+      .send({ email, password: randomBytes(24).toString('base64url') })
       .expect(401);
-    expect(unknown.body.message).toBe('Invalid email or password');
+    expect(unknown.body.message).toBe('Email hoặc mật khẩu không đúng.');
     expect(invalid.body.message).toBe(unknown.body.message);
     for (let attempt = 0; attempt < 4; attempt++)
       await request(app.getHttpServer())
         .post('/api/v1/auth/login')
-        .send({ email, password: 'wrong password' })
+        .send({ email, password: randomBytes(24).toString('base64url') })
         .expect(401);
     await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .send({ email, password: oldPassword })
-      .expect(401);
+      .expect(201);
     expect(
       (await prisma.passwordCredential.findUniqueOrThrow({ where: { userId } }))
         .lockedUntil,
-    ).not.toBeNull();
+    ).toBeNull();
+    const audit = await prisma.auditLog.findFirstOrThrow({
+      where: { actorUserId: userId, action: 'auth.login.failure' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(JSON.stringify(audit)).not.toContain(oldPassword);
+    expect(JSON.stringify(audit)).not.toContain('passwordHash');
     await prisma.passwordCredential.update({
       where: { userId },
       data: { failedLoginCount: 0, lockedUntil: null },
     });
+    await prisma.session.deleteMany({ where: { userId } });
+  });
+
+  it('does not authenticate through GET or query-string credentials', async () => {
+    await request(app.getHttpServer()).get('/api/v1/auth/login').expect(404);
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .query({ password: 'query-value' })
+      .send({ email, password: oldPassword })
+      .expect(400);
+    expect(
+      await prisma.session.count({ where: { userId, revokedAt: null } }),
+    ).toBe(0);
   });
 
   it('rejects cross-site authentication mutations', async () => {
@@ -129,7 +149,7 @@ describe.sequential('real authentication and personal account', () => {
     const setCookie = login.headers['set-cookie'] as unknown as string[];
     expect(setCookie[0]).toContain('HttpOnly');
     expect(setCookie[0]).toContain('SameSite=Lax');
-    expect(setCookie[0]).toContain('Path=/api/v1');
+    expect(setCookie[0]).toContain('Path=/');
     cookie = setCookie[0]!.split(';')[0]!;
     const me = await request(app.getHttpServer())
       .get('/api/v1/me')
@@ -138,6 +158,11 @@ describe.sequential('real authentication and personal account', () => {
     expect(me.body.mustChangePassword).toBe(true);
     expect(me.body.email).toBe(email);
     expect(me.body).not.toHaveProperty('passwordHash');
+    expect(JSON.stringify(me.body)).not.toContain('password');
+    expect(
+      (await prisma.user.findUniqueOrThrow({ where: { id: userId } }))
+        .lastLoginAt,
+    ).not.toBeNull();
     await request(app.getHttpServer())
       .get('/api/v1/organization')
       .set('Cookie', cookie)
@@ -231,8 +256,8 @@ describe.sequential('real authentication and personal account', () => {
       .set('Cookie', cookie)
       .expect(401);
     process.env.NODE_ENV = 'production';
-    process.env.WEB_ORIGIN = 'https://galaxy.example';
-    process.env.APP_BASE_URL = 'https://galaxy.example';
+    process.env.APP_PUBLIC_ORIGIN = 'https://galaxy.example';
+    process.env.TRUST_PROXY = 'true';
     process.env.SMTP_HOST = 'smtp.example';
     process.env.EMAIL_FROM = 'no-reply@galaxy.example';
     const login = await request(app.getHttpServer())
@@ -246,10 +271,16 @@ describe.sequential('real authentication and personal account', () => {
   });
 
   it('logout revokes the session and a disabled user cannot reuse one', async () => {
-    await request(app.getHttpServer())
+    const logout = await request(app.getHttpServer())
       .post('/api/v1/auth/logout')
       .set('Cookie', cookie)
       .expect(201);
+    const clearedCookie = (
+      logout.headers['set-cookie'] as unknown as string[]
+    )[0];
+    expect(clearedCookie).toContain('Path=/');
+    expect(clearedCookie).toContain('HttpOnly');
+    expect(clearedCookie).toContain('SameSite=Lax');
     await request(app.getHttpServer())
       .get('/api/v1/me')
       .set('Cookie', cookie)
@@ -266,11 +297,27 @@ describe.sequential('real authentication and personal account', () => {
       data: { status: 'disabled' },
     });
     await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email, password: newPassword })
+      .expect(401);
+    await request(app.getHttpServer())
       .get('/api/v1/me')
       .set('Cookie', freshCookie)
       .expect(401);
     await prisma.user.update({
       where: { id: userId },
+      data: { status: 'active' },
+    });
+    await prisma.organizationMembership.updateMany({
+      where: { userId },
+      data: { status: 'disabled' },
+    });
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email, password: newPassword })
+      .expect(401);
+    await prisma.organizationMembership.updateMany({
+      where: { userId },
       data: { status: 'active' },
     });
   });
@@ -305,7 +352,7 @@ describe.sequential('real authentication and personal account', () => {
     const oldCookie = (
       login.headers['set-cookie'] as unknown as string[]
     )[0]!.split(';')[0]!;
-    const recovered = 'Recovered passphrase 789';
+    const recovered = randomBytes(24).toString('base64url');
     await request(app.getHttpServer())
       .post('/api/v1/auth/reset-password')
       .send({

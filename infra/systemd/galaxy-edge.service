@@ -1,0 +1,31 @@
+[Unit]
+Description=Galaxy OS Node TLS edge
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=GALAXY_USER
+Group=GALAXY_GROUP
+WorkingDirectory=GALAXY_ROOT
+Environment=NODE_ENV=production
+EnvironmentFile=/home/galaxy_os/.env.edge
+ExecStart=/usr/bin/node GALAXY_ROOT/apps/edge/dist/main.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/galaxy_os/.runtime
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

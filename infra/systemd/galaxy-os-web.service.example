@@ -1,0 +1,16 @@
+[Unit]
+Description=Galaxy OS web
+After=galaxy-os-api.service
+Requires=galaxy-os-api.service
+
+[Service]
+Type=simple
+WorkingDirectory=<REPOSITORY_PATH>
+EnvironmentFile=<REPOSITORY_PATH>/.env.production
+ExecStart=<PNPM_PATH> --filter @galaxy/web start
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=galaxy-os.target

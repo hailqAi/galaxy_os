@@ -35,7 +35,7 @@ export class DevelopmentAuthGuard implements CanActivate {
     const headers = request.headers ?? {};
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method ?? 'GET')) {
       const origin = headers.origin;
-      if (origin && origin !== environment.WEB_ORIGIN)
+      if (origin && origin !== environment.APP_PUBLIC_ORIGIN)
         throw new ForbiddenException('Invalid request origin');
     }
     if (

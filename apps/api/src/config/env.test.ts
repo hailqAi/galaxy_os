@@ -20,6 +20,26 @@ describe('readEnvironment', () => {
     ).toThrow('Development authentication cannot be enabled in production');
   });
 
+  it('requires an HTTPS public origin in production', () => {
+    expect(() =>
+      readEnvironment({
+        ...database,
+        NODE_ENV: 'production',
+        APP_PUBLIC_ORIGIN: 'http://os.example.com',
+      }),
+    ).toThrow('Production APP_PUBLIC_ORIGIN must use HTTPS');
+  });
+
+  it('requires explicit proxy trust in production', () => {
+    expect(() =>
+      readEnvironment({
+        ...database,
+        NODE_ENV: 'production',
+        APP_PUBLIC_ORIGIN: 'https://os.example.com',
+      }),
+    ).toThrow('TRUST_PROXY must be enabled in production');
+  });
+
   it('enables development authentication only when explicitly true', () => {
     expect(
       readEnvironment({ ...database, ALLOW_DEV_AUTH: 'true' }).ALLOW_DEV_AUTH,
@@ -44,6 +64,7 @@ describe('readEnvironment', () => {
       NODE_ENV: 'development',
       ALLOW_DEV_AUTH: false,
       DEV_AUTH_USER_EMAIL: 'admin@galaxy.local',
+      TRUST_PROXY: false,
     });
   });
 });

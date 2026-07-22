@@ -8,6 +8,7 @@
     "test": "vitest run",
     "build": "nest build",
     "start": "node dist/main.js",
+    "start:production": "node --env-file=../../.env.production dist/main.js",
     "admin:reset-password": "node --env-file-if-exists=../../.env.local scripts/reset-admin-password.mjs",
     "prisma:generate": "node --env-file-if-exists=../../.env.local node_modules/prisma/build/index.js generate --schema prisma/schema.prisma",
     "prisma:validate": "node --env-file-if-exists=../../.env.local node_modules/prisma/build/index.js validate --schema prisma/schema.prisma",

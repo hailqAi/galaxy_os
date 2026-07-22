@@ -1,0 +1,17 @@
+[Unit]
+Description=Galaxy OS API
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=<REPOSITORY_PATH>
+EnvironmentFile=<REPOSITORY_PATH>/.env.production
+ExecStartPre=/usr/bin/docker compose up -d postgres redis
+ExecStart=<PNPM_PATH> --filter @galaxy/api start
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=galaxy-os.target

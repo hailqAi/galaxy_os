@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { compare, hash } from 'bcryptjs';
 import { spawnSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -9,7 +9,7 @@ describe.sequential('admin:reset-password', () => {
   const prisma = new PrismaClient();
   const repositoryRoot = resolve(__dirname, '../../..');
   const email = `reset-admin-${Date.now()}@galaxy.local`;
-  const temporaryPassword = 'Temporary admin passphrase 123';
+  const temporaryPassword = randomBytes(24).toString('base64url');
   let userId: string;
   let membershipId: string;
   let roleIds: string[];
@@ -72,7 +72,7 @@ describe.sequential('admin:reset-password', () => {
         scopeType: 'SYSTEM',
       },
     });
-    previousHash = await hash('Previous administrator password', 4);
+    previousHash = await hash(randomBytes(24).toString('base64url'), 4);
     await prisma.passwordCredential.create({
       data: {
         userId,

@@ -11,7 +11,7 @@ services:
       timeout: 5s
       retries: 10
     ports:
-      - '${POSTGRES_PORT:-5432}:5432'
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
     volumes:
       - galaxy_postgres_data:/var/lib/postgresql/data
 
@@ -24,15 +24,15 @@ services:
       timeout: 5s
       retries: 10
     ports:
-      - '${REDIS_PORT:-6379}:6379'
+      - '127.0.0.1:${REDIS_PORT:-6379}:6379'
     volumes:
       - galaxy_redis_data:/data
 
   mailpit:
     image: axllent/mailpit:v1.30.0
     ports:
-      - '${MAILPIT_SMTP_PORT:-1025}:1025'
-      - '${MAILPIT_WEB_PORT:-8025}:8025'
+      - '127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025'
+      - '127.0.0.1:${MAILPIT_WEB_PORT:-8025}:8025'
 
 volumes:
   galaxy_postgres_data:
