@@ -13,6 +13,20 @@ import { AuthModule } from './auth/auth.module';
 import { MeService } from './me.service';
 import { SettingsModule } from './settings/settings.module';
 import { CustomFieldsModule } from './custom-fields/custom-fields.module';
+import { CustomersModule } from './customers/customers.module';
+import { LeadsModule } from './leads/leads.module';
+import { OpportunitiesModule } from './opportunities/opportunities.module';
+import { ProjectsModule } from './projects/projects.module';
+import { TasksModule } from './tasks/tasks.module';
+import { DiscoveryModule } from './discovery/discovery.module';
+import { FilesModule } from './files/files.module';
+import { CommentsModule } from './comments/comments.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { ActivitiesModule } from './activities/activities.module';
+import { DashboardModule } from './dashboard/dashboard.module';
+import { SearchModule } from './search/search.module';
+import { ImportsModule } from './imports/imports.module';
+import { MarketingModule } from './marketing/marketing.module';
 
 @Module({
   imports: [
@@ -26,6 +40,20 @@ import { CustomFieldsModule } from './custom-fields/custom-fields.module';
     PermissionsModule,
     SettingsModule,
     CustomFieldsModule,
+    CustomersModule,
+    LeadsModule,
+    OpportunitiesModule,
+    ProjectsModule,
+    TasksModule,
+    DiscoveryModule,
+    FilesModule,
+    CommentsModule,
+    NotificationsModule,
+    ActivitiesModule,
+    DashboardModule,
+    SearchModule,
+    ImportsModule,
+    MarketingModule,
   ],
   controllers: [HealthController, MeController],
   providers: [PrismaService, MeService],

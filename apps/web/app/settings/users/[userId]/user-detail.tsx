@@ -1,10 +1,12 @@
 'use client';
 
 import Link from 'next/link';
+import * as React from 'react';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { Actor, api } from '../../../lib/api';
+import { normalizeAccessPreview } from './access-preview';
 
-type User = {
+export type User = {
   id: string;
   email: string;
   displayName: string;
@@ -110,14 +112,11 @@ export function UserDetail({
     }
   }, [edit, userId]);
   useEffect(() => {
-    // Initial detail belongs to this route effect; section saves reuse the loader.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
+    const timeout = setTimeout(() => void load(), 0);
+    return () => clearTimeout(timeout);
   }, [load]);
   useEffect(() => {
-    // Reset the previous tab payload before its independent request starts.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLazy(null);
+    const timeout = setTimeout(() => setLazy(null), 0);
     const path =
       tab === 'capabilities'
         ? 'capabilities'
@@ -130,14 +129,19 @@ export function UserDetail({
               : tab === 'custom-fields'
                 ? null
                 : null;
-    if (path)
-      api(`/users/${userId}/${path}`)
-        .then(setLazy)
-        .catch((error: Error) => setLazy({ error: error.message }));
-    if (tab === 'custom-fields')
-      api('/custom-fields?entityType=USER')
-        .then(setLazy)
-        .catch((error: Error) => setLazy({ error: error.message }));
+    const request = path
+      ? api(`/users/${userId}/${path}`)
+      : tab === 'custom-fields'
+        ? api('/custom-fields?entityType=USER')
+        : null;
+    let current = true;
+    void request
+      ?.then((value) => current && setLazy(value))
+      .catch((error: Error) => current && setLazy({ error: error.message }));
+    return () => {
+      clearTimeout(timeout);
+      current = false;
+    };
   }, [tab, userId]);
   if (!user)
     return (
@@ -298,7 +302,7 @@ function Item({
   );
 }
 
-function ViewTab({
+export function ViewTab({
   user,
   tab,
   data,
@@ -442,9 +446,27 @@ function ViewTab({
       </>
     );
   if (!data) return <p role="status">Đang tải dữ liệu riêng cho tab này…</p>;
-  if ('error' in (data as object))
-    return <p role="alert">{(data as { error: string }).error}</p>;
-  if (tab === 'capabilities')
+  if (typeof data !== 'object')
+    return <p role="alert">Dữ liệu của tab không hợp lệ.</p>;
+  if ('error' in data) return <p role="alert">{String(data.error)}</p>;
+  if (tab === 'capabilities') {
+    const capabilities = (data as { capabilities?: unknown }).capabilities;
+    if (
+      !Array.isArray(capabilities) ||
+      capabilities.some(
+        (item) =>
+          !item ||
+          typeof item !== 'object' ||
+          !Array.isArray((item as { sourceRoles?: unknown }).sourceRoles),
+      )
+    )
+      return <p role="alert">Dữ liệu quyền hạn không hợp lệ.</p>;
+    const items = capabilities as {
+      key: string;
+      module: string;
+      sourceRoles: { name: string }[];
+      scope: string;
+    }[];
     return (
       <>
         <h2 className="text-lg font-semibold">Quyền hạn hiệu lực</h2>
@@ -458,16 +480,7 @@ function ViewTab({
             </tr>
           </thead>
           <tbody>
-            {(
-              data as {
-                capabilities: {
-                  key: string;
-                  module: string;
-                  sourceRoles: { name: string }[];
-                  scope: string;
-                }[];
-              }
-            ).capabilities.map((item) => (
+            {items.map((item) => (
               <tr key={item.key}>
                 <td>
                   <code>{item.key}</code>
@@ -485,16 +498,10 @@ function ViewTab({
           )}
       </>
     );
+  }
   if (tab === 'access-preview') {
-    const preview = data as {
-      scope: string;
-      visibleModules: string[];
-      visibleDepartmentIds: string[];
-      manageableUsers: number;
-      effectivePermissions: string[];
-      deniedPermissions: string[];
-    };
-    return (
+    const preview = normalizeAccessPreview(data);
+    return preview ? (
       <>
         <h2 className="text-lg font-semibold">Xem trước truy cập</h2>
         <dl className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -502,60 +509,83 @@ function ViewTab({
           <Item label="Người dùng có thể quản lý">
             {preview.manageableUsers}
           </Item>
-          <Item label="Mô-đun">{preview.visibleModules.join(', ')}</Item>
+          <Item label="Mô-đun">
+            {preview.visibleModules.join(', ') || 'Không có'}
+          </Item>
           <Item label="Đơn vị hiển thị">
-            {preview.visibleDepartmentIds.length}
+            {preview.visibleDepartmentIds.length || 'Không có'}
           </Item>
         </dl>
         <h3 className="mt-5 font-semibold">Quyền hiệu lực</h3>
         <p className="mt-2 text-sm">
-          {preview.effectivePermissions.join(', ')}
+          {preview.effectivePermissions.join(', ') || 'Không có'}
         </p>
         <h3 className="mt-5 font-semibold">Quyền không được cấp</h3>
         <p className="mt-2 text-sm text-black/60">
-          {preview.deniedPermissions.join(', ')}
+          {preview.deniedPermissions.join(', ') || 'Không có'}
         </p>
       </>
+    ) : (
+      <p role="alert">Dữ liệu xem trước truy cập không hợp lệ.</p>
     );
   }
-  if (tab === 'custom-fields')
+  if (tab === 'custom-fields') {
+    if (
+      !Array.isArray(data) ||
+      data.some(
+        (field) =>
+          !field ||
+          typeof field !== 'object' ||
+          typeof (field as { id?: unknown }).id !== 'string' ||
+          typeof (field as { label?: unknown }).label !== 'string' ||
+          typeof (field as { key?: unknown }).key !== 'string' ||
+          typeof (field as { dataType?: unknown }).dataType !== 'string' ||
+          typeof (field as { required?: unknown }).required !== 'boolean',
+      )
+    )
+      return <p role="alert">Dữ liệu trường tùy chỉnh không hợp lệ.</p>;
+    const fields = data as {
+      id: string;
+      label: string;
+      key: string;
+      dataType: string;
+      required: boolean;
+    }[];
     return (
       <>
         <h2 className="text-lg font-semibold">Trường tùy chỉnh</h2>
         <ul className="mt-4 grid gap-2">
-          {(
-            data as {
-              id: string;
-              label: string;
-              key: string;
-              dataType: string;
-              required: boolean;
-            }[]
-          ).map((field) => (
-            <li className="rounded border p-3" key={field.id}>
-              <strong>{field.label}</strong> · {field.dataType}
-              {field.required ? ' · Bắt buộc' : ''}
-              <br />
-              <small>{field.key}</small>
-            </li>
-          ))}
+          {fields.length ? (
+            fields.map((field) => (
+              <li className="rounded border p-3" key={field.id}>
+                <strong>{field.label}</strong> · {field.dataType}
+                {field.required ? ' · Bắt buộc' : ''}
+                <br />
+                <small>{field.key}</small>
+              </li>
+            ))
+          ) : (
+            <li>Không có trường dữ liệu tùy chỉnh</li>
+          )}
         </ul>
       </>
     );
-  if (tab === 'sessions')
+  }
+  if (tab === 'sessions') {
+    if (!Array.isArray(data))
+      return <p role="alert">Dữ liệu phiên đăng nhập không hợp lệ.</p>;
+    const sessions = data as {
+      id: string;
+      createdAt: string;
+      lastSeenAt: string;
+      expiresAt: string;
+      revokedAt?: string;
+    }[];
     return (
       <>
         <h2 className="text-lg font-semibold">Phiên đăng nhập</h2>
         <ul className="mt-4 divide-y">
-          {(
-            data as {
-              id: string;
-              createdAt: string;
-              lastSeenAt: string;
-              expiresAt: string;
-              revokedAt?: string;
-            }[]
-          ).map((session) => (
+          {sessions.map((session) => (
             <li className="py-3" key={session.id}>
               Hoạt động {new Date(session.lastSeenAt).toLocaleString('vi-VN')} ·
               Hết hạn {new Date(session.expiresAt).toLocaleString('vi-VN')} ·{' '}
@@ -565,18 +595,20 @@ function ViewTab({
         </ul>
       </>
     );
+  }
+  if (!Array.isArray(data))
+    return <p role="alert">Dữ liệu hoạt động không hợp lệ.</p>;
+  const logs = data as { id: string; action: string; createdAt: string }[];
   return (
     <>
       <h2 className="text-lg font-semibold">Hoạt động</h2>
       <ul className="mt-4 divide-y">
-        {(data as { id: string; action: string; createdAt: string }[]).map(
-          (log) => (
-            <li className="py-3" key={log.id}>
-              <code>{log.action}</code> ·{' '}
-              {new Date(log.createdAt).toLocaleString('vi-VN')}
-            </li>
-          ),
-        )}
+        {logs.map((log) => (
+          <li className="py-3" key={log.id}>
+            <code>{log.action}</code> ·{' '}
+            {new Date(log.createdAt).toLocaleString('vi-VN')}
+          </li>
+        ))}
       </ul>
     </>
   );

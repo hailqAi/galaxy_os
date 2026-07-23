@@ -552,6 +552,22 @@ describe.sequential('Sprint 1 API integration', () => {
       ).size,
     ).toBe(capabilities.body.capabilities.length);
     expect(capabilities.body.capabilities[0]).toHaveProperty('sourceRoles');
+    const preview = await request(app.getHttpServer())
+      .get(`/api/v1/users/${createdUserId}/access-preview`)
+      .set('x-galaxy-dev-auth', process.env.DEV_AUTH_USER_EMAIL!)
+      .expect(200);
+    for (const field of [
+      'visibleModules',
+      'visibleDepartmentIds',
+      'effectivePermissions',
+      'deniedPermissions',
+      'sourceRoles',
+      'roles',
+      'permissions',
+      'scopes',
+      'customFields',
+    ])
+      expect(Array.isArray(preview.body[field])).toBe(true);
   });
 
   it('assigns role permissions through the protected API and audits the change', async () => {

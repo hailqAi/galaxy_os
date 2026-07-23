@@ -5,6 +5,42 @@ export const navigation: {
 }[] = [
   { href: '/', label: 'Tổng quan' },
   {
+    href: '/crm/leads',
+    label: 'Khách hàng tiềm năng',
+    permission: 'crm.lead.read',
+  },
+  {
+    href: '/crm/opportunities',
+    label: 'Cơ hội',
+    permission: 'crm.opportunity.read',
+  },
+  { href: '/customers', label: 'Khách hàng', permission: 'crm.customer.read' },
+  { href: '/projects', label: 'Dự án', permission: 'project.read' },
+  { href: '/tasks', label: 'Công việc', permission: 'task.read' },
+  { href: '/surveys', label: 'Khảo sát & Yêu cầu', permission: 'survey.read' },
+  { href: '/files', label: 'Tệp tin', permission: 'file.read' },
+  {
+    href: '/notifications',
+    label: 'Thông báo',
+    permission: 'notification.read',
+  },
+  { href: '/import', label: 'Nhập dữ liệu', permission: 'import.read' },
+  {
+    href: '/marketing/content',
+    label: 'Nội dung Marketing',
+    permission: 'marketing.content.read',
+  },
+  {
+    href: '/marketing/calendar',
+    label: 'Lịch xuất bản',
+    permission: 'marketing.content.read',
+  },
+  {
+    href: '/marketing/publishing',
+    label: 'Hàng đợi xuất bản',
+    permission: 'marketing.content.read',
+  },
+  {
     href: '/settings/organization',
     label: 'Tổ chức',
     permission: 'organization.read',

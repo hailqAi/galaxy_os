@@ -14,8 +14,8 @@ const actor = () => ({
   membership: { id: 'test', status: 'active', joinedAt: '' },
   departments: [],
   roles: [],
-  permissions: [],
-  administrationScope: 'SELF',
+  permissions: ['user.read', 'user.capabilities.read'],
+  administrationScope: 'ORGANIZATION',
   managedDepartmentIds: [],
   administrationTier: 0,
 });
@@ -52,6 +52,65 @@ createServer((request, response) => {
     response.writeHead(200, { 'content-type': 'application/json' });
     return response.end(JSON.stringify(actor()));
   }
+  const user = {
+    id: 'cf9b5f15-5fa2-4910-b0a6-671f54d345e6',
+    email: 'user@example.test',
+    displayName: 'User Detail Test',
+    status: 'active',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    organizationMembers: [],
+    departmentMembers: [],
+    roles: [],
+    actions: [],
+  };
+  if (request.url === '/api/v1/users?page=1&pageSize=20') {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    return response.end(
+      JSON.stringify({ items: [user], page: 1, pageSize: 20, total: 1 }),
+    );
+  }
+  if (request.url === `/api/v1/users/${user.id}`) {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    return response.end(JSON.stringify(user));
+  }
+  if (request.url === `/api/v1/users/${user.id}/access-preview`) {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    return setTimeout(
+      () =>
+        response.end(
+          JSON.stringify({
+            userId: user.id,
+            scope: 'SELF',
+            visibleModules: [],
+            visibleDepartmentIds: [],
+            manageableUsers: 1,
+            effectivePermissions: [],
+            deniedPermissions: [],
+            sourceRoles: [],
+            roles: [],
+            permissions: [],
+            scopes: [],
+            customFields: [],
+            protectedTargets: 0,
+          }),
+        ),
+      150,
+    );
+  }
+  if (request.url === '/api/v1/custom-fields?entityType=USER') {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    return response.end(JSON.stringify([]));
+  }
+  for (const [suffix, body] of [
+    ['capabilities', { capabilities: [] }],
+    ['sessions', []],
+    ['audit', []],
+  ])
+    if (request.url === `/api/v1/users/${user.id}/${suffix}`) {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      return response.end(JSON.stringify(body));
+    }
   if (request.url === '/api/v1/auth/logout' && request.method === 'POST') {
     active = false;
     response.writeHead(200, {

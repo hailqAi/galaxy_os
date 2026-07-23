@@ -1,5 +1,29 @@
 # Project status
 
+## Sprint 2 — CRM, Project Hub and Work Management — 2026-07-23
+
+- Implemented functional Customer/Contact, Lead, Opportunity pipeline,
+  Project Hub, Task board, Survey and Requirement vertical slices with scoped
+  IAM authorization, activity records, notifications, idempotent conversion,
+  seed data, and usable list/detail/form screens.
+- Added shared file upload/download with local ignored storage and
+  entity-scope authorization; comments, replies and mentions; business
+  timelines; recipient-owned notifications and header badge; scoped dashboard
+  aggregates and global search.
+- Added staged Excel import for Customer, Contact, Lead and Project using
+  `.xlsx` parsing, column mapping, validation, preview and idempotent
+  confirmation. Added Marketing campaign/content review, approval, channel
+  variants, calendar and a database-backed publishing queue with locking,
+  bounded retry and a development/test fake provider. No external publishing
+  credential or live provider is configured.
+- Prisma reports 20 applied migrations and an up-to-date schema. Verification
+  passed: diff check, format, lint, strict typecheck, API 98/98, web 50/50,
+  Edge 4/4, document service 1/1, production build, Edge build/test, and
+  targeted Sprint 2 tests 24/24.
+- Browser Playwright acceptance remains blocked by the host's missing
+  `libnss3`; no system package installation was attempted. Ignored `.env*` and
+  `.runtime/` files remain local and are not part of the implementation.
+
 ## Internet deployment preparation — 2026-07-22
 
 - Added production-only Next and Nest start commands bound to
