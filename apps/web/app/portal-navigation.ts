@@ -16,6 +16,37 @@ export const navigation: {
   },
   { href: '/customers', label: 'Khách hàng', permission: 'crm.customer.read' },
   { href: '/projects', label: 'Dự án', permission: 'project.read' },
+  {
+    href: '/catalog',
+    label: 'Sản phẩm & Thương hiệu',
+    permission: 'catalog.read',
+  },
+  { href: '/partners', label: 'Nhà cung cấp', permission: 'supplier.read' },
+  {
+    href: '/procurement/requests',
+    label: 'Yêu cầu mua hàng',
+    permission: 'purchase_request.read',
+  },
+  {
+    href: '/procurement/rfqs',
+    label: 'RFQ nhà cung cấp',
+    permission: 'procurement.rfq.read',
+  },
+  {
+    href: '/procurement/supplier-quotes',
+    label: 'Báo giá nhà cung cấp',
+    permission: 'procurement.supplier_quotation.read',
+  },
+  {
+    href: '/procurement/comparisons',
+    label: 'So sánh nhà cung cấp',
+    permission: 'procurement.supplier_selection.read',
+  },
+  {
+    href: '/procurement/purchase-orders',
+    label: 'Đơn mua hàng',
+    permission: 'procurement.purchase_order.read',
+  },
   { href: '/tasks', label: 'Công việc', permission: 'task.read' },
   { href: '/surveys', label: 'Khảo sát & Yêu cầu', permission: 'survey.read' },
   { href: '/files', label: 'Tệp tin', permission: 'file.read' },
@@ -74,9 +105,11 @@ export const visibleNavigation = (
     | 'SELF'
     | 'MANAGED_DEPARTMENTS'
     | 'ORGANIZATION' = 'SELF',
+  marketingEnabled = process.env.FEATURE_MARKETING === 'true',
 ) =>
   navigation.filter(
     (item) =>
+      (marketingEnabled || !item.href.startsWith('/marketing')) &&
       (!item.permission || permissions.includes(item.permission)) &&
       (item.href !== '/settings/users' || administrationScope !== 'SELF'),
   );

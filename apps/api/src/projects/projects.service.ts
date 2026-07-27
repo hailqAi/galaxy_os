@@ -64,6 +64,7 @@ export class ProjectsService {
       customer: { select: { id: true, displayName: true } },
       primaryContact: { select: { id: true, displayName: true } },
       projectManager: { select: { id: true, displayName: true } },
+      salesOwner: { select: { id: true, displayName: true } },
       members: {
         include: {
           user: { select: { id: true, displayName: true, email: true } },

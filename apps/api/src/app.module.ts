@@ -27,6 +27,11 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { SearchModule } from './search/search.module';
 import { ImportsModule } from './imports/imports.module';
 import { MarketingModule } from './marketing/marketing.module';
+import { CatalogModule } from './catalog/catalog.module';
+import { CommercialModule } from './commercial/commercial.module';
+import { UploadsModule } from './uploads/uploads.module';
+import { ContractsModule } from './contracts/contracts.module';
+import { ProcurementModule } from './procurement/procurement.module';
 
 @Module({
   imports: [
@@ -53,7 +58,12 @@ import { MarketingModule } from './marketing/marketing.module';
     DashboardModule,
     SearchModule,
     ImportsModule,
-    MarketingModule,
+    CatalogModule,
+    CommercialModule,
+    UploadsModule,
+    ContractsModule,
+    ProcurementModule,
+    ...(process.env.FEATURE_MARKETING === 'true' ? [MarketingModule] : []),
   ],
   controllers: [HealthController, MeController],
   providers: [PrismaService, MeService],

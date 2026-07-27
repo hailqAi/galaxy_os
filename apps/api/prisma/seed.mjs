@@ -146,6 +146,60 @@ const permissions = [
   'import.read',
   'import.create',
   'import.confirm',
+  'catalog.read',
+  'catalog.create',
+  'catalog.update',
+  'supplier.read',
+  'supplier.create',
+  'supplier.update',
+  'bank_information.read',
+  'bank_information.update',
+  'estimate.read',
+  'estimate.create',
+  'estimate.update',
+  'estimate.approve',
+  'quotation.read',
+  'quotation.create',
+  'quotation.update',
+  'quotation.approve',
+  'quotation.discount.approve',
+  'quotation.export',
+  'contract.read',
+  'contract.create',
+  'contract.update',
+  'contract.approve',
+  'appendix.read',
+  'appendix.create',
+  'appendix.approve',
+  'receivable.read',
+  'receivable.create',
+  'receivable.payment.record',
+  'purchase_request.read',
+  'purchase_request.create',
+  'purchase_request.update',
+  'purchase_request.delete',
+  'purchase_request.approve',
+  'procurement.rfq.read',
+  'procurement.rfq.create',
+  'procurement.rfq.update',
+  'procurement.rfq.send',
+  'procurement.rfq.close',
+  'procurement.rfq.cancel',
+  'procurement.rfq.manage_recipients',
+  'procurement.supplier_quotation.read',
+  'procurement.supplier_quotation.create',
+  'procurement.supplier_quotation.update',
+  'procurement.supplier_quotation.review',
+  'procurement.supplier_cost.read',
+  'procurement.supplier_selection.read',
+  'procurement.supplier_selection.create',
+  'procurement.supplier_selection.approve',
+  'procurement.purchase_order.read',
+  'procurement.purchase_order.create',
+  'procurement.purchase_order.update',
+  'procurement.purchase_order.approve',
+  'procurement.purchase_order.send',
+  'financial_margin.read',
   'marketing.campaign.read',
   'marketing.campaign.create',
   'marketing.campaign.update',
@@ -373,16 +427,25 @@ async function seed() {
                         'notification.read',
                       ].includes(permission.code),
                   )
-                : ['project_manager', 'employee'].includes(role.code)
+                : role.code === 'procurement'
                   ? allPermissions.filter(
                       (permission) =>
-                        ['project.', 'task.', 'survey.', 'requirement.'].some(
-                          (prefix) => permission.code.startsWith(prefix),
+                        [
+                          'catalog.',
+                          'supplier.',
+                          'purchase_request.',
+                          'procurement.rfq.',
+                          'procurement.supplier_quotation.',
+                          'procurement.supplier_cost.',
+                          'procurement.supplier_selection.',
+                          'procurement.purchase_order.',
+                        ].some((prefix) =>
+                          permission.code.startsWith(prefix),
                         ) ||
                         [
-                          'dashboard.read',
-                          'search.read',
-                          'activity.read',
+                          'project.read',
+                          'task.read',
+                          'task.create',
                           'file.read',
                           'file.upload',
                           'comment.read',
@@ -390,35 +453,52 @@ async function seed() {
                           'notification.read',
                         ].includes(permission.code),
                     )
-                  : [
-                        'department_manager',
-                        'deputy_manager',
-                        'team_lead',
-                      ].includes(role.code)
-                    ? allPermissions.filter((permission) =>
-                        [
-                          'organization.read',
-                          'department.read',
-                          'department.member.read',
-                          'department.member.manage',
-                          'user.read',
-                          'user.update',
-                          'user.disable',
-                          'user.reactivate',
-                          'user.password.reset',
-                          'user.password.temporary',
-                          'user.session.revoke',
-                          'membership.read',
-                          'role.read',
-                          'role.assign',
-                          'user.audit.read',
-                        ].includes(permission.code),
+                  : ['project_manager', 'employee'].includes(role.code)
+                    ? allPermissions.filter(
+                        (permission) =>
+                          ['project.', 'task.', 'survey.', 'requirement.'].some(
+                            (prefix) => permission.code.startsWith(prefix),
+                          ) ||
+                          [
+                            'dashboard.read',
+                            'search.read',
+                            'activity.read',
+                            'file.read',
+                            'file.upload',
+                            'comment.read',
+                            'comment.create',
+                            'notification.read',
+                          ].includes(permission.code),
                       )
-                    : allPermissions.filter((permission) =>
-                        ['organization.read', 'department.read'].includes(
-                          permission.code,
-                        ),
-                      );
+                    : [
+                          'department_manager',
+                          'deputy_manager',
+                          'team_lead',
+                        ].includes(role.code)
+                      ? allPermissions.filter((permission) =>
+                          [
+                            'organization.read',
+                            'department.read',
+                            'department.member.read',
+                            'department.member.manage',
+                            'user.read',
+                            'user.update',
+                            'user.disable',
+                            'user.reactivate',
+                            'user.password.reset',
+                            'user.password.temporary',
+                            'user.session.revoke',
+                            'membership.read',
+                            'role.read',
+                            'role.assign',
+                            'user.audit.read',
+                          ].includes(permission.code),
+                        )
+                      : allPermissions.filter((permission) =>
+                          ['organization.read', 'department.read'].includes(
+                            permission.code,
+                          ),
+                        );
     await prisma.rolePermission.deleteMany({
       where: {
         roleId: role.id,

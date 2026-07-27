@@ -1,5 +1,18 @@
 # Project status
 
+## Sprint 2 — Complete Business Operations — in progress
+
+Branch `feature/sprint-2-complete-business-operations` contains the Marketing-off guard, project workspace, catalog/supplier master data, Estimate/Quotation/Contract/Appendix/Receivables, Purchase Requests, Supplier RFQs, Supplier Quotations, Comparison/Selection, Purchase Orders, and a local streamed resumable-upload adapter. Migrations through `20260723240000_add_purchase_orders` (30 total) are applied locally.
+
+| Module | Backend | Frontend | Authorization | Tests | Status | Limitations |
+| --- | --- | --- | --- | --- | --- | --- |
+| Supplier RFQ | CRUD, recipients, PR lines, lifecycle, clarification, history, activity, notification | List, create, detail, project/sidebar links | Tenant/project policy and seven RFQ permissions | Focused procurement tests; API/web typecheck | Complete | SMTP remains manual/simulated |
+| Supplier Quotation | Decimal totals, RFQ recipient/line validation, review lifecycle, immutable selection and revisions | List, create, detail | Tenant/project policy and cost/review permissions | Focused procurement tests and API/web typecheck | Complete | Original document upload uses existing FileAsset integration |
+| Supplier Comparison | Currency snapshots, landed estimates, split-line idempotent selection and approval | List, create, side-by-side detail | Selection and approval permissions; self-approval blocked | Focused procurement tests and API/web typecheck | Complete | Risk inputs are explicit assessments, not an opaque score |
+| Purchase Order | Approved-selection creation, backend totals, lifecycle, approval and confirmed quantity update | List, create, detail | PO permissions; self-approval blocked | Focused procurement tests and API/web typecheck | Complete | PDF/XLSX generation is not yet wired |
+
+Sprint 2 — Complete Business Operations is not complete and has not been committed, tagged, or pushed. Exact completed and outstanding scope is in `docs/sprint-2-complete-business-operations.md`.
+
 ## Sprint 2 — CRM, Project Hub and Work Management — 2026-07-23
 
 - Implemented functional Customer/Contact, Lead, Opportunity pipeline,

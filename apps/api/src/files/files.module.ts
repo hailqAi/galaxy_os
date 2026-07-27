@@ -8,5 +8,6 @@ import { FilesService } from './files.service';
   imports: [AccessControlModule],
   controllers: [FilesController],
   providers: [FilesService, FileStorage, PrismaService],
+  exports: [FileStorage],
 })
 export class FilesModule {}

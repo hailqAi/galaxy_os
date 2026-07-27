@@ -80,6 +80,23 @@ describe('protected routing', () => {
     const response = await proxy(request('/login'));
     expect(response.headers.get('location')).toBe('http://localhost:3000/');
   });
+
+  it('guards Marketing routes while the feature is disabled', async () => {
+    vi.stubEnv('FEATURE_MARKETING', 'false');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json({
+          mustChangePassword: false,
+          permissions: ['marketing.content.read'],
+          administrationScope: 'ORGANIZATION',
+        }),
+      ),
+    );
+    expect(
+      (await proxy(request('/marketing/content'))).headers.get('location'),
+    ).toBe('http://localhost:3000/forbidden');
+  });
 });
 
 describe('web CSP', () => {
