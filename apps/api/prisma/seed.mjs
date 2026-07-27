@@ -199,6 +199,91 @@ const permissions = [
   'procurement.purchase_order.update',
   'procurement.purchase_order.approve',
   'procurement.purchase_order.send',
+  'procurement.proforma_invoice.read',
+  'procurement.proforma_invoice.create',
+  'procurement.proforma_invoice.update',
+  'procurement.proforma_invoice.verify',
+  'procurement.proforma_invoice.approve',
+  'procurement.proforma_invoice.over_commitment.approve',
+  'supplier_payable.create',
+  'supplier_payable.read',
+  'supplier_payable.update',
+  'supplier_payment.read',
+  'supplier_payment.record',
+  'supplier_payment.approve',
+  'supplier_payment.allocate',
+  'production.read',
+  'production.create',
+  'production.update',
+  'production.technical.submit',
+  'production.technical.approve',
+  'production.quality.create',
+  'production.packing.create',
+  'logistics.forwarder.read',
+  'logistics.forwarder.manage',
+  'logistics.shipment.read',
+  'logistics.shipment.create',
+  'logistics.shipment.update',
+  'logistics.customs.read',
+  'logistics.customs.manage',
+  'logistics.landed_cost.read',
+  'logistics.landed_cost.manage',
+  'logistics.landed_cost.finalize',
+  'warehouse.read',
+  'warehouse.manage',
+  'inventory.read',
+  'inventory.post',
+  'inventory.cost.read',
+  'inventory.receipt.read',
+  'inventory.receipt.create',
+  'inventory.receipt.post',
+  'inventory.quality.inspect',
+  'inventory.quality.approve',
+  'inventory.reservation.read',
+  'inventory.reservation.create',
+  'inventory.reservation.approve',
+  'inventory.reservation.reserve',
+  'inventory.reservation.release',
+  'inventory.transfer.read',
+  'inventory.transfer.create',
+  'inventory.transfer.approve',
+  'inventory.transfer.post',
+  'inventory.issue.read',
+  'inventory.issue.create',
+  'inventory.issue.approve',
+  'inventory.issue.post',
+  'inventory.return.create',
+  'inventory.return.post',
+  'inventory.adjustment.read',
+  'inventory.adjustment.create',
+  'inventory.adjustment.approve',
+  'inventory.adjustment.post',
+  'inventory.count.read',
+  'inventory.count.create',
+  'inventory.count.record',
+  'inventory.count.approve',
+  'inventory.count.post',
+  'installation.read',
+  'installation.manage',
+  'installation.release',
+  'installation.readiness.override',
+  'installation.execute',
+  'installation.punch.manage',
+  'installation.punch.verify',
+  'inspection.read',
+  'inspection.manage',
+  'acceptance.manage',
+  'handover.read',
+  'handover.manage',
+  'handover.complete',
+  'handover.override',
+  'warranty.read',
+  'warranty.register',
+  'warranty.goodwill.approve',
+  'service_ticket.read',
+  'service_ticket.create',
+  'service_ticket.manage',
+  'service.cost.read',
   'financial_margin.read',
   'marketing.campaign.read',
   'marketing.campaign.create',
@@ -220,6 +305,8 @@ const roles = [
   ['estimator', 'Dự toán'],
   ['procurement', 'Mua hàng'],
   ['accounting', 'Kế toán'],
+  ['warehouse_manager', 'Quản lý kho'],
+  ['warehouse_employee', 'Nhân viên kho'],
   ['project_manager', 'Quản lý dự án'],
   ['installer', 'Lắp đặt'],
   ['warranty', 'Bảo hành'],
@@ -439,6 +526,13 @@ async function seed() {
                           'procurement.supplier_cost.',
                           'procurement.supplier_selection.',
                           'procurement.purchase_order.',
+                          'procurement.proforma_invoice.',
+                          'supplier_payable.',
+                          'supplier_payment.',
+                          'production.',
+                          'logistics.forwarder.',
+                          'logistics.shipment.',
+                          'logistics.customs.',
                         ].some((prefix) =>
                           permission.code.startsWith(prefix),
                         ) ||
@@ -453,52 +547,141 @@ async function seed() {
                           'notification.read',
                         ].includes(permission.code),
                     )
-                  : ['project_manager', 'employee'].includes(role.code)
+                  : ['warehouse_manager', 'warehouse_employee'].includes(
+                        role.code,
+                      )
                     ? allPermissions.filter(
                         (permission) =>
-                          ['project.', 'task.', 'survey.', 'requirement.'].some(
-                            (prefix) => permission.code.startsWith(prefix),
-                          ) ||
+                          permission.code === 'warehouse.read' ||
+                          (role.code === 'warehouse_manager' &&
+                            (permission.code === 'warehouse.manage' ||
+                              permission.code.startsWith('inventory.'))) ||
+                          (role.code === 'warehouse_employee' &&
+                            [
+                              'inventory.read',
+                              'inventory.receipt.read',
+                              'inventory.receipt.create',
+                              'inventory.quality.inspect',
+                              'inventory.reservation.read',
+                              'inventory.reservation.create',
+                              'inventory.transfer.read',
+                              'inventory.issue.read',
+                              'inventory.return.create',
+                              'inventory.count.read',
+                              'inventory.count.record',
+                            ].includes(permission.code)) ||
                           [
-                            'dashboard.read',
-                            'search.read',
-                            'activity.read',
+                            'project.read',
                             'file.read',
                             'file.upload',
-                            'comment.read',
-                            'comment.create',
+                            'activity.read',
                             'notification.read',
                           ].includes(permission.code),
                       )
-                    : [
-                          'department_manager',
-                          'deputy_manager',
-                          'team_lead',
-                        ].includes(role.code)
-                      ? allPermissions.filter((permission) =>
-                          [
-                            'organization.read',
-                            'department.read',
-                            'department.member.read',
-                            'department.member.manage',
-                            'user.read',
-                            'user.update',
-                            'user.disable',
-                            'user.reactivate',
-                            'user.password.reset',
-                            'user.password.temporary',
-                            'user.session.revoke',
-                            'membership.read',
-                            'role.read',
-                            'role.assign',
-                            'user.audit.read',
-                          ].includes(permission.code),
+                    : role.code === 'warranty'
+                      ? allPermissions.filter(
+                          (permission) =>
+                            [
+                              'service_ticket.',
+                              'project.read',
+                              'inventory.read',
+                              'inventory.reservation.read',
+                              'inventory.reservation.create',
+                              'inventory.issue.read',
+                              'inventory.return.create',
+                              'file.read',
+                              'file.upload',
+                              'activity.read',
+                              'comment.read',
+                              'comment.create',
+                              'notification.read',
+                            ].some((prefix) =>
+                              permission.code.startsWith(prefix),
+                            ) ||
+                            ['warranty.read', 'warranty.register'].includes(
+                              permission.code,
+                            ),
                         )
-                      : allPermissions.filter((permission) =>
-                          ['organization.read', 'department.read'].includes(
-                            permission.code,
-                          ),
-                        );
+                      : role.code === 'installer'
+                        ? allPermissions.filter((permission) =>
+                            [
+                              'installation.read',
+                              'installation.execute',
+                              'installation.punch.manage',
+                              'project.read',
+                              'inventory.read',
+                              'file.read',
+                              'file.upload',
+                              'activity.read',
+                            ].includes(permission.code),
+                          )
+                        : ['project_manager', 'employee'].includes(role.code)
+                          ? allPermissions.filter(
+                              (permission) =>
+                                ![
+                                  'installation.readiness.override',
+                                  'handover.override',
+                                  'warranty.goodwill.approve',
+                                ].includes(permission.code) &&
+                                ([
+                                  'project.',
+                                  'task.',
+                                  'survey.',
+                                  'requirement.',
+                                  ...(role.code === 'project_manager'
+                                    ? [
+                                        'installation.',
+                                        'inspection.',
+                                        'acceptance.',
+                                        'handover.',
+                                        'warranty.',
+                                        'service_ticket.',
+                                      ]
+                                    : []),
+                                ].some((prefix) =>
+                                  permission.code.startsWith(prefix),
+                                ) ||
+                                  [
+                                    'dashboard.read',
+                                    'search.read',
+                                    'activity.read',
+                                    'file.read',
+                                    'file.upload',
+                                    'comment.read',
+                                    'comment.create',
+                                    'notification.read',
+                                  ].includes(permission.code)),
+                            )
+                          : [
+                                'department_manager',
+                                'deputy_manager',
+                                'team_lead',
+                              ].includes(role.code)
+                            ? allPermissions.filter((permission) =>
+                                [
+                                  'organization.read',
+                                  'department.read',
+                                  'department.member.read',
+                                  'department.member.manage',
+                                  'user.read',
+                                  'user.update',
+                                  'user.disable',
+                                  'user.reactivate',
+                                  'user.password.reset',
+                                  'user.password.temporary',
+                                  'user.session.revoke',
+                                  'membership.read',
+                                  'role.read',
+                                  'role.assign',
+                                  'user.audit.read',
+                                ].includes(permission.code),
+                              )
+                            : allPermissions.filter((permission) =>
+                                [
+                                  'organization.read',
+                                  'department.read',
+                                ].includes(permission.code),
+                              );
     await prisma.rolePermission.deleteMany({
       where: {
         roleId: role.id,
@@ -1075,6 +1258,26 @@ async function seed() {
         update: { status: 'active', includeChildren: true },
       });
   }
+
+  await prisma.warrantyPolicy.upsert({
+    where: {
+      organizationId_name_version: {
+        organizationId: organization.id,
+        name: 'Standard handover warranty',
+        version: 1,
+      },
+    },
+    create: {
+      organizationId: organization.id,
+      name: 'Standard handover warranty',
+      version: 1,
+      warrantyMonths: 12,
+      startRule: 'HANDOVER_DATE',
+      terms: 'Standard warranty terms recorded at handover.',
+      createdBy: user.id,
+    },
+    update: {},
+  });
 
   let campaign = await prisma.campaign.findFirst({
     where: { organizationId: organization.id, name: 'Galaxy Living 2026' },

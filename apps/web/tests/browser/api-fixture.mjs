@@ -54,17 +54,24 @@ createServer((request, response) => {
   }
   const user = {
     id: 'cf9b5f15-5fa2-4910-b0a6-671f54d345e6',
+    userId: 'cf9b5f15-5fa2-4910-b0a6-671f54d345e6',
+    username: 'user-detail-test',
     email: 'user@example.test',
     displayName: 'User Detail Test',
     status: 'active',
+    membershipStatus: 'active',
+    mustChangePassword: false,
+    locked: false,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
+    lastLoginAt: null,
     organizationMembers: [],
+    departments: [],
     departmentMembers: [],
     roles: [],
     actions: [],
   };
-  if (request.url === '/api/v1/users?page=1&pageSize=20') {
+  if (request.url?.startsWith('/api/v1/users?')) {
     response.writeHead(200, { 'content-type': 'application/json' });
     return response.end(
       JSON.stringify({ items: [user], page: 1, pageSize: 20, total: 1 }),

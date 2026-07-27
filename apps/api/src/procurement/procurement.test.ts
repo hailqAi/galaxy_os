@@ -3,6 +3,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
+import { Prisma } from '@prisma/client';
 import { CurrentActor } from '../access-control/current-actor';
 import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { PrismaService } from '../prisma.service';
@@ -203,5 +204,290 @@ describe('Purchase orders', () => {
     await expect(
       service.transitionPurchaseOrder(actor, 'po', 'APPROVED'),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+});
+
+describe('Proforma invoices', () => {
+  it('rejects protected bank reference without update permission', async () => {
+    const service = new ProcurementService(
+      {} as PrismaService,
+      {} as BusinessEntityPolicy,
+    );
+    await expect(
+      service.createProformaInvoice(actor, {
+        piNumber: 'PI-1',
+        purchaseOrderId: '00000000-0000-4000-8000-000000000001',
+        piDate: new Date(),
+        currency: 'USD',
+        exchangeRateSnapshot: '1',
+        bankReferenceProtected: 'secret',
+        lines: [],
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+  it('calculates totals from PO-linked lines with Decimal', async () => {
+    const create = vi.fn().mockImplementation(({ data }) => ({
+      id: 'pi',
+      ...data,
+      lines: data.lines.create,
+    }));
+    const prisma = {
+      purchaseOrder: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'po',
+          supplierId: 'supplier',
+          currency: 'USD',
+          totalAmount: '200',
+          lines: [
+            {
+              id: '00000000-0000-4000-8000-000000000002',
+              productId: null,
+              variantId: null,
+              quantity: '2',
+              unit: 'pcs',
+            },
+          ],
+          proformaInvoices: [],
+        }),
+      },
+      $transaction: vi.fn().mockImplementation(async (run) =>
+        run({
+          proformaInvoice: { create },
+          activity: { create: vi.fn() },
+        }),
+      ),
+    } as unknown as PrismaService;
+    const policy = {
+      projectWhere: vi.fn().mockReturnValue({}),
+    } as unknown as BusinessEntityPolicy;
+    const result = await new ProcurementService(
+      prisma,
+      policy,
+    ).createProformaInvoice(actor, {
+      piNumber: 'PI-1',
+      purchaseOrderId: '00000000-0000-4000-8000-000000000001',
+      piDate: new Date(),
+      currency: 'USD',
+      exchangeRateSnapshot: '25000',
+      shippingAmount: '10.10',
+      lines: [
+        {
+          purchaseOrderLineId: '00000000-0000-4000-8000-000000000002',
+          description: 'Item',
+          quantity: '2',
+          unit: 'pcs',
+          unitPrice: '50.25',
+        },
+      ],
+    });
+    expect(String(result.totalAmount)).toBe('110.6');
+    expect(create).toHaveBeenCalledOnce();
+  });
+
+  it('marks aggregate quantity above PO commitment for special approval', async () => {
+    const create = vi.fn().mockImplementation(({ data }) => ({
+      id: 'pi',
+      ...data,
+      lines: data.lines.create,
+    }));
+    const prisma = {
+      purchaseOrder: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'po',
+          supplierId: 'supplier',
+          currency: 'USD',
+          totalAmount: '1000',
+          lines: [
+            {
+              id: '00000000-0000-4000-8000-000000000002',
+              productId: null,
+              variantId: null,
+              quantity: '2',
+              unit: 'pcs',
+            },
+          ],
+          proformaInvoices: [
+            {
+              totalAmount: '10',
+              lines: [
+                {
+                  purchaseOrderLineId: '00000000-0000-4000-8000-000000000002',
+                  quantity: '1',
+                },
+              ],
+            },
+          ],
+        }),
+      },
+      $transaction: vi.fn().mockImplementation(async (run) =>
+        run({
+          proformaInvoice: { create },
+          activity: { create: vi.fn() },
+        }),
+      ),
+    } as unknown as PrismaService;
+    const result = await new ProcurementService(prisma, {
+      projectWhere: vi.fn().mockReturnValue({}),
+    } as unknown as BusinessEntityPolicy).createProformaInvoice(actor, {
+      piNumber: 'PI-2',
+      purchaseOrderId: '00000000-0000-4000-8000-000000000001',
+      piDate: new Date(),
+      currency: 'USD',
+      exchangeRateSnapshot: '1',
+      lines: [
+        {
+          purchaseOrderLineId: '00000000-0000-4000-8000-000000000002',
+          description: 'Item',
+          quantity: '2',
+          unit: 'pcs',
+          unitPrice: '10',
+        },
+      ],
+    });
+    expect(result.exceedsCommitment).toBe(true);
+  });
+
+  it('keeps approved PI immutable', async () => {
+    const service = new ProcurementService(
+      {} as PrismaService,
+      {} as BusinessEntityPolicy,
+    );
+    vi.spyOn(service, 'getProformaInvoice').mockResolvedValue({
+      status: 'APPROVED',
+    } as never);
+    await expect(
+      service.updateProformaInvoice(actor, 'pi', { notes: 'changed' }),
+    ).rejects.toThrow('immutable');
+  });
+
+  it('requires special permission to approve an over-commitment PI', async () => {
+    const service = new ProcurementService(
+      {} as PrismaService,
+      {} as BusinessEntityPolicy,
+    );
+    vi.spyOn(service, 'getProformaInvoice').mockResolvedValue({
+      status: 'VERIFIED',
+      exceedsCommitment: true,
+      createdBy: 'other',
+    } as never);
+    await expect(
+      service.transitionProformaInvoice(actor, 'pi', 'APPROVED'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+});
+
+describe('Supplier payables', () => {
+  it('rejects protected payment bank reference without update permission', async () => {
+    const service = new ProcurementService(
+      {} as PrismaService,
+      {} as BusinessEntityPolicy,
+    );
+    await expect(
+      service.createSupplierPayment(actor, {
+        supplierId: '00000000-0000-4000-8000-000000000001',
+        projectId: '00000000-0000-4000-8000-000000000002',
+        paymentDate: new Date(),
+        amount: '1',
+        currency: 'USD',
+        exchangeRateSnapshot: '1',
+        paymentMethod: 'BANK_TRANSFER',
+        bankReferenceProtected: 'secret',
+        idempotencyKey: 'payment-1',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('requires schedules to equal approved PI total', async () => {
+    const service = new ProcurementService(
+      {} as PrismaService,
+      {} as BusinessEntityPolicy,
+    );
+    vi.spyOn(service, 'getProformaInvoice').mockResolvedValue({
+      id: 'pi',
+      status: 'APPROVED',
+      totalAmount: new Prisma.Decimal(100),
+    } as never);
+    await expect(
+      service.generateSupplierPayable(actor, {
+        proformaInvoiceId: '00000000-0000-4000-8000-000000000001',
+        schedules: [
+          {
+            milestone: 'DEPOSIT',
+            sequence: 1,
+            dueDate: new Date(),
+            amount: '99',
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('prevents payment recorder self approval', async () => {
+    const service = new ProcurementService(
+      {} as PrismaService,
+      {} as BusinessEntityPolicy,
+    );
+    vi.spyOn(service, 'getSupplierPayment').mockResolvedValue({
+      status: 'SUBMITTED',
+      recordedBy: actor.userId,
+    } as never);
+    await expect(
+      service.transitionSupplierPayment(actor, 'payment', 'APPROVED'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects allocation above payment amount', async () => {
+    const prisma = {
+      $transaction: vi.fn().mockImplementation((run) =>
+        run({
+          supplierPayment: {
+            findUniqueOrThrow: vi.fn().mockResolvedValue({
+              status: 'APPROVED',
+              amount: new Prisma.Decimal(100),
+              allocations: [],
+            }),
+          },
+        }),
+      ),
+    } as unknown as PrismaService;
+    const service = new ProcurementService(prisma, {} as BusinessEntityPolicy);
+    vi.spyOn(service, 'getSupplierPayment').mockResolvedValue({} as never);
+    await expect(
+      service.allocateSupplierPayment(actor, 'payment', {
+        allocations: [
+          {
+            scheduleId: '00000000-0000-4000-8000-000000000001',
+            amount: '101',
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('rejects duplicate schedules in one allocation command', async () => {
+    const prisma = {
+      $transaction: vi.fn().mockImplementation((run) =>
+        run({
+          supplierPayment: {
+            findUniqueOrThrow: vi.fn().mockResolvedValue({
+              status: 'APPROVED',
+              amount: new Prisma.Decimal(100),
+              allocations: [],
+            }),
+          },
+        }),
+      ),
+    } as unknown as PrismaService;
+    const service = new ProcurementService(prisma, {} as BusinessEntityPolicy);
+    vi.spyOn(service, 'getSupplierPayment').mockResolvedValue({} as never);
+    const scheduleId = '00000000-0000-4000-8000-000000000001';
+    await expect(
+      service.allocateSupplierPayment(actor, 'payment', {
+        allocations: [
+          { scheduleId, amount: '40' },
+          { scheduleId, amount: '40' },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 });

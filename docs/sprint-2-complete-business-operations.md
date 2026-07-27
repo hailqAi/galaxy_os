@@ -2,12 +2,24 @@
 
 Status: in progress; do not tag or release.
 
-Completed in the working tree: Marketing-off guards; project workspace redesign; Brand/Product/Variant/Supplier master data and UI; isolated supplier bank permission; Estimate approval with cost redaction; versioned Quotation lifecycle and documents; Contract, effective Appendix value history, receivable schedules and allocation; Purchase Request and Supplier RFQ lifecycles; Supplier Quotation review/revision; supplier comparison, split-line selection and approval; Purchase Order lifecycle; and a local streamed resumable upload adapter.
+Implemented in the working tree through partial vertical slices: Proforma
+Invoice, supplier payables/payments, and Production Tracking in addition to the
+previously reported commercial and procurement modules. Tenant-scoped payment
+idempotency, maker-checker approval, Serializable allocation, immutable
+technical revisions, sample decisions, quality reports, and packing records
+are present.
 
 Routes include `/catalog`, `/partners`, `/procurement/requests`, `/procurement/rfqs`, `/procurement/supplier-quotes`, `/procurement/comparisons`, `/procurement/purchase-orders`, and the corresponding project and API routes.
 
-Migrations currently run through `20260723240000_add_purchase_orders` (30 applied locally).
+Migrations currently run through
+`20260727190000_add_inventory_operations` (38 applied locally).
 
-Not completed: PI/AP; production/logistics; warehouse/inventory; installation/inspection/handover; warranty/service; import worker; dashboards; pilots; and the full E2E/authorization matrix.
+Logistics/Customs/Landed Cost, Warehouse Master and Inventory operations are
+partial working slices. Not completed: inventory hardening;
+installation/inspection/handover; warranty/service; the queued large import
+worker; operational dashboards; final Project Workspace integration; and the
+full business E2E/authorization matrix. PI, supplier payables, and production
+remain `PARTIAL` until their missing integration and authorization evidence is
+implemented. See `docs/sprint-2-completion-audit.md`.
 
 Production still needs S3-compatible storage, malware scanning, SMTP, and external integration credentials.

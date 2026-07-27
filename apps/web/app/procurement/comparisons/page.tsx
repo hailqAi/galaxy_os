@@ -30,7 +30,11 @@ export default function ComparisonsPage() {
     );
   }
   useEffect(() => {
-    void load().catch((e: Error) => setError(e.message));
+    const timeout = setTimeout(
+      () => void load().catch((e: Error) => setError(e.message)),
+      0,
+    );
+    return () => clearTimeout(timeout);
   }, []);
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

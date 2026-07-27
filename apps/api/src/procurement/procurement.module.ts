@@ -7,6 +7,8 @@ import { RFQController } from './rfq.controller';
 import { SupplierQuotationController } from './supplier-quotation.controller';
 import { SupplierComparisonController } from './supplier-comparison.controller';
 import { PurchaseOrderController } from './purchase-order.controller';
+import { ProformaInvoiceController } from './proforma-invoice.controller';
+import { SupplierPayablesController } from './supplier-payables.controller';
 @Module({
   imports: [AccessControlModule],
   controllers: [
@@ -15,6 +17,8 @@ import { PurchaseOrderController } from './purchase-order.controller';
     SupplierQuotationController,
     SupplierComparisonController,
     PurchaseOrderController,
+    ProformaInvoiceController,
+    SupplierPayablesController,
   ],
   providers: [ProcurementService, PrismaService],
 })

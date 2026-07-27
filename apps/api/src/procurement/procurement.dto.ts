@@ -214,3 +214,138 @@ export class CreatePurchaseOrderDto {
   @IsOptional() @Type(() => Date) @IsDate() expectedReadyDate?: Date;
   @IsOptional() @IsString() notes?: string;
 }
+
+export class ProformaInvoicesQuery extends PageQuery {
+  @IsOptional() @IsUUID() projectId?: string;
+  @IsOptional() @IsUUID() supplierId?: string;
+  @IsOptional() @IsUUID() purchaseOrderId?: string;
+  @IsOptional() @IsString() status?: string;
+}
+
+export class ProformaInvoiceLineDto {
+  @IsUUID() purchaseOrderLineId!: string;
+  @IsString() @Length(1, 1000) description!: string;
+  @IsNumberString() quantity!: string;
+  @IsString() @Length(1, 30) unit!: string;
+  @IsNumberString() unitPrice!: string;
+  @IsOptional() @IsString() notes?: string;
+}
+
+export class CreateProformaInvoiceDto {
+  @IsString() @Length(1, 100) piNumber!: string;
+  @IsUUID() purchaseOrderId!: string;
+  @Type(() => Date) @IsDate() piDate!: Date;
+  @IsOptional() @Type(() => Date) @IsDate() receivedDate?: Date;
+  @IsOptional() @Type(() => Date) @IsDate() dueDate?: Date;
+  @IsString() @Length(3, 3) currency!: string;
+  @IsNumberString() exchangeRateSnapshot!: string;
+  @IsOptional() @IsNumberString() shippingAmount?: string;
+  @IsOptional() @IsNumberString() insuranceAmount?: string;
+  @IsOptional() @IsNumberString() taxAmount?: string;
+  @IsOptional() @IsNumberString() otherAmount?: string;
+  @IsOptional() @IsString() paymentTerms?: string;
+  @IsOptional() @IsString() bankReferenceProtected?: string;
+  @IsOptional() @IsString() notes?: string;
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => ProformaInvoiceLineDto)
+  lines!: ProformaInvoiceLineDto[];
+}
+
+export class UpdateProformaInvoiceDto {
+  @IsOptional() @Type(() => Date) @IsDate() receivedDate?: Date;
+  @IsOptional() @Type(() => Date) @IsDate() dueDate?: Date;
+  @IsOptional() @IsString() paymentTerms?: string;
+  @IsOptional() @IsString() bankReferenceProtected?: string;
+  @IsOptional() @IsString() notes?: string;
+}
+
+export class ProformaInvoiceDecisionDto {
+  @IsOptional() @IsString() @Length(1, 1000) comment?: string;
+}
+
+export class ProformaInvoiceDocumentDto {
+  @IsString() @Length(1, 1000) storageKey!: string;
+  @IsString() @Length(64, 64) checksum!: string;
+}
+
+export class SupplierPayablesQuery extends PageQuery {
+  @IsOptional() @IsUUID() projectId?: string;
+  @IsOptional() @IsUUID() supplierId?: string;
+  @IsOptional() @IsString() status?: string;
+}
+
+export class SupplierPaymentScheduleDto {
+  @IsIn([
+    'DEPOSIT',
+    'PRODUCTION_START',
+    'PRODUCTION_PROGRESS',
+    'PRE_SHIPMENT',
+    'BALANCE',
+    'RETENTION',
+    'OTHER',
+  ])
+  milestone!: string;
+  @Type(() => Number) @IsInt() @Min(1) sequence!: number;
+  @Type(() => Date) @IsDate() dueDate!: Date;
+  @IsOptional() @IsNumberString() percentage?: string;
+  @IsNumberString() amount!: string;
+  @IsOptional() @IsString() condition?: string;
+  @IsOptional() @IsString() dependencyType?: string;
+  @IsOptional() @IsUUID() dependencyId?: string;
+  @IsOptional() @IsString() dependencyStatus?: string;
+}
+
+export class GenerateSupplierPayableDto {
+  @IsUUID() proformaInvoiceId!: string;
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => SupplierPaymentScheduleDto)
+  schedules!: SupplierPaymentScheduleDto[];
+}
+
+export class CreateSupplierPaymentScheduleDto extends SupplierPaymentScheduleDto {
+  @IsUUID() supplierPayableId!: string;
+}
+
+export class UpdateSupplierPaymentScheduleDto {
+  @IsOptional() @Type(() => Date) @IsDate() dueDate?: Date;
+  @IsOptional() @IsString() condition?: string;
+  @IsOptional() @IsString() dependencyStatus?: string;
+}
+
+export class CreateSupplierPaymentDto {
+  @IsUUID() supplierId!: string;
+  @IsUUID() projectId!: string;
+  @Type(() => Date) @IsDate() paymentDate!: Date;
+  @IsNumberString() amount!: string;
+  @IsString() @Length(3, 3) currency!: string;
+  @IsNumberString() exchangeRateSnapshot!: string;
+  @IsIn([
+    'BANK_TRANSFER',
+    'LETTER_OF_CREDIT',
+    'OFFSET',
+    'RETENTION_RELEASE',
+    'OTHER',
+  ])
+  paymentMethod!: string;
+  @IsOptional() @IsString() bankReferenceProtected?: string;
+  @IsOptional() @IsString() transactionReference?: string;
+  @IsOptional() @IsString() notes?: string;
+  @IsString() @Length(8, 200) idempotencyKey!: string;
+}
+
+export class SupplierPaymentAllocationLineDto {
+  @IsUUID() scheduleId!: string;
+  @IsNumberString() amount!: string;
+}
+
+export class AllocateSupplierPaymentDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => SupplierPaymentAllocationLineDto)
+  allocations!: SupplierPaymentAllocationLineDto[];
+}

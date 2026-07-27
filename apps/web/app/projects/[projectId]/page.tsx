@@ -287,7 +287,21 @@ export default function ProjectWorkspace() {
                               ? '/catalog'
                               : workspace === 'procurement'
                                 ? `/procurement/requests?projectId=${id}`
-                                : '#'
+                                : workspace === 'production'
+                                  ? `/production?projectId=${id}`
+                                  : workspace === 'shipping'
+                                    ? `/logistics/shipments?projectId=${id}`
+                                    : workspace === 'warehouse'
+                                      ? `/inventory?projectId=${id}`
+                                      : workspace === 'installation'
+                                        ? `/installations?projectId=${id}`
+                                        : workspace === 'inspection'
+                                          ? `/projects/${id}/inspections`
+                                          : workspace === 'handover'
+                                            ? `/projects/${id}/handover`
+                                            : workspace === 'warranty'
+                                              ? `/projects/${id}/warranty`
+                                              : '#'
                 }
               >
                 {quick?.[0] ?? 'Mở danh sách liên quan'}

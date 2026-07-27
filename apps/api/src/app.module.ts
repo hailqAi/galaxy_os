@@ -32,6 +32,12 @@ import { CommercialModule } from './commercial/commercial.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { ProcurementModule } from './procurement/procurement.module';
+import { ProductionModule } from './production/production.module';
+import { LogisticsModule } from './logistics/logistics.module';
+import { WarehouseModule } from './warehouse/warehouse.module';
+import { InventoryModule } from './inventory/inventory.module';
+import { InstallationModule } from './installation/installation.module';
+import { AfterSalesModule } from './after-sales/after-sales.module';
 
 @Module({
   imports: [
@@ -63,6 +69,12 @@ import { ProcurementModule } from './procurement/procurement.module';
     UploadsModule,
     ContractsModule,
     ProcurementModule,
+    ProductionModule,
+    LogisticsModule,
+    WarehouseModule,
+    InventoryModule,
+    InstallationModule,
+    AfterSalesModule,
     ...(process.env.FEATURE_MARKETING === 'true' ? [MarketingModule] : []),
   ],
   controllers: [HealthController, MeController],
