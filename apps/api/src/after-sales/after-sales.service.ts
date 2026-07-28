@@ -12,13 +12,20 @@ import { CurrentActor } from '../access-control/current-actor';
 import { PrismaService } from '../prisma.service';
 import {
   CompleteHandoverDto,
+  CompleteServiceVisitDto,
   ConfirmTicketDto,
   CreateAcceptanceDto,
   CreateHandoverDto,
   CreateInspectionDto,
+  CreateReplacementDto,
+  CreateServiceVisitDto,
   CreateTicketDto,
+  CreateWarrantyClaimDto,
+  DecideWarrantyClaimDto,
   DecideInspectionItemDto,
+  HandoverDocumentDto,
   ResolveTicketDto,
+  SignDocumentDto,
   TicketStatusDto,
 } from './after-sales.dto';
 
@@ -296,6 +303,70 @@ export class AfterSalesService {
     return this.handover(actor, handoverId);
   }
 
+  async addHandoverDocument(
+    actor: CurrentActor,
+    handoverId: string,
+    data: HandoverDocumentDto,
+  ) {
+    const handover = await this.handover(actor, handoverId);
+    if (handover.status === 'COMPLETED')
+      throw new ConflictException('Completed handover documents are immutable');
+    await this.assertFile(actor, data.fileAssetId);
+    const latest = await this.prisma.handoverDocument.findFirst({
+      where: { handoverId, type: data.type },
+      orderBy: { version: 'desc' },
+    });
+    if (
+      latest?.checksum === data.checksum.toLowerCase() &&
+      latest.language === data.language
+    )
+      return latest;
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.handoverDocument.create({
+        data: {
+          organizationId: actor.organizationId,
+          projectId: handover.projectId,
+          handoverId,
+          fileAssetId: data.fileAssetId,
+          type: data.type,
+          version: (latest?.version ?? 0) + 1,
+          checksum: data.checksum.toLowerCase(),
+          language: data.language,
+          uploadedBy: actor.userId,
+          createdBy: actor.userId,
+        },
+      });
+      if (latest)
+        await tx.handoverDocument.update({
+          where: { id: latest.id },
+          data: { supersededBy: created.id },
+        });
+      return created;
+    });
+  }
+
+  async signHandoverDocument(
+    actor: CurrentActor,
+    id: string,
+    data: SignDocumentDto,
+  ) {
+    const item = await this.prisma.handoverDocument.findFirst({
+      where: { id, organizationId: actor.organizationId },
+      include: { handover: true },
+    });
+    if (!item) throw new NotFoundException('Handover document not found');
+    await this.policy.assertView(actor, 'Project', item.handover.projectId);
+    if (item.supersededBy || item.handover.status === 'COMPLETED')
+      throw new ConflictException('Finalized document is immutable');
+    return this.prisma.handoverDocument.update({
+      where: { id },
+      data: {
+        signedStatus: data.signedStatus,
+        signedAt: data.signedStatus.startsWith('SIGNED_') ? new Date() : null,
+      },
+    });
+  }
+
   async completeHandover(
     actor: CurrentActor,
     id: string,
@@ -303,6 +374,16 @@ export class AfterSalesService {
   ) {
     const item = await this.handover(actor, id);
     if (item.status === 'COMPLETED') return item;
+    const documents = await this.prisma.handoverDocument.findMany({
+      where: { handoverId: id, supersededBy: null },
+      select: { type: true },
+    });
+    const documentTypes = new Set(documents.map(({ type }) => type));
+    const missingDocuments = [
+      'HANDOVER_MINUTES',
+      'PRODUCT_LIST',
+      'WARRANTY_DOCUMENT',
+    ].filter((type) => !documentTypes.has(type));
     const [missingChecklist, acceptedInspection, criticalPunch] =
       await Promise.all([
         this.prisma.handoverChecklist.count({
@@ -326,6 +407,7 @@ export class AfterSalesService {
       ]);
     const blockers = [
       missingChecklist && 'required checklist',
+      missingDocuments.length && 'required documents',
       !acceptedInspection && 'accepted inspection',
       criticalPunch && 'critical punch item',
     ].filter(Boolean);
@@ -454,6 +536,219 @@ export class AfterSalesService {
     });
   }
 
+  async createServiceVisit(
+    actor: CurrentActor,
+    ticketId: string,
+    data: CreateServiceVisitDto,
+  ) {
+    const ticket = await this.ticketRecord(actor, ticketId);
+    if (['CLOSED', 'CANCELLED'].includes(ticket.status))
+      throw new ConflictException('Closed ticket cannot be scheduled');
+    if (
+      data.technicianId &&
+      !(await this.prisma.user.findFirst({
+        where: {
+          id: data.technicianId,
+          status: 'active',
+          organizationMembers: {
+            some: {
+              organizationId: actor.organizationId,
+              status: 'active',
+            },
+          },
+        },
+      }))
+    )
+      throw new NotFoundException('Active technician not found');
+    return this.prisma.$transaction(async (tx) => {
+      const visit = await tx.serviceVisit.create({
+        data: {
+          ...data,
+          organizationId: actor.organizationId,
+          projectId: ticket.projectId,
+          customerId: ticket.customerId,
+          serviceTicketId: ticketId,
+          technicianId: data.technicianId,
+          createdBy: actor.userId,
+          updatedBy: actor.userId,
+        },
+      });
+      await tx.serviceTicket.update({
+        where: { id: ticketId },
+        data: { status: 'SCHEDULED' },
+      });
+      return visit;
+    });
+  }
+
+  async startServiceVisit(actor: CurrentActor, id: string) {
+    const visit = await this.visit(actor, id);
+    if (!['SCHEDULED', 'CONFIRMED', 'EN_ROUTE'].includes(visit.status))
+      throw new ConflictException('Visit cannot be started');
+    if (
+      visit.technicianId &&
+      visit.technicianId !== actor.userId &&
+      !actor.permissions.includes('service_visit.manage')
+    )
+      throw new ForbiddenException('Visit is assigned to another technician');
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.serviceVisit.update({
+        where: { id },
+        data: {
+          status: 'IN_PROGRESS',
+          actualStart: new Date(),
+          updatedBy: actor.userId,
+        },
+      });
+      await tx.serviceTicket.update({
+        where: { id: visit.serviceTicketId },
+        data: { status: 'IN_PROGRESS' },
+      });
+      return updated;
+    });
+  }
+
+  async completeServiceVisit(
+    actor: CurrentActor,
+    id: string,
+    data: CompleteServiceVisitDto,
+  ) {
+    const visit = await this.visit(actor, id);
+    if (
+      visit.technicianId &&
+      visit.technicianId !== actor.userId &&
+      !actor.permissions.includes('service_visit.manage')
+    )
+      throw new ForbiddenException('Visit is assigned to another technician');
+    if (visit.status !== 'IN_PROGRESS')
+      throw new ConflictException('Active visit required');
+    if (
+      ['DIAGNOSIS', 'INSPECTION'].includes(visit.visitType)
+        ? !data.diagnosis
+        : !data.workPerformed
+    )
+      throw new UnprocessableEntityException(
+        'Diagnosis or work performed is required',
+      );
+    if (data.evidenceFileId) await this.assertFile(actor, data.evidenceFileId);
+    return this.prisma.serviceVisit.update({
+      where: { id },
+      data: {
+        ...data,
+        status: 'COMPLETED',
+        actualEnd: new Date(),
+        completedAt: new Date(),
+        updatedBy: actor.userId,
+      },
+    });
+  }
+
+  async createWarrantyClaim(
+    actor: CurrentActor,
+    ticketId: string,
+    data: CreateWarrantyClaimDto,
+  ) {
+    const ticket = await this.ticketRecord(actor, ticketId);
+    const asset = data.warrantyAssetId
+      ? await this.prisma.warrantyAsset.findFirst({
+          where: {
+            id: data.warrantyAssetId,
+            organizationId: actor.organizationId,
+            projectId: ticket.projectId,
+            customerId: ticket.customerId,
+          },
+        })
+      : null;
+    const goodwill = data.claimType === 'GOODWILL';
+    if (!asset && !goodwill)
+      throw new UnprocessableEntityException('Warranty asset required');
+    if (
+      asset &&
+      (ticket.reportedAt < asset.warrantyStart ||
+        ticket.reportedAt > asset.warrantyEnd) &&
+      !goodwill
+    )
+      throw new ConflictException('Warranty was not active when reported');
+    if (goodwill && !actor.permissions.includes('warranty.goodwill.approve'))
+      throw new ForbiddenException('Goodwill approval required');
+    return this.prisma.warrantyClaim.create({
+      data: {
+        ...data,
+        organizationId: actor.organizationId,
+        projectId: ticket.projectId,
+        customerId: ticket.customerId,
+        serviceTicketId: ticketId,
+        goodwill,
+        warrantyAssetId: asset?.id,
+        productId: asset?.productId,
+        variantId: asset?.variantId,
+        inventorySerialId: asset?.inventorySerialId,
+        inventoryLotId: asset?.inventoryLotId,
+        createdBy: actor.userId,
+      },
+    });
+  }
+
+  async decideWarrantyClaim(
+    actor: CurrentActor,
+    id: string,
+    data: DecideWarrantyClaimDto,
+  ) {
+    const claim = await this.claim(actor, id);
+    if (
+      claim.goodwill &&
+      data.coverageDecision === 'GOODWILL_APPROVED' &&
+      !actor.permissions.includes('warranty.goodwill.approve')
+    )
+      throw new ForbiddenException('Goodwill approval required');
+    return this.prisma.warrantyClaim.update({
+      where: { id },
+      data: {
+        ...data,
+        decision: data.status,
+        decisionDate: new Date(),
+        approvedBy: ['APPROVED', 'PARTIALLY_APPROVED'].includes(data.status)
+          ? actor.userId
+          : null,
+        updatedBy: actor.userId,
+      },
+    });
+  }
+
+  async createReplacement(
+    actor: CurrentActor,
+    claimId: string,
+    data: CreateReplacementDto,
+  ) {
+    const claim = await this.claim(actor, claimId);
+    if (
+      !['APPROVED', 'PARTIALLY_APPROVED'].includes(claim.status) &&
+      claim.coverageDecision !== 'GOODWILL_APPROVED'
+    )
+      throw new ConflictException('Approved warranty claim required');
+    if (!claim.warrantyAssetId)
+      throw new ConflictException('Original warranty asset required');
+    return this.prisma.warrantyReplacement.upsert({
+      where: { warrantyClaimId: claim.id },
+      update: {},
+      create: {
+        organizationId: actor.organizationId,
+        projectId: claim.projectId!,
+        customerId: claim.customerId!,
+        serviceTicketId: claim.serviceTicketId,
+        warrantyClaimId: claim.id,
+        originalWarrantyAssetId: claim.warrantyAssetId,
+        replacementProductId: data.replacementProductId,
+        replacementVariantId: data.replacementVariantId,
+        warrantyDecision: data.warrantyDecision,
+        notes: data.notes,
+        approvedBy: actor.userId,
+        createdBy: actor.userId,
+        status: 'STOCK_PENDING',
+      },
+    });
+  }
+
   async tickets(actor: CurrentActor, projectId: string) {
     await this.policy.assertView(actor, 'Project', projectId);
     const items = await this.prisma.serviceTicket.findMany({
@@ -571,6 +866,24 @@ export class AfterSalesService {
     });
     if (!item) throw new NotFoundException('Service ticket not found');
     await this.policy.assertView(actor, 'Project', item.projectId);
+    return item;
+  }
+
+  private async visit(actor: CurrentActor, id: string) {
+    const item = await this.prisma.serviceVisit.findFirst({
+      where: { id, organizationId: actor.organizationId },
+    });
+    if (!item) throw new NotFoundException('Service visit not found');
+    await this.policy.assertView(actor, 'Project', item.projectId!);
+    return item;
+  }
+
+  private async claim(actor: CurrentActor, id: string) {
+    const item = await this.prisma.warrantyClaim.findFirst({
+      where: { id, organizationId: actor.organizationId },
+    });
+    if (!item) throw new NotFoundException('Warranty claim not found');
+    await this.policy.assertView(actor, 'Project', item.projectId!);
     return item;
   }
 

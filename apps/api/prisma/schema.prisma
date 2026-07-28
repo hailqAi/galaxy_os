@@ -4040,17 +4040,26 @@ model HandoverChecklist {
 }
 
 model HandoverDocument {
-  id          String   @id @default(uuid()) @db.Uuid
-  handoverId  String   @db.Uuid
-  fileAssetId String   @db.Uuid
-  type        String
-  version     Int
-  checksum    String
-  createdBy   String   @db.Uuid
-  createdAt   DateTime @default(now())
-  handover    Handover @relation(fields: [handoverId], references: [id])
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String?   @db.Uuid
+  projectId      String?   @db.Uuid
+  handoverId     String    @db.Uuid
+  fileAssetId    String    @db.Uuid
+  type           String
+  version        Int
+  checksum       String
+  language       String    @default("VI")
+  signedStatus   String    @default("NOT_REQUIRED")
+  signedAt       DateTime?
+  uploadedAt     DateTime  @default(now())
+  uploadedBy     String?   @db.Uuid
+  supersededBy   String?   @db.Uuid
+  createdBy      String    @db.Uuid
+  createdAt      DateTime  @default(now())
+  handover       Handover  @relation(fields: [handoverId], references: [id])
 
   @@unique([handoverId, type, version])
+  @@index([organizationId, projectId, type])
 }
 
 model HandoverStatusHistory {
@@ -4160,35 +4169,110 @@ model ServiceTicket {
 }
 
 model WarrantyClaim {
-  id              String        @id @default(uuid()) @db.Uuid
-  organizationId  String        @db.Uuid
-  serviceTicketId String        @db.Uuid
-  supplierId      String?       @db.Uuid
-  purchaseOrderId String?       @db.Uuid
-  decision        String        @default("PENDING")
-  goodwill        Boolean       @default(false)
-  approvedBy      String?       @db.Uuid
-  notes           String?
-  createdBy       String        @db.Uuid
-  createdAt       DateTime      @default(now())
-  ticket          ServiceTicket @relation(fields: [serviceTicketId], references: [id])
+  id                String        @id @default(uuid()) @db.Uuid
+  organizationId    String        @db.Uuid
+  claimNumber       String?
+  projectId         String?       @db.Uuid
+  customerId        String?       @db.Uuid
+  serviceTicketId   String        @db.Uuid
+  warrantyAssetId   String?       @db.Uuid
+  supplierId        String?       @db.Uuid
+  purchaseOrderId   String?       @db.Uuid
+  productId         String?       @db.Uuid
+  variantId         String?       @db.Uuid
+  inventorySerialId String?       @db.Uuid
+  inventoryLotId    String?       @db.Uuid
+  claimType         String        @default("CUSTOMER_WARRANTY")
+  status            String        @default("DRAFT")
+  coverageDecision  String        @default("PENDING")
+  submissionMode    String        @default("MANUAL")
+  supplierReference String?
+  issueDescription  String?
+  diagnosis         String?
+  decision          String        @default("PENDING")
+  goodwill          Boolean       @default(false)
+  estimatedCost     Decimal?      @db.Decimal(20, 2)
+  approvedAmount    Decimal?      @db.Decimal(20, 2)
+  actualCost        Decimal?      @db.Decimal(20, 2)
+  currency          String        @default("VND")
+  approvedBy        String?       @db.Uuid
+  submittedDate     DateTime?
+  decisionDate      DateTime?
+  resolution        String?
+  notes             String?
+  createdBy         String        @db.Uuid
+  updatedBy         String?       @db.Uuid
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  ticket            ServiceTicket @relation(fields: [serviceTicketId], references: [id])
 
+  @@unique([organizationId, claimNumber])
   @@index([organizationId, serviceTicketId, decision])
+  @@index([organizationId, projectId, status])
 }
 
 model ServiceVisit {
-  id              String        @id @default(uuid()) @db.Uuid
-  organizationId  String        @db.Uuid
-  serviceTicketId String        @db.Uuid
-  scheduledAt     DateTime
-  technicianId    String?       @db.Uuid
-  status          String        @default("SCHEDULED")
-  findings        String?
-  evidenceFileId  String?       @db.Uuid
-  completedAt     DateTime?
-  ticket          ServiceTicket @relation(fields: [serviceTicketId], references: [id])
+  id               String        @id @default(uuid()) @db.Uuid
+  organizationId   String        @db.Uuid
+  projectId        String?       @db.Uuid
+  customerId       String?       @db.Uuid
+  serviceTicketId  String        @db.Uuid
+  scheduledAt      DateTime
+  scheduledEnd     DateTime?
+  actualStart      DateTime?
+  actualEnd        DateTime?
+  location         String?
+  contactName      String?
+  contactPhone     String?
+  technicianId     String?       @db.Uuid
+  status           String        @default("SCHEDULED")
+  visitType        String        @default("INSPECTION")
+  diagnosis        String?
+  workPerformed    String?
+  customerNotes    String?
+  technicianNotes  String?
+  followUpRequired Boolean       @default(false)
+  followUpDate     DateTime?
+  findings         String?
+  evidenceFileId   String?       @db.Uuid
+  completedAt      DateTime?
+  createdBy        String?       @db.Uuid
+  updatedBy        String?       @db.Uuid
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  ticket           ServiceTicket @relation(fields: [serviceTicketId], references: [id])
 
   @@index([organizationId, scheduledAt, status])
+  @@index([organizationId, projectId, technicianId, status])
+}
+
+model WarrantyReplacement {
+  id                         String    @id @default(uuid()) @db.Uuid
+  organizationId             String    @db.Uuid
+  projectId                  String    @db.Uuid
+  customerId                 String    @db.Uuid
+  serviceTicketId            String    @db.Uuid
+  warrantyClaimId            String    @unique @db.Uuid
+  originalWarrantyAssetId    String    @db.Uuid
+  replacementProductId       String    @db.Uuid
+  replacementVariantId       String?   @db.Uuid
+  replacementSerialId        String?   @db.Uuid
+  reservationId              String?   @db.Uuid
+  stockIssueId               String?   @db.Uuid
+  defectiveReturnId          String?   @db.Uuid
+  serviceVisitId             String?   @db.Uuid
+  replacementWarrantyAssetId String?   @db.Uuid
+  status                     String    @default("REQUESTED")
+  warrantyDecision           String
+  approvedBy                 String?   @db.Uuid
+  completedAt                DateTime?
+  notes                      String?
+  createdBy                  String    @db.Uuid
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  @@index([organizationId, projectId, status])
+  @@index([serviceTicketId])
 }
 
 model ServicePart {

@@ -284,6 +284,11 @@ const permissions = [
   'service_ticket.create',
   'service_ticket.manage',
   'service.cost.read',
+  'service_visit.manage',
+  'service_visit.execute',
+  'warranty.claim.manage',
+  'warranty.claim.decide',
+  'warranty.replacement.manage',
   'financial_margin.read',
   'marketing.campaign.read',
   'marketing.campaign.create',
@@ -583,6 +588,7 @@ async function seed() {
                           (permission) =>
                             [
                               'service_ticket.',
+                              'service_visit.',
                               'project.read',
                               'inventory.read',
                               'inventory.reservation.read',
@@ -600,7 +606,11 @@ async function seed() {
                             ) ||
                             ['warranty.read', 'warranty.register'].includes(
                               permission.code,
-                            ),
+                            ) ||
+                            [
+                              'warranty.claim.manage',
+                              'warranty.replacement.manage',
+                            ].includes(permission.code),
                         )
                       : role.code === 'installer'
                         ? allPermissions.filter((permission) =>
@@ -622,6 +632,7 @@ async function seed() {
                                   'installation.readiness.override',
                                   'handover.override',
                                   'warranty.goodwill.approve',
+                                  'warranty.claim.decide',
                                 ].includes(permission.code) &&
                                 ([
                                   'project.',

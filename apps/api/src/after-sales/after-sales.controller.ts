@@ -11,13 +11,20 @@ import { Actor, RequirePermission } from '../access-control/access.decorators';
 import { CurrentActor } from '../access-control/current-actor';
 import {
   CompleteHandoverDto,
+  CompleteServiceVisitDto,
   ConfirmTicketDto,
   CreateAcceptanceDto,
   CreateHandoverDto,
   CreateInspectionDto,
+  CreateReplacementDto,
+  CreateServiceVisitDto,
   CreateTicketDto,
+  CreateWarrantyClaimDto,
+  DecideWarrantyClaimDto,
   DecideInspectionItemDto,
+  HandoverDocumentDto,
   ResolveTicketDto,
+  SignDocumentDto,
   TicketStatusDto,
 } from './after-sales.dto';
 import { AfterSalesService } from './after-sales.service';
@@ -107,6 +114,24 @@ export class AfterSalesController {
   ) {
     return this.service.completeHandover(actor, id, data);
   }
+  @Post('handovers/:id/documents')
+  @RequirePermission('handover.manage')
+  addHandoverDocument(
+    @Actor() actor: CurrentActor,
+    @Param('id') id: string,
+    @Body() data: HandoverDocumentDto,
+  ) {
+    return this.service.addHandoverDocument(actor, id, data);
+  }
+  @Post('handover-documents/:id/sign')
+  @RequirePermission('handover.manage')
+  signHandoverDocument(
+    @Actor() actor: CurrentActor,
+    @Param('id') id: string,
+    @Body() data: SignDocumentDto,
+  ) {
+    return this.service.signHandoverDocument(actor, id, data);
+  }
   @Get('warranty/assets')
   @RequirePermission('warranty.read')
   warrantyAssets(
@@ -161,5 +186,55 @@ export class AfterSalesController {
   @RequirePermission('service_ticket.manage')
   closeTicket(@Actor() actor: CurrentActor, @Param('id') id: string) {
     return this.service.closeTicket(actor, id);
+  }
+  @Post('service-tickets/:id/visits')
+  @RequirePermission('service_visit.manage')
+  createServiceVisit(
+    @Actor() actor: CurrentActor,
+    @Param('id') id: string,
+    @Body() data: CreateServiceVisitDto,
+  ) {
+    return this.service.createServiceVisit(actor, id, data);
+  }
+  @Post('service-visits/:id/start')
+  @RequirePermission('service_visit.execute')
+  startServiceVisit(@Actor() actor: CurrentActor, @Param('id') id: string) {
+    return this.service.startServiceVisit(actor, id);
+  }
+  @Post('service-visits/:id/complete')
+  @RequirePermission('service_visit.execute')
+  completeServiceVisit(
+    @Actor() actor: CurrentActor,
+    @Param('id') id: string,
+    @Body() data: CompleteServiceVisitDto,
+  ) {
+    return this.service.completeServiceVisit(actor, id, data);
+  }
+  @Post('service-tickets/:id/claims')
+  @RequirePermission('warranty.claim.manage')
+  createWarrantyClaim(
+    @Actor() actor: CurrentActor,
+    @Param('id') id: string,
+    @Body() data: CreateWarrantyClaimDto,
+  ) {
+    return this.service.createWarrantyClaim(actor, id, data);
+  }
+  @Post('warranty-claims/:id/decide')
+  @RequirePermission('warranty.claim.decide')
+  decideWarrantyClaim(
+    @Actor() actor: CurrentActor,
+    @Param('id') id: string,
+    @Body() data: DecideWarrantyClaimDto,
+  ) {
+    return this.service.decideWarrantyClaim(actor, id, data);
+  }
+  @Post('warranty-claims/:id/replacement')
+  @RequirePermission('warranty.replacement.manage')
+  createReplacement(
+    @Actor() actor: CurrentActor,
+    @Param('id') id: string,
+    @Body() data: CreateReplacementDto,
+  ) {
+    return this.service.createReplacement(actor, id, data);
   }
 }

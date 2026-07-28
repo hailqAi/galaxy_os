@@ -10,6 +10,8 @@ policy-snapshot Warranty Assets idempotently. Service Tickets enforce
 project/customer scope, resolution evidence and customer confirmation.
 
 Remaining before `COMPLETE`: team/site-delivery/site-issue commands, versioned
-handover document package, manual warranty registration and expiry worker,
-service visits/claims/replacement commands, notifications and browser
-authorization coverage.
+generated handover documents, manual warranty registration and expiry worker,
+replacement inventory commands, notifications and browser authorization
+coverage. Uploaded Handover Documents are versioned, checksummed and
+immutable after completion; Service Visit and Warranty Claim transitions are
+implemented.

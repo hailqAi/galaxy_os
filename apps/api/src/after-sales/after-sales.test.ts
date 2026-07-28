@@ -1,4 +1,8 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
@@ -58,6 +62,7 @@ describe('Inspection, handover and after-sales', () => {
         }),
       },
       handoverChecklist: { count: vi.fn().mockResolvedValue(1) },
+      handoverDocument: { findMany: vi.fn().mockResolvedValue([]) },
       acceptanceRecord: { count: vi.fn().mockResolvedValue(1) },
       punchItem: { count: vi.fn().mockResolvedValue(0) },
     };
@@ -106,5 +111,103 @@ describe('Inspection, handover and after-sales', () => {
     await expect(service.closeTicket(actor, 'ticket')).rejects.toBeInstanceOf(
       ConflictException,
     );
+  });
+
+  it('rejects a service visit for a closed ticket', async () => {
+    const service = new AfterSalesService(
+      {
+        serviceTicket: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: 'ticket',
+            projectId: 'project',
+            status: 'CLOSED',
+          }),
+        },
+      } as unknown as PrismaService,
+      policy,
+    );
+    await expect(
+      service.createServiceVisit(actor, 'ticket', {
+        scheduledAt: new Date(),
+        visitType: 'INSPECTION',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('keeps completed handover documents immutable', async () => {
+    const service = new AfterSalesService(
+      {
+        handoverDocument: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: 'document',
+            supersededBy: null,
+            handover: { projectId: 'project', status: 'COMPLETED' },
+          }),
+        },
+      } as unknown as PrismaService,
+      policy,
+    );
+    await expect(
+      service.signHandoverDocument(actor, 'document', {
+        signedStatus: 'SIGNED_MANUALLY',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('prevents another technician from completing an assigned visit', async () => {
+    const service = new AfterSalesService(
+      {
+        serviceVisit: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: 'visit',
+            projectId: 'project',
+            technicianId: 'other-user',
+            status: 'IN_PROGRESS',
+            visitType: 'DIAGNOSIS',
+          }),
+        },
+      } as unknown as PrismaService,
+      policy,
+    );
+    await expect(
+      service.completeServiceVisit(actor, 'visit', {
+        diagnosis: 'Fault found',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects an expired warranty claim unless it is goodwill', async () => {
+    const service = new AfterSalesService(
+      {
+        serviceTicket: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: 'ticket',
+            projectId: 'project',
+            customerId: 'customer',
+            status: 'IN_PROGRESS',
+            reportedAt: new Date('2026-01-01'),
+          }),
+        },
+        warrantyAsset: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: 'asset',
+            projectId: 'project',
+            customerId: 'customer',
+            warrantyStart: new Date('2024-01-01'),
+            warrantyEnd: new Date('2025-01-01'),
+          }),
+        },
+      } as unknown as PrismaService,
+      policy,
+    );
+    await expect(
+      service.createWarrantyClaim(actor, 'ticket', {
+        claimNumber: 'CL-1',
+        warrantyAssetId: '00000000-0000-4000-8000-000000000001',
+        claimType: 'CUSTOMER_WARRANTY',
+        issueDescription: 'Failed',
+        submissionMode: 'MANUAL',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 });
