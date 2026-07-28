@@ -30,6 +30,24 @@ type Activity = {
   createdAt: string;
   actor: { displayName: string };
 };
+type OperationsSummary = {
+  inventory: Record<string, string | null>;
+  openPunchItems: number;
+  criticalPunchItems: number;
+  inspectionStatus: string | null;
+  acceptanceStatus: string | null;
+  handover: {
+    status: string;
+    incompleteRequiredChecklist: number;
+    documentCount: number;
+  } | null;
+  warrantyAssets: number;
+  expiringWarrantyAssets: number;
+  openServiceTickets: number;
+  slaRiskTickets: number;
+  openWarrantyClaims: number;
+  activeWarrantyReplacements: number;
+};
 
 const stages = [
   ['REQUIREMENT', 'Yêu cầu', 'requirements'],
@@ -90,6 +108,7 @@ export default function ProjectWorkspace() {
   const query = useSearchParams();
   const [project, setProject] = useState<Project>();
   const [activity, setActivity] = useState<Activity[]>([]);
+  const [operations, setOperations] = useState<OperationsSummary>();
   const [workspace, setWorkspace] = useState(
     () =>
       query.get('workspace') ||
@@ -101,12 +120,14 @@ export default function ProjectWorkspace() {
   const [message, setMessage] = useState('');
   const load = useCallback(async () => {
     try {
-      const [item, timeline] = await Promise.all([
+      const [item, timeline, summary] = await Promise.all([
         api<Project>(`/projects/${id}`),
         api<Activity[]>(`/projects/${id}/timeline`),
+        api<OperationsSummary>(`/projects/${id}/operations-summary`),
       ]);
       setProject(item);
       setActivity(timeline);
+      setOperations(summary);
     } catch (error) {
       setMessage((error as Error).message);
     }
@@ -203,6 +224,32 @@ export default function ProjectWorkspace() {
           </div>
         ))}
       </section>
+      {operations && (
+        <section
+          aria-label="Tổng hợp vận hành"
+          className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6"
+        >
+          {[
+            ['Đã nhận', operations.inventory.onHandDelta ?? '0'],
+            ['Quality hold', operations.inventory.qualityHoldDelta ?? '0'],
+            ['Đã giữ', operations.inventory.reservedDelta ?? '0'],
+            ['Đã xuất', operations.inventory.issuedDelta ?? '0'],
+            ['Đã lắp', operations.inventory.installedDelta ?? '0'],
+            ['Punch mở', operations.openPunchItems],
+            ['Nghiệm thu', operations.inspectionStatus ?? '—'],
+            ['Bàn giao', operations.handover?.status ?? '—'],
+            ['Tài sản BH', operations.warrantyAssets],
+            ['Claim mở', operations.openWarrantyClaims],
+            ['Ticket mở', operations.openServiceTickets],
+            ['SLA risk', operations.slaRiskTickets],
+          ].map(([label, value]) => (
+            <div className="panel" key={label}>
+              <p className="text-sm text-black/55">{label}</p>
+              <strong>{value}</strong>
+            </div>
+          ))}
+        </section>
+      )}
       <div className="grid gap-5 lg:grid-cols-[230px_1fr_280px]">
         <nav
           aria-label="Không gian dự án"

@@ -113,6 +113,28 @@ describe('Inspection, handover and after-sales', () => {
     );
   });
 
+  it('blocks closing while a service workflow remains open', async () => {
+    const service = new AfterSalesService(
+      {
+        serviceTicket: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: 'ticket',
+            projectId: 'project',
+            status: 'CUSTOMER_CONFIRMED',
+          }),
+        },
+        serviceVisit: { count: vi.fn() },
+        warrantyClaim: { count: vi.fn() },
+        warrantyReplacement: { count: vi.fn() },
+        $transaction: vi.fn().mockResolvedValue([1, 0, 0]),
+      } as unknown as PrismaService,
+      policy,
+    );
+    await expect(service.closeTicket(actor, 'ticket')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+  });
+
   it('rejects a service visit for a closed ticket', async () => {
     const service = new AfterSalesService(
       {

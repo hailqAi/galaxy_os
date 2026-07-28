@@ -854,6 +854,33 @@ export class AfterSalesService {
     const item = await this.ticketRecord(actor, id);
     if (item.status !== 'CUSTOMER_CONFIRMED')
       throw new ConflictException('Customer confirmation required');
+    const [openVisits, openClaims, openReplacements] =
+      await this.prisma.$transaction([
+        this.prisma.serviceVisit.count({
+          where: {
+            serviceTicketId: id,
+            status: {
+              notIn: ['COMPLETED', 'CUSTOMER_ACKNOWLEDGED', 'CANCELLED'],
+            },
+          },
+        }),
+        this.prisma.warrantyClaim.count({
+          where: {
+            serviceTicketId: id,
+            status: { notIn: ['RESOLVED', 'CLOSED', 'REJECTED', 'CANCELLED'] },
+          },
+        }),
+        this.prisma.warrantyReplacement.count({
+          where: {
+            serviceTicketId: id,
+            status: { notIn: ['COMPLETED', 'REJECTED', 'CANCELLED'] },
+          },
+        }),
+      ]);
+    if (openVisits || openClaims || openReplacements)
+      throw new ConflictException(
+        'Open service workflow blocks ticket closure',
+      );
     return this.prisma.serviceTicket.update({
       where: { id },
       data: { status: 'CLOSED', closedAt: new Date() },

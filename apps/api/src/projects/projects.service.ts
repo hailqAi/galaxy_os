@@ -160,6 +160,131 @@ export class ProjectsService {
       orderBy: { createdAt: 'desc' },
     });
   }
+  async operationsSummary(actor: CurrentActor, id: string) {
+    await this.get(actor, id);
+    const scope = { organizationId: actor.organizationId, projectId: id };
+    const [
+      inventory,
+      workOrders,
+      openPunchItems,
+      criticalPunchItems,
+      inspection,
+      acceptance,
+      handover,
+      warrantyAssets,
+      expiringWarrantyAssets,
+      openServiceTickets,
+      slaRiskTickets,
+      openWarrantyClaims,
+      activeWarrantyReplacements,
+    ] = await this.prisma.$transaction([
+      this.prisma.inventoryTransactionLine.aggregate({
+        where: { transaction: scope },
+        _sum: {
+          onHandDelta: true,
+          availableDelta: true,
+          reservedDelta: true,
+          qualityHoldDelta: true,
+          issuedDelta: true,
+          installedDelta: true,
+        },
+      }),
+      this.prisma.installationWorkOrder.groupBy({
+        by: ['status'],
+        where: scope,
+        _count: true,
+        orderBy: { status: 'asc' },
+      }),
+      this.prisma.punchItem.count({
+        where: { ...scope, status: { notIn: ['RESOLVED', 'CLOSED'] } },
+      }),
+      this.prisma.punchItem.count({
+        where: {
+          ...scope,
+          severity: 'CRITICAL',
+          status: { notIn: ['RESOLVED', 'CLOSED'] },
+        },
+      }),
+      this.prisma.inspection.findFirst({
+        where: scope,
+        select: { status: true },
+        orderBy: { updatedAt: 'desc' },
+      }),
+      this.prisma.acceptanceRecord.findFirst({
+        where: scope,
+        select: { status: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.handover.findFirst({
+        where: scope,
+        select: {
+          status: true,
+          _count: {
+            select: {
+              checklist: { where: { required: true, completedAt: null } },
+              documents: true,
+            },
+          },
+        },
+        orderBy: { updatedAt: 'desc' },
+      }),
+      this.prisma.warrantyAsset.count({ where: scope }),
+      this.prisma.warrantyAsset.count({
+        where: {
+          ...scope,
+          status: { in: ['ACTIVE', 'EXPIRING'] },
+          warrantyEnd: {
+            lte: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          },
+        },
+      }),
+      this.prisma.serviceTicket.count({
+        where: { ...scope, status: { notIn: ['CLOSED', 'CANCELLED'] } },
+      }),
+      this.prisma.serviceTicket.count({
+        where: {
+          ...scope,
+          status: { notIn: ['CLOSED', 'CANCELLED'] },
+          slaDueAt: {
+            lte: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          },
+        },
+      }),
+      this.prisma.warrantyClaim.count({
+        where: {
+          ...scope,
+          status: { notIn: ['RESOLVED', 'CLOSED', 'REJECTED', 'CANCELLED'] },
+        },
+      }),
+      this.prisma.warrantyReplacement.count({
+        where: {
+          ...scope,
+          status: { notIn: ['COMPLETED', 'REJECTED', 'CANCELLED'] },
+        },
+      }),
+    ]);
+    return {
+      inventory: inventory._sum,
+      installationWorkOrders: workOrders,
+      openPunchItems,
+      criticalPunchItems,
+      inspectionStatus: inspection?.status ?? null,
+      acceptanceStatus: acceptance?.status ?? null,
+      handover: handover
+        ? {
+            status: handover.status,
+            incompleteRequiredChecklist: handover._count.checklist,
+            documentCount: handover._count.documents,
+          }
+        : null,
+      warrantyAssets,
+      expiringWarrantyAssets,
+      openServiceTickets,
+      slaRiskTickets,
+      openWarrantyClaims,
+      activeWarrantyReplacements,
+    };
+  }
   async create(actor: CurrentActor, data: CreateProjectDto) {
     await this.references(actor, data);
     return this.prisma

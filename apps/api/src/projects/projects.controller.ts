@@ -187,4 +187,12 @@ export class ProjectsController {
   ) {
     return this.projects.timeline(a, id);
   }
+  @Get(':id/operations-summary')
+  @RequirePermission('project.read')
+  operationsSummary(
+    @Actor() a: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.projects.operationsSummary(a, id);
+  }
 }

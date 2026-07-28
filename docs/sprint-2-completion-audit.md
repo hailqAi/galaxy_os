@@ -37,6 +37,6 @@ complete.
 ## Audit conclusion
 
 `SPRINT 2 NOT COMPLETE`. Inventory, installation, handover, and
-warranty/after-sales are missing. PI, payables, production, large import,
+warranty/after-sales are partial. PI, payables, production, large import,
 dashboards, workspace integration, authorization matrix, and Playwright
 coverage are partial. No completion tag or final commit is permitted yet.
