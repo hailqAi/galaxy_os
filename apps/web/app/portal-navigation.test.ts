@@ -16,4 +16,18 @@ describe('permission-aware portal navigation', () => {
       ]),
     );
   });
+
+  it('hides Marketing when its feature flag is off', () => {
+    const permissions = ['marketing.campaign.read', 'marketing.content.read'];
+    expect(
+      visibleNavigation(permissions, 'ORGANIZATION', false).some(({ href }) =>
+        href.startsWith('/marketing'),
+      ),
+    ).toBe(false);
+    expect(
+      visibleNavigation(permissions, 'ORGANIZATION', true).some(({ href }) =>
+        href.startsWith('/marketing'),
+      ),
+    ).toBe(true);
+  });
 });

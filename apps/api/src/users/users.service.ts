@@ -98,6 +98,27 @@ const userSummarySelect = (organizationId: string) =>
     credential: { select: { mustChangePassword: true, lockedUntil: true } },
   }) satisfies Prisma.UserSelect;
 
+export type AccessPreviewResponse = {
+  userId: string;
+  scope: 'SYSTEM' | 'ORGANIZATION' | 'DEPARTMENT' | 'SELF';
+  visibleModules: string[];
+  visibleDepartmentIds: string[];
+  manageableUsers: number;
+  effectivePermissions: string[];
+  deniedPermissions: string[];
+  sourceRoles: {
+    roleId: string;
+    roleName: string;
+    scopeType: string;
+    departmentId: string | null;
+  }[];
+  roles: { id: string; name: string }[];
+  permissions: { code: string; module: string }[];
+  scopes: { type: string; departmentId: string | null }[];
+  customFields: { key: string; value: Prisma.JsonValue }[];
+  protectedTargets: number;
+};
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -331,7 +352,10 @@ export class UsersService {
     };
   }
 
-  async accessPreview(actor: CurrentActor, id: string) {
+  async accessPreview(
+    actor: CurrentActor,
+    id: string,
+  ): Promise<AccessPreviewResponse> {
     await this.policy.assert(actor, id, 'view');
     const target = await this.prisma.user.findUniqueOrThrow({
       where: { id },
@@ -363,7 +387,7 @@ export class UsersService {
       ),
     ].sort();
     const catalogue = await this.prisma.permission.findMany({
-      select: { code: true },
+      select: { code: true, module: true },
     });
     const scope = assignments.some(({ scopeType }) => scopeType === 'SYSTEM')
       ? 'SYSTEM'
@@ -380,13 +404,20 @@ export class UsersService {
               select: { id: true },
             })
           ).map(({ id }) => id)
-        : (target.organizationMembers[0]?.managedDepartments.map(
+        : (target.organizationMembers[0]?.managedDepartments?.map(
             ({ departmentId }) => departmentId,
           ) ?? []);
     const manageableUsers = await this.prisma.user.count({
       where:
         scope === 'SYSTEM'
-          ? {}
+          ? {
+              organizationMembers: {
+                some: {
+                  organizationId: actor.organizationId,
+                  status: 'active',
+                },
+              },
+            }
           : scope === 'ORGANIZATION'
             ? {
                 organizationMembers: {
@@ -411,7 +442,9 @@ export class UsersService {
       userId: id,
       scope,
       visibleModules: [
-        ...new Set(effectivePermissions.map((code) => code.split('.')[0])),
+        ...new Set(
+          effectivePermissions.map((code) => code.split('.')[0] ?? code),
+        ),
       ].sort(),
       visibleDepartmentIds: departmentIds,
       manageableUsers,
@@ -426,8 +459,27 @@ export class UsersService {
         scopeType,
         departmentId,
       })),
+      roles: assignments.map(({ role }) => ({ id: role.id, name: role.name })),
+      permissions: catalogue.filter(({ code }) =>
+        effectivePermissions.includes(code),
+      ),
+      scopes: assignments.map(({ scopeType, departmentId }) => ({
+        type: scopeType,
+        departmentId,
+      })),
+      customFields:
+        target.customData &&
+        typeof target.customData === 'object' &&
+        !Array.isArray(target.customData)
+          ? Object.entries(target.customData).flatMap(([key, value]) =>
+              value === undefined ? [] : [{ key, value }],
+            )
+          : [],
       protectedTargets: await this.prisma.user.count({
         where: {
+          organizationMembers: {
+            some: { organizationId: actor.organizationId },
+          },
           roles: {
             some: {
               organizationId: actor.organizationId,

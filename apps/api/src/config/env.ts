@@ -11,6 +11,10 @@ const environmentSchema = z
       .enum(['true', 'false'])
       .default('false')
       .transform((value) => value === 'true'),
+    FEATURE_MARKETING: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((value) => value === 'true'),
     DEV_AUTH_USER_EMAIL: z
       .string()
       .trim()
@@ -27,6 +31,18 @@ const environmentSchema = z
       .min(1024)
       .max(2_097_152)
       .default(2_097_152),
+    MAX_OBJECT_SIZE_BYTES: z.coerce
+      .number()
+      .int()
+      .min(5_476_083_303)
+      .default(10_737_418_240),
+    UPLOAD_PART_SIZE_BYTES: z.coerce
+      .number()
+      .int()
+      .min(5_242_880)
+      .max(1_073_741_824)
+      .default(67_108_864),
+    LOCAL_UPLOAD_PATH: z.string().min(1).default('/tmp/galaxy-os-uploads'),
     APP_PUBLIC_ORIGIN: z.string().url().default('http://localhost:3000'),
     TRUST_PROXY: z
       .enum(['true', 'false'])

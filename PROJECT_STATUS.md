@@ -1,5 +1,63 @@
 # Project status
 
+## Sprint 2 — Complete Business Operations — in progress
+
+Branch `feature/sprint-2-complete-business-operations` contains the Marketing-off guard, project workspace, commercial/procurement operations, Production Tracking, partial Logistics/Customs/Landed Cost, Warehouse and Inventory operations, Installation, Inspection/Acceptance, Handover Documents, Warranty Assets, Service Visits, Claims and replacement tracking, plus a local streamed resumable-upload adapter. Migrations through `20260727230000_complete_handover_warranty_operations` (42 total) are applied locally.
+
+| Module                              | Backend                                                                                                                                                   | Frontend                                                   | Authorization                                                                                | Tests                                                | Status   | Limitations                                                                                            |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
+| Supplier RFQ                        | CRUD, recipients, PR lines, lifecycle, clarification, history, activity, notification                                                                     | List, create, detail, project/sidebar links                | Tenant/project policy and seven RFQ permissions                                              | Focused procurement tests; API/web typecheck         | Complete | SMTP remains manual/simulated                                                                          |
+| Supplier Quotation                  | Decimal totals, RFQ recipient/line validation, review lifecycle, immutable selection and revisions                                                        | List, create, detail                                       | Tenant/project policy and cost/review permissions                                            | Focused procurement tests and API/web typecheck      | Complete | Original document upload uses existing FileAsset integration                                           |
+| Supplier Comparison                 | Currency snapshots, landed estimates, split-line idempotent selection and approval                                                                        | List, create, side-by-side detail                          | Selection and approval permissions; self-approval blocked                                    | Focused procurement tests and API/web typecheck      | Complete | Risk inputs are explicit assessments, not an opaque score                                              |
+| Purchase Order                      | Approved-selection creation, backend totals, lifecycle, approval and confirmed quantity update                                                            | List, create, detail                                       | PO permissions; self-approval blocked                                                        | Focused procurement tests and API/web typecheck      | Complete | PDF/XLSX generation is not yet wired                                                                   |
+| Proforma Invoice                    | PO reconciliation, Decimal totals, immutable revisions, checksum documents                                                                                | List, create, detail                                       | Project, bank-reference and approval permissions                                             | Focused unit tests; API/web typecheck                | Partial  | Project integration and direct authorization/E2E remain                                                |
+| Supplier Payables                   | Milestone schedules, tenant-scoped payment idempotency, maker-checker approval, Serializable allocation                                                   | Payable/payment list and detail                            | Project, bank-reference and payment permissions                                              | Focused unit tests; API/web typecheck                | Partial  | Project views and authorization/concurrency E2E remain                                                 |
+| Production                          | PO-confirmed idempotent creation, milestones, technical/sample decisions, quality, packing, payment unlock                                                | List and detail                                            | Project and production permissions                                                           | Focused unit tests; API/web typecheck                | Partial  | Full forms, project integration and authorization/E2E remain                                           |
+| Logistics, Customs, Landed Cost     | Partial shipment, lifecycle, customs totals, allocation/finalize, FileAsset linkage                                                                       | List/detail/create and project-filtered shipment view      | Project scope and separate logistics/financial permissions                                   | Focused unit tests; API/web typecheck                | Partial  | Direct authorization/E2E and complete freight/customs document flows remain                            |
+| Warehouse Master                    | Warehouse, zones and hierarchical locations linked to Project                                                                                             | List/detail/create and hierarchy forms                     | Organization/project scope; manager/employee permissions                                     | Focused unit tests; API/web typecheck                | Partial  | Direct URL/role E2E and inventory aggregates remain                                                    |
+| Inventory and Receiving             | Immutable transactions, transaction-safe balances, lot/serial, Receipt/QC, reservation, transfer, issue, return, adjustment and cycle count               | Dashboard, item/transaction/receipt and operation screens  | Project/organization scope, cost redaction and command permissions                           | 15 focused tests; API/web typecheck                  | Partial  | Database concurrency/E2E, evidence upload, approved excess receipt and richer detail screens remain    |
+| Installation                        | Plans, readiness-gated work orders, issued-stock installation, daily logs and punch verification                                                          | Project-filtered plan/work-order list and detail workflows | Project scope; separate execute, release, override and punch verification permissions        | Focused service tests; API/web typecheck             | Partial  | Team/site-delivery/site-issue management and browser authorization coverage remain                     |
+| Inspection, Acceptance and Handover | Item decisions, acceptance blocking, handover checklist/readiness and idempotent warranty generation                                                      | Project inspection and handover list/detail/forms          | Project scope; separate inspection, acceptance, handover completion and override permissions | Focused service tests; API/web typecheck             | Partial  | Document package/version UI and full transition/E2E coverage remain                                    |
+| Warranty and After-sales            | Policy snapshots, handover assets, scoped tickets, visit assignment, claim decisions, replacement tracking, resolution evidence and close guards          | Project warranty view and ticket list/create/detail        | Project/customer scope, service-cost redaction and separate permissions                      | Focused service tests; API/web typecheck             | Partial  | Replacement inventory orchestration, visit reschedule/no-access, claim evidence/history and E2E remain |
+| Project operations summary          | Scoped backend aggregates for inventory movements, installation, punch, inspection, acceptance, handover, warranty, claims, replacements, tickets and SLA | Project header summary cards                               | Project visibility and organization scope; no financial fields returned                      | Focused project/after-sales tests; API/web typecheck | Partial  | Direct aggregate-isolation integration tests and business Playwright remain                            |
+
+Sprint 2 — Complete Business Operations is not complete. Inventory is partial;
+installation, handover, warranty/after-sales, the large import worker,
+operational dashboards, authorization matrix, and business E2E remain. The
+current completion audit is `docs/sprint-2-completion-audit.md`.
+
+Verification on 2026-07-28: full API 162/162, web 52/52, Edge 4/4,
+document service 1/1, Playwright baseline 6/6, lint (two existing `<img>`
+warnings), API/Web/Edge typecheck, production build with validated safe
+environment values, Prisma validate/status (42 migrations, database up to
+date), and `git diff --check` passed. The ten required operational Playwright
+flows and real-database Inventory concurrency matrix do not yet exist, so no
+completion tag was created.
+
+## Sprint 2 — CRM, Project Hub and Work Management — 2026-07-23
+
+- Implemented functional Customer/Contact, Lead, Opportunity pipeline,
+  Project Hub, Task board, Survey and Requirement vertical slices with scoped
+  IAM authorization, activity records, notifications, idempotent conversion,
+  seed data, and usable list/detail/form screens.
+- Added shared file upload/download with local ignored storage and
+  entity-scope authorization; comments, replies and mentions; business
+  timelines; recipient-owned notifications and header badge; scoped dashboard
+  aggregates and global search.
+- Added staged Excel import for Customer, Contact, Lead and Project using
+  `.xlsx` parsing, column mapping, validation, preview and idempotent
+  confirmation. Added Marketing campaign/content review, approval, channel
+  variants, calendar and a database-backed publishing queue with locking,
+  bounded retry and a development/test fake provider. No external publishing
+  credential or live provider is configured.
+- Prisma reports 20 applied migrations and an up-to-date schema. Verification
+  passed: diff check, format, lint, strict typecheck, API 98/98, web 50/50,
+  Edge 4/4, document service 1/1, production build, Edge build/test, and
+  targeted Sprint 2 tests 24/24.
+- Browser Playwright acceptance remains blocked by the host's missing
+  `libnss3`; no system package installation was attempted. Ignored `.env*` and
+  `.runtime/` files remain local and are not part of the implementation.
+
 ## Internet deployment preparation — 2026-07-22
 
 - Added production-only Next and Nest start commands bound to

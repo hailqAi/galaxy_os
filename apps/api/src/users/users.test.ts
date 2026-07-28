@@ -25,6 +25,51 @@ const policy = {
 } as unknown as UserManagementPolicy;
 
 describe('UsersService security rules', () => {
+  it('returns stable access-preview collections for a legacy user without roles or departments', async () => {
+    const previewPolicy = {
+      assert: vi.fn(),
+    } as unknown as UserManagementPolicy;
+    const prisma = {
+      user: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          organizationMembers: [{}],
+          roles: [],
+          customData: {},
+        }),
+        count: vi.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(0),
+      },
+      permission: {
+        findMany: vi.fn().mockResolvedValue([{ code: 'user.read' }]),
+      },
+    } as unknown as PrismaService;
+    const preview = await new UsersService(
+      prisma,
+      {} as AuditService,
+      previewPolicy,
+    ).accessPreview(actor, 'u');
+    expect(previewPolicy.assert).toHaveBeenCalledWith(actor, 'u', 'view');
+    expect(preview).toMatchObject({
+      scope: 'SELF',
+      visibleModules: [],
+      visibleDepartmentIds: [],
+      effectivePermissions: [],
+      deniedPermissions: ['user.read'],
+      sourceRoles: [],
+    });
+    for (const collection of [
+      preview.visibleModules,
+      preview.visibleDepartmentIds,
+      preview.effectivePermissions,
+      preview.deniedPermissions,
+      preview.sourceRoles,
+      preview.roles,
+      preview.permissions,
+      preview.scopes,
+      preview.customFields,
+    ])
+      expect(Array.isArray(collection)).toBe(true);
+  });
+
   it('normalizes email and writes the audit in one transaction', async () => {
     const tx = {
       user: {

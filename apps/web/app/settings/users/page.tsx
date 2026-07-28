@@ -110,9 +110,8 @@ export default function UsersPage() {
     }
   }, [params]);
   useEffect(() => {
-    // Initial data belongs to this route effect; later refreshes reuse the same loader.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
+    const timeout = setTimeout(() => void load(), 0);
+    return () => clearTimeout(timeout);
   }, [load]);
   useEffect(() => {
     const timer = setTimeout(() => {

@@ -102,6 +102,11 @@ export async function proxy(request: NextRequest) {
       response = NextResponse.redirect(
         new URL('/account/change-password', request.url),
       );
+    } else if (
+      path.startsWith('/marketing') &&
+      process.env.FEATURE_MARKETING !== 'true'
+    ) {
+      response = NextResponse.redirect(new URL('/forbidden', request.url));
     } else {
       const required = routePermissions.find(([prefix]) =>
         path.startsWith(prefix),
