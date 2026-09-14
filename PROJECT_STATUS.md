@@ -1,5 +1,25 @@
 # Project status
 
+## G00 build/typecheck and isolated verification foundation — 2026-09-14
+
+- Implementation is `IMPLEMENTED`; verification remains `PARTIAL` because the
+  full API run passed 1,085/1,086 tests but one `/me` test timed out. The exact
+  Sprint 1 suite passed 18/18 when rerun alone; no timeout was loosened.
+- Clean frozen install plus Prisma generate now passes root typecheck and build
+  after adding exact dev type dependency `@types/multer@2.2.0`. Root format
+  passes in a detached clean worktree; the six audit-listed files were the only
+  files formatted.
+- The fail-closed G00 harness uses local Docker, loopback-only PostgreSQL/Redis,
+  tmpfs data, synthetic tenants/Projects and real Nest auth/guards with Prisma.
+  Smoke passes 3/3 for allowed SELF scope, denied same-tenant/other-tenant scope,
+  and financial field visibility. The harness reapplies 69 existing migrations,
+  seeds only the test DB, and removes its exact project/root afterward.
+- `G01_MINIMUM_ENV=READY`, but SEC-01, SEC-02 and FIN-01 remain G01 findings and
+  were not fixed. Browser/worker/export E2E remain unverified.
+- Local code commit: `a20332227da47f162ab65684ead973460f9fc647`;
+  `PUSH_STATUS=PUSH_BLOCKED`. Detailed evidence:
+  `docs/project-system/G00_BUILD_AND_ISOLATED_TEST_HANDOFF_2026-09-14.md`.
+
 ## Project Dashboard, shared workspace, context separation, and Upload P0 — 2026-08-24
 
 - Overall status is **PARTIAL**, not COMPLETE. The production implementation and
