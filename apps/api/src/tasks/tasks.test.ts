@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { CurrentActor } from '../access-control/current-actor';
 import { PrismaService } from '../prisma.service';
@@ -16,6 +16,26 @@ const actor = {
   administrationTier: 1,
 } satisfies CurrentActor;
 describe('TasksService', () => {
+  it('omits allocated budget from generic Task lists without estimate.read', async () => {
+    const findMany = vi.fn().mockResolvedValue([{ id: 'task' }]);
+    const prisma = {
+      task: { findMany, count: vi.fn().mockResolvedValue(1) },
+      $transaction: vi.fn((queries: Promise<unknown>[]) =>
+        Promise.all(queries),
+      ),
+    } as unknown as PrismaService;
+
+    const result = await new TasksService(prisma).list(actor, {
+      page: 1,
+      pageSize: 20,
+    });
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ omit: { allocatedBudget: true } }),
+    );
+    expect(JSON.stringify(result)).not.toContain('allocatedBudget');
+  });
+
   it('rejects cross-department assignees', async () => {
     const prisma = {
       task: {
@@ -28,6 +48,61 @@ describe('TasksService', () => {
     await expect(
       new TasksService(prisma).assign(actor, 'task', ['user']),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+  it.each(['update', 'remove'] as const)(
+    'blocks generic %s for a Stage 2 baseline row',
+    async (operation) => {
+      const prisma = {
+        task: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: 'task',
+            relatedEntityType: 'PROJECT_STAGE_TWO_BASELINE',
+          }),
+          update: vi.fn(),
+        },
+        activity: { findMany: vi.fn().mockResolvedValue([]) },
+      } as unknown as PrismaService;
+      const service = new TasksService(prisma);
+
+      const result =
+        operation === 'update'
+          ? service.update(actor, 'task', { title: 'Bypass' })
+          : service.remove(actor, 'task');
+      await expect(result).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.task.update).not.toHaveBeenCalled();
+    },
+  );
+  it('blocks generic create with the reserved Stage 2 discriminator', async () => {
+    const transaction = vi.fn();
+    const prisma = { $transaction: transaction } as unknown as PrismaService;
+
+    await expect(
+      new TasksService(prisma).create(actor, {
+        title: 'Bypass',
+        relatedEntityType: 'PROJECT_STAGE_TWO_BASELINE',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+  it('blocks assigning the reserved Stage 2 discriminator on generic update', async () => {
+    const update = vi.fn();
+    const prisma = {
+      task: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'task',
+          relatedEntityType: null,
+        }),
+        update,
+      },
+      activity: { findMany: vi.fn().mockResolvedValue([]) },
+    } as unknown as PrismaService;
+
+    await expect(
+      new TasksService(prisma).update(actor, 'task', {
+        relatedEntityType: 'PROJECT_STAGE_TWO_BASELINE',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(update).not.toHaveBeenCalled();
   });
   it('completes and records completedAt atomically', async () => {
     const tx = {
@@ -48,6 +123,7 @@ describe('TasksService', () => {
     await new TasksService(prisma).complete(actor, 'task');
     expect(tx.task.update).toHaveBeenCalledWith(
       expect.objectContaining({
+        omit: { allocatedBudget: true },
         data: expect.objectContaining({
           status: 'DONE',
           completedAt: expect.any(Date),

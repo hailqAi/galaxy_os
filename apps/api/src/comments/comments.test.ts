@@ -1,8 +1,10 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
+import { REQUIRED_PERMISSIONS } from '../access-control/access.decorators';
 import { CurrentActor } from '../access-control/current-actor';
 import { PrismaService } from '../prisma.service';
+import { CommentsController } from './comments.controller';
 import { CommentsService } from './comments.service';
 const actor = {
   organizationId: 'organization',
@@ -103,5 +105,74 @@ describe('CommentsService', () => {
         mentionedUserIds: ['outside'],
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('allows delete-any through the controller and service, but no permissionless deletion', async () => {
+    expect(
+      Reflect.getMetadata(
+        REQUIRED_PERMISSIONS,
+        CommentsController.prototype.remove,
+      ),
+    ).toBeUndefined();
+    const remove = vi.fn().mockResolvedValue({ deleted: true });
+    await expect(
+      new CommentsController({ remove } as unknown as CommentsService).remove(
+        { ...actor, permissions: ['comment.delete_any'] },
+        'comment',
+      ),
+    ).resolves.toEqual({ deleted: true });
+    expect(remove).toHaveBeenCalledWith(
+      expect.objectContaining({ permissions: ['comment.delete_any'] }),
+      'comment',
+    );
+
+    const prisma = {
+      comment: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'comment',
+          entityType: 'Project',
+          entityId: 'project',
+          authorId: 'actor',
+        }),
+      },
+    } as unknown as PrismaService;
+    const entities = {
+      assertView: vi.fn().mockResolvedValue({}),
+    } as unknown as BusinessEntityPolicy;
+    await expect(
+      new CommentsService(prisma, entities).remove(
+        { ...actor, permissions: [] },
+        'comment',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('keeps delete-own author-only while allowing delete-any for another author', async () => {
+    const prisma = {
+      comment: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'comment',
+          entityType: 'Project',
+          entityId: 'project',
+          authorId: 'other',
+        }),
+        update: vi.fn(),
+      },
+      activity: { create: vi.fn() },
+    } as unknown as PrismaService;
+    const entities = {
+      assertView: vi.fn().mockResolvedValue({}),
+    } as unknown as BusinessEntityPolicy;
+    const service = new CommentsService(prisma, entities);
+
+    await expect(service.remove(actor, 'comment')).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    await expect(
+      service.remove(
+        { ...actor, permissions: ['comment.delete_any'] },
+        'comment',
+      ),
+    ).resolves.toEqual({ deleted: true });
   });
 });

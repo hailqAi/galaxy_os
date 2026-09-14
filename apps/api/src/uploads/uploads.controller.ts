@@ -15,6 +15,8 @@ import { CurrentActor } from '../access-control/current-actor';
 import {
   CompleteUploadDto,
   InitiateUploadDto,
+  RecoverUploadsQuery,
+  SubmitUploadsDto,
   UploadPartQuery,
 } from './uploads.dto';
 import { UploadsService } from './uploads.service';
@@ -28,6 +30,21 @@ export class UploadsController {
   @RequirePermission('file.upload')
   initiate(@Actor() a: CurrentActor, @Body() d: InitiateUploadDto) {
     return this.uploads.initiate(a, d);
+  }
+  @Get('constraints')
+  @RequirePermission('file.upload')
+  constraints(@Actor() a: CurrentActor) {
+    return this.uploads.constraints(a);
+  }
+  @Get('recovery')
+  @RequirePermission('file.upload')
+  recovery(@Actor() a: CurrentActor, @Query() q: RecoverUploadsQuery) {
+    return this.uploads.recover(a, q);
+  }
+  @Post('submit')
+  @RequirePermission('file.upload')
+  submit(@Actor() a: CurrentActor, @Body() d: SubmitUploadsDto) {
+    return this.uploads.submit(a, d);
   }
   @Get(':id')
   @RequirePermission('file.upload')

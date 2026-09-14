@@ -9,6 +9,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
+import { findProjectFile } from '../files/project-file';
 import { PrismaService } from '../prisma.service';
 import {
   ApprovalDecisionDto,
@@ -243,7 +244,8 @@ export class ProductionService {
     id: string,
     data: ProductionMilestoneDto,
   ) {
-    await this.get(actor, id);
+    const item = await this.get(actor, id);
+    await this.assertProjectFile(actor, item.projectId, data.evidenceFileId);
     if (data.status === 'DELAYED' && !data.delayReason)
       throw new UnprocessableEntityException('Delay reason is required');
     return this.prisma.$transaction(async (tx) => {
@@ -287,7 +289,8 @@ export class ProductionService {
     id: string,
     data: TechnicalApprovalDto,
   ) {
-    await this.get(actor, id);
+    const item = await this.get(actor, id);
+    await this.assertProjectFile(actor, item.projectId, data.fileId);
     return this.prisma.technicalApproval.create({
       data: {
         productionOrderId: id,
@@ -314,6 +317,11 @@ export class ProductionService {
     data: TechnicalRevisionDto,
   ) {
     const approval = await this.scopedTechnicalApproval(actor, approvalId);
+    await this.assertProjectFile(
+      actor,
+      approval.productionOrder.projectId,
+      data.fileId,
+    );
     return this.prisma.$transaction(async (tx) => {
       const revision = approval.currentRevision + 1;
       await tx.technicalApproval.update({
@@ -363,7 +371,8 @@ export class ProductionService {
   }
 
   async sample(actor: CurrentActor, id: string, data: SampleApprovalDto) {
-    await this.get(actor, id);
+    const item = await this.get(actor, id);
+    await this.assertProjectFile(actor, item.projectId, data.fileId);
     return this.prisma.sampleApproval.create({
       data: {
         ...data,
@@ -406,14 +415,16 @@ export class ProductionService {
   }
 
   async quality(actor: CurrentActor, id: string, data: QualityReportDto) {
-    await this.get(actor, id);
+    const item = await this.get(actor, id);
+    await this.assertProjectFile(actor, item.projectId, data.fileId);
     return this.prisma.qualityReport.create({
       data: { ...data, productionOrderId: id, createdBy: actor.userId },
     });
   }
 
   async packing(actor: CurrentActor, id: string, data: PackingRecordDto) {
-    await this.get(actor, id);
+    const item = await this.get(actor, id);
+    await this.assertProjectFile(actor, item.projectId, data.fileId);
     return this.prisma.packingRecord.create({
       data: {
         ...data,
@@ -438,8 +449,21 @@ export class ProductionService {
           },
         },
       },
+      include: { productionOrder: { select: { projectId: true } } },
     });
     if (!approval) throw new NotFoundException('Technical approval not found');
     return approval;
+  }
+
+  private async assertProjectFile(
+    actor: CurrentActor,
+    projectId: string,
+    fileId?: string,
+  ) {
+    if (
+      fileId &&
+      !(await findProjectFile(this.prisma, actor, projectId, fileId))
+    )
+      throw new NotFoundException('File not found');
   }
 }

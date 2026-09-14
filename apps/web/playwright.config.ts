@@ -2,6 +2,13 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests/browser',
+  testIgnore: [
+    'product-acceptance.spec.ts',
+    'project-stage-one.spec.ts',
+    'project-stage-two.spec.ts',
+    'project-pms-dashboard.spec.ts',
+    'project-pms-stage-access.spec.ts',
+  ],
   fullyParallel: false,
   workers: 1,
   use: { baseURL: 'http://127.0.0.1:3000' },

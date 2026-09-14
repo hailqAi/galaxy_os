@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { resolve, sep } from 'node:path';
 
 const environmentSchema = z
   .object({
@@ -31,11 +32,36 @@ const environmentSchema = z
       .min(1024)
       .max(2_097_152)
       .default(2_097_152),
-    MAX_OBJECT_SIZE_BYTES: z.coerce
+    UPLOAD_MAX_FILE_BYTES: z.coerce
       .number()
       .int()
-      .min(5_476_083_303)
-      .default(10_737_418_240),
+      .min(1)
+      .max(Number.MAX_SAFE_INTEGER)
+      .default(21_474_836_480),
+    UPLOAD_ORGANIZATION_QUOTA_BYTES: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(Number.MAX_SAFE_INTEGER)
+      .default(107_374_182_400),
+    UPLOAD_GLOBAL_QUOTA_BYTES: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(Number.MAX_SAFE_INTEGER)
+      .default(1_099_511_627_776),
+    UPLOAD_STAGING_CAPACITY_BYTES: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(Number.MAX_SAFE_INTEGER)
+      .default(824_633_720_832),
+    UPLOAD_ACTOR_STAGING_LIMIT: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .default(20),
     UPLOAD_PART_SIZE_BYTES: z.coerce
       .number()
       .int()
@@ -43,6 +69,7 @@ const environmentSchema = z
       .max(1_073_741_824)
       .default(67_108_864),
     LOCAL_UPLOAD_PATH: z.string().min(1).default('/tmp/galaxy-os-uploads'),
+    FILE_STORAGE_PATH: z.string().min(1).default('../../.runtime/files'),
     APP_PUBLIC_ORIGIN: z.string().url().default('http://localhost:3000'),
     TRUST_PROXY: z
       .enum(['true', 'false'])
@@ -65,6 +92,48 @@ const environmentSchema = z
     SMTP_PASSWORD: z.string().optional(),
     EMAIL_FROM: z.string().email().default('no-reply@galaxy.local'),
   })
+  .refine(
+    (environment) =>
+      BigInt(environment.UPLOAD_GLOBAL_QUOTA_BYTES) >=
+      BigInt(environment.UPLOAD_ORGANIZATION_QUOTA_BYTES),
+    {
+      message: 'Global file capacity must cover every organization quota',
+      path: ['UPLOAD_GLOBAL_QUOTA_BYTES'],
+    },
+  )
+  .refine(
+    (environment) => {
+      const files = resolve(environment.FILE_STORAGE_PATH);
+      const staging = resolve(environment.LOCAL_UPLOAD_PATH);
+      return (
+        files !== staging &&
+        !files.startsWith(`${staging}${sep}`) &&
+        !staging.startsWith(`${files}${sep}`)
+      );
+    },
+    {
+      message: 'File storage and upload staging paths must be disjoint',
+      path: ['LOCAL_UPLOAD_PATH'],
+    },
+  )
+  .refine(
+    (environment) =>
+      BigInt(environment.UPLOAD_ORGANIZATION_QUOTA_BYTES) >=
+      BigInt(environment.UPLOAD_MAX_FILE_BYTES) * 3n,
+    {
+      message: 'Upload organization quota must cover staging amplification',
+      path: ['UPLOAD_ORGANIZATION_QUOTA_BYTES'],
+    },
+  )
+  .refine(
+    (environment) =>
+      BigInt(environment.UPLOAD_STAGING_CAPACITY_BYTES) >=
+      (BigInt(environment.UPLOAD_GLOBAL_QUOTA_BYTES) * 2n + 2n) / 3n,
+    {
+      message: 'Upload staging capacity cannot absorb finalization',
+      path: ['UPLOAD_STAGING_CAPACITY_BYTES'],
+    },
+  )
   .refine(
     (environment) =>
       !(environment.NODE_ENV === 'production' && environment.ALLOW_DEV_AUTH),
@@ -110,5 +179,18 @@ export type Environment = z.infer<typeof environmentSchema>;
 export function readEnvironment(
   source: NodeJS.ProcessEnv = process.env,
 ): Environment {
-  return environmentSchema.parse(source);
+  const environment = environmentSchema.parse(source);
+  if (
+    environment.NODE_ENV === 'production' &&
+    source.UPLOAD_GLOBAL_QUOTA_BYTES === undefined
+  )
+    throw new Error('Production requires explicit UPLOAD_GLOBAL_QUOTA_BYTES');
+  if (
+    environment.NODE_ENV === 'production' &&
+    source.UPLOAD_STAGING_CAPACITY_BYTES === undefined
+  )
+    throw new Error(
+      'Production requires explicit UPLOAD_STAGING_CAPACITY_BYTES',
+    );
+  return environment;
 }

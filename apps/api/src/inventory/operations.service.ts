@@ -9,6 +9,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
+import { findProjectFile } from '../files/project-file';
 import { PrismaService } from '../prisma.service';
 import { InventoryService, InventoryPostingLine } from './inventory.service';
 import {
@@ -324,6 +325,19 @@ export class InventoryOperationsService {
   async createIssue(actor: CurrentActor, data: CreateIssueDto) {
     if (data.projectId)
       await this.policy.assertView(actor, 'Project', data.projectId);
+    if (data.evidenceFileId) {
+      if (!data.projectId)
+        throw new UnprocessableEntityException(
+          'Project is required for issue evidence',
+        );
+      const file = await findProjectFile(
+        this.prisma,
+        actor,
+        data.projectId,
+        data.evidenceFileId,
+      );
+      if (!file) throw new NotFoundException('File not found');
+    }
     await this.assertWarehouse(actor, data.warehouseId);
     return this.prisma.stockIssue.create({
       data: {

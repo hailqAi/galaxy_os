@@ -1,98 +1,157 @@
 'use client';
-import { FormEvent, useEffect, useState } from 'react';
+import React from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { api } from '../lib/api';
-type Project = {
+import { ApiError, api } from '../lib/api';
+import { createCommandKey } from '../lib/create-command-key';
+import { normalizeVietnameseMoney } from './[projectId]/stage-1/money';
+
+export type ProjectCustomer = {
+  id: string;
+  displayName: string;
+  contacts?: { id: string; displayName: string; isPrimary?: boolean }[];
+};
+export type NewProjectValues = {
+  name: string;
+  estimatedInvestmentAmount: string;
+  customerId: string;
+  primaryContactId?: string;
+};
+export type CreatedProject = {
   id: string;
   code: string;
-  name: string;
-  customerId: string;
-  projectType: string | null;
-  propertyType: string | null;
-  location: string | null;
-  address: string | null;
-  status: string;
-  phase: string;
-  priority: string;
-  estimatedValue: string | null;
-  contractedValue: string | null;
-  description: string | null;
-  healthStatus: string;
-  progressPercentage: number;
-  expectedCompletionDate: string | null;
+  stageOneUrl: `/projects/${string}/stage-1?step=1`;
 };
-type Customer = { id: string; displayName: string };
-export function ProjectForm({ project }: { project?: Project }) {
-  const router = useRouter();
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [message, setMessage] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  useEffect(() => {
-    api<{ items: Customer[] }>('/customers?pageSize=100')
-      .then((result) => setCustomers(result.items))
-      .catch((error: Error) => setMessage(error.message));
-  }, []);
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSubmitting(true);
-    const entries = Object.fromEntries(new FormData(event.currentTarget));
-    const body = Object.fromEntries(
-      Object.entries(entries).filter(([, value]) => value !== ''),
-    );
-    try {
-      const saved = await api<{ id: string }>(
-        project ? `/projects/${project.id}` : '/projects',
-        {
-          method: project ? 'PATCH' : 'POST',
-          body: JSON.stringify({
-            ...body,
-            estimatedValue: body.estimatedValue
-              ? Number(body.estimatedValue)
-              : undefined,
-            contractedValue: body.contractedValue
-              ? Number(body.contractedValue)
-              : undefined,
-            progressPercentage: body.progressPercentage
-              ? Number(body.progressPercentage)
-              : undefined,
-          }),
-        },
-      );
-      router.push(`/projects/${saved.id}`);
-    } catch (error) {
-      setMessage((error as Error).message);
-      setSubmitting(false);
-    }
+type ProjectRequest = (
+  path: string,
+  init?: RequestInit,
+) => Promise<CreatedProject>;
+type CustomerRequest = (path: string) => Promise<ProjectCustomer>;
+
+export const createNewProjectSubmitter =
+  (request: ProjectRequest = api, idempotencyKey = createCommandKey()) =>
+  (values: NewProjectValues) => {
+    const amount = normalizeVietnameseMoney(values.estimatedInvestmentAmount);
+    if (!values.name.trim()) throw new Error('Vui lòng nhập tên dự án.');
+    if (!amount) throw new Error('Giá trị dự kiến không hợp lệ.');
+    if (!values.customerId) throw new Error('Vui lòng chọn khách hàng.');
+    return request('/projects', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...values,
+        name: values.name.trim(),
+        estimatedInvestmentAmount: amount,
+        primaryContactId: values.primaryContactId || undefined,
+        idempotencyKey,
+      }),
+    });
+  };
+
+export const loadProjectCustomer = (
+  customerId: string,
+  request: CustomerRequest = api,
+) => request(`/customers/${customerId}`);
+
+export const isCurrentCustomerDetail = (
+  currentCustomerId: string,
+  requestedCustomerId: string,
+) => currentCustomerId === requestedCustomerId;
+
+export function finishProjectCreation(
+  project: CreatedProject,
+  refresh: () => void,
+  replace: (url: string) => void,
+) {
+  if (project.stageOneUrl !== `/projects/${project.id}/stage-1?step=1`)
+    throw new Error('Đường dẫn Giai đoạn 1 không hợp lệ.');
+  refresh();
+  replace(project.stageOneUrl);
+}
+
+export function projectFormError(error: unknown) {
+  if (error instanceof ApiError) {
+    if (error.status === 401 || error.status === 403)
+      return 'Bạn không có quyền khởi tạo dự án.';
+    if (error.status === 409)
+      return 'Yêu cầu tạo dự án đã được xử lý trước đó.';
+    if (error.status === 400 || error.status === 422)
+      return 'Thông tin dự án chưa hợp lệ. Vui lòng kiểm tra lại.';
   }
+  if (
+    error instanceof Error &&
+    /tên dự án|giá trị|khách hàng/i.test(error.message)
+  )
+    return error.message;
+  return 'Không thể khởi tạo dự án. Vui lòng kiểm tra kết nối và thử lại.';
+}
+
+export function NewProjectFormView({
+  busy = false,
+  customers,
+  message = '',
+  onCustomerChange,
+  onSubmit,
+}: {
+  busy?: boolean;
+  customers: ProjectCustomer[];
+  message?: string;
+  onCustomerChange?: (
+    customerId: string,
+  ) => Promise<ProjectCustomer | undefined>;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const [customerId, setCustomerId] = useState('');
+  const currentCustomerId = useRef('');
+  const selectedCustomer = customers.find(({ id }) => id === customerId);
+  const [contactId, setContactId] = useState('');
   return (
-    <form
-      className="panel grid gap-4 sm:grid-cols-2"
-      onSubmit={(event) => void submit(event)}
-    >
-      <label>
-        Mã dự án
+    <form className="panel grid gap-4 sm:grid-cols-2" onSubmit={onSubmit}>
+      <label className="grid gap-1 text-sm font-semibold">
+        TÊN DỰ ÁN *
         <input
-          name="code"
-          required
-          maxLength={50}
-          defaultValue={project?.code}
-        />
-      </label>
-      <label>
-        Tên dự án
-        <input
+          data-business-input="name"
+          maxLength={200}
           name="name"
           required
-          maxLength={200}
-          defaultValue={project?.name}
         />
       </label>
-      <label>
-        Khách hàng
-        <select
-          name="customerId"
+      <label className="grid gap-1 text-sm font-semibold">
+        GIÁ TRỊ DỰ KIẾN (VND) *
+        <input
+          data-business-input="estimated-investment"
+          inputMode="decimal"
+          name="estimatedInvestmentAmount"
+          placeholder="35.000.000.000 ₫"
           required
-          defaultValue={project?.customerId ?? ''}
+        />
+      </label>
+      <label className="grid gap-1 text-sm font-semibold">
+        KHÁCH HÀNG / ĐẠI DIỆN KHÁCH HÀNG *
+        <select
+          data-business-input="investor"
+          name="customerId"
+          onChange={async (event) => {
+            const requestedCustomerId = event.target.value;
+            currentCustomerId.current = requestedCustomerId;
+            const next = customers.find(({ id }) => id === requestedCustomerId);
+            setCustomerId(requestedCustomerId);
+            setContactId(
+              next?.contacts?.find(({ isPrimary }) => isPrimary)?.id ?? '',
+            );
+            const detailed = await onCustomerChange?.(requestedCustomerId);
+            if (
+              detailed &&
+              isCurrentCustomerDetail(
+                currentCustomerId.current,
+                requestedCustomerId,
+              )
+            )
+              setContactId(
+                detailed.contacts?.find(({ isPrimary }) => isPrimary)?.id ?? '',
+              );
+          }}
+          required
+          value={customerId}
         >
           <option value="">Chọn khách hàng</option>
           {customers.map((customer) => (
@@ -101,112 +160,95 @@ export function ProjectForm({ project }: { project?: Project }) {
             </option>
           ))}
         </select>
-      </label>
-      <label>
-        Loại dự án
-        <input name="projectType" defaultValue={project?.projectType ?? ''} />
-      </label>
-      <label>
-        Loại công trình
-        <input name="propertyType" defaultValue={project?.propertyType ?? ''} />
-      </label>
-      <label>
-        Địa điểm
-        <input name="location" defaultValue={project?.location ?? ''} />
-      </label>
-      <label className="sm:col-span-2">
-        Địa chỉ
-        <input name="address" defaultValue={project?.address ?? ''} />
-      </label>
-      <label>
-        Trạng thái
-        <select name="status" defaultValue={project?.status ?? 'PLANNING'}>
-          {['PLANNING', 'ACTIVE', 'ON_HOLD', 'COMPLETED', 'CANCELLED'].map(
-            (value) => (
-              <option key={value}>{value}</option>
-            ),
-          )}
-        </select>
-      </label>
-      <label>
-        Giai đoạn
-        <select name="phase" defaultValue={project?.phase ?? 'SURVEY'}>
-          {['SURVEY', 'REQUIREMENT', 'DESIGN'].map((value) => (
-            <option key={value}>{value}</option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Ưu tiên
-        <select name="priority" defaultValue={project?.priority ?? 'NORMAL'}>
-          {['LOW', 'NORMAL', 'HIGH', 'URGENT'].map((value) => (
-            <option key={value}>{value}</option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Sức khỏe
-        <select
-          name="healthStatus"
-          defaultValue={project?.healthStatus ?? 'ON_TRACK'}
-        >
-          {['ON_TRACK', 'AT_RISK', 'OFF_TRACK'].map((value) => (
-            <option key={value}>{value}</option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Tiến độ %
-        <input
-          name="progressPercentage"
-          type="number"
-          min="0"
-          max="100"
-          defaultValue={project?.progressPercentage ?? 0}
-        />
-      </label>
-      <label>
-        Hoàn thành dự kiến
-        <input
-          name="expectedCompletionDate"
-          type="date"
-          defaultValue={project?.expectedCompletionDate?.slice(0, 10) ?? ''}
-        />
-      </label>
-      <label>
-        Giá trị dự kiến
-        <input
-          name="estimatedValue"
-          type="number"
-          min="0"
-          defaultValue={project?.estimatedValue ?? ''}
-        />
-      </label>
-      <label>
-        Giá trị hợp đồng
-        <input
-          name="contractedValue"
-          type="number"
-          min="0"
-          defaultValue={project?.contractedValue ?? ''}
-        />
-      </label>
-      <label className="sm:col-span-2">
-        Mô tả
-        <textarea
-          name="description"
-          maxLength={5000}
-          defaultValue={project?.description ?? ''}
-        />
+        {!!selectedCustomer?.contacts?.length && (
+          <select
+            aria-label="Đại diện khách hàng"
+            name="primaryContactId"
+            onChange={(event) => setContactId(event.target.value)}
+            value={contactId}
+          >
+            <option value="">Chọn người đại diện</option>
+            {selectedCustomer.contacts.map((contact) => (
+              <option key={contact.id} value={contact.id}>
+                {contact.displayName}
+              </option>
+            ))}
+          </select>
+        )}
       </label>
       {message && (
-        <p className="sm:col-span-2" role="alert">
+        <p className="sm:col-span-2 text-red-700" role="alert">
           {message}
         </p>
       )}
-      <button className="primary sm:col-span-2" disabled={submitting}>
-        {submitting ? 'Đang lưu…' : project ? 'Lưu dự án' : 'Tạo dự án'}
+      <button className="primary sm:col-span-2" disabled={busy}>
+        {busy ? 'Đang khởi tạo…' : 'KHỞI TẠO DỰ ÁN'}
       </button>
     </form>
+  );
+}
+
+export function ProjectForm() {
+  const router = useRouter();
+  const [customers, setCustomers] = useState<ProjectCustomer[]>([]);
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = useRef<ReturnType<typeof createNewProjectSubmitter> | null>(
+    null,
+  );
+  submit.current ??= createNewProjectSubmitter();
+  const createProject = submit.current;
+  useEffect(() => {
+    api<{ items: ProjectCustomer[] }>(
+      '/customers?pageSize=100&status=ACTIVE&sort=displayName&direction=asc',
+    )
+      .then(({ items }) => setCustomers(items))
+      .catch(() =>
+        setMessage('Không thể tải danh sách khách hàng. Vui lòng thử lại.'),
+      );
+  }, []);
+  const selectCustomer = async (customerId: string) => {
+    if (!customerId) return undefined;
+    try {
+      const selected = await loadProjectCustomer(customerId);
+      setCustomers((current) => [
+        ...current.filter(({ id }) => id !== selected.id),
+        selected,
+      ]);
+      return selected;
+    } catch (error) {
+      setMessage(projectFormError(error));
+      return undefined;
+    }
+  };
+  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setMessage('');
+    const values = new FormData(event.currentTarget);
+    try {
+      const created = await createProject({
+        name: String(values.get('name') ?? ''),
+        estimatedInvestmentAmount: String(
+          values.get('estimatedInvestmentAmount') ?? '',
+        ),
+        customerId: String(values.get('customerId') ?? ''),
+        primaryContactId:
+          String(values.get('primaryContactId') ?? '') || undefined,
+      });
+      finishProjectCreation(created, router.refresh, router.replace);
+    } catch (error) {
+      setMessage(projectFormError(error));
+      setBusy(false);
+    }
+  };
+  return (
+    <NewProjectFormView
+      busy={busy}
+      customers={customers}
+      message={message}
+      onCustomerChange={selectCustomer}
+      onSubmit={(event) => void onSubmit(event)}
+    />
   );
 }

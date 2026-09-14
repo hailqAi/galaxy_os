@@ -9,6 +9,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
+import { findProjectFile } from '../files/project-file';
 import { PrismaService } from '../prisma.service';
 import {
   CompleteHandoverDto,
@@ -103,7 +104,12 @@ export class AfterSalesService {
     await this.policy.assertView(actor, 'Project', line.inspection.projectId);
     if (!['DRAFT', 'SCHEDULED', 'IN_PROGRESS'].includes(line.inspection.status))
       throw new ConflictException('Inspection item cannot be decided');
-    if (data.evidenceFileId) await this.assertFile(actor, data.evidenceFileId);
+    if (data.evidenceFileId)
+      await this.assertFile(
+        actor,
+        line.inspection.projectId,
+        data.evidenceFileId,
+      );
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.inspectionItem.update({
         where: { id },
@@ -185,7 +191,7 @@ export class AfterSalesService {
     )
       throw new ConflictException('Critical punch items block acceptance');
     if (data.signedDocumentId)
-      await this.assertFile(actor, data.signedDocumentId);
+      await this.assertFile(actor, inspection.projectId, data.signedDocumentId);
     return this.prisma.acceptanceRecord.create({
       data: {
         organizationId: actor.organizationId,
@@ -311,7 +317,7 @@ export class AfterSalesService {
     const handover = await this.handover(actor, handoverId);
     if (handover.status === 'COMPLETED')
       throw new ConflictException('Completed handover documents are immutable');
-    await this.assertFile(actor, data.fileAssetId);
+    await this.assertFile(actor, handover.projectId, data.fileAssetId);
     const latest = await this.prisma.handoverDocument.findFirst({
       where: { handoverId, type: data.type },
       orderBy: { version: 'desc' },
@@ -630,7 +636,8 @@ export class AfterSalesService {
       throw new UnprocessableEntityException(
         'Diagnosis or work performed is required',
       );
-    if (data.evidenceFileId) await this.assertFile(actor, data.evidenceFileId);
+    if (data.evidenceFileId)
+      await this.assertFile(actor, visit.projectId!, data.evidenceFileId);
     return this.prisma.serviceVisit.update({
       where: { id },
       data: {
@@ -812,7 +819,7 @@ export class AfterSalesService {
       )
     )
       throw new ConflictException('Active service ticket required');
-    await this.assertFile(actor, data.evidenceFileId);
+    await this.assertFile(actor, item.projectId, data.evidenceFileId);
     return this.prisma.$transaction(async (tx) => {
       await tx.serviceResolution.create({
         data: {
@@ -834,7 +841,8 @@ export class AfterSalesService {
     const item = await this.ticketRecord(actor, id);
     if (item.status !== 'RESOLVED')
       throw new ConflictException('Resolved ticket required');
-    if (data.documentId) await this.assertFile(actor, data.documentId);
+    if (data.documentId)
+      await this.assertFile(actor, item.projectId, data.documentId);
     return this.prisma.$transaction(async (tx) => {
       await tx.customerConfirmation.create({
         data: {
@@ -914,12 +922,8 @@ export class AfterSalesService {
     return item;
   }
 
-  private async assertFile(actor: CurrentActor, id: string) {
-    if (
-      !(await this.prisma.fileAsset.findFirst({
-        where: { id, organizationId: actor.organizationId, deletedAt: null },
-      }))
-    )
+  private async assertFile(actor: CurrentActor, projectId: string, id: string) {
+    if (!(await findProjectFile(this.prisma, actor, projectId, id)))
       throw new NotFoundException('File not found');
   }
 

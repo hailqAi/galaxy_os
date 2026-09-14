@@ -17,7 +17,7 @@ import {
   CreateReservationDto,
   CreateReturnDto,
   CreateTransferDto,
-  DecisionDto,
+  InventoryDecisionDto,
   ReceiveTransferDto,
   RecordCountDto,
 } from './operations.dto';
@@ -51,7 +51,7 @@ export class InventoryOperationsController {
   approveReservation(
     @Actor() actor: CurrentActor,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() data: DecisionDto,
+    @Body() data: InventoryDecisionDto,
   ) {
     return this.operations.approveReservation(actor, id, data.comment);
   }

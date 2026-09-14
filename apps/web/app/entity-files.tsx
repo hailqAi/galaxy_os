@@ -1,11 +1,12 @@
 'use client';
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import React, { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api, apiUrl } from './lib/api';
+import { parseUploadBytes } from './projects/[projectId]/documents/document-upload';
 type FileItem = {
   id: string;
   originalFilename: string;
   mimeType: string;
-  sizeBytes: number;
+  sizeBytes: string;
   category: string;
   version: number;
   createdAt: string;
@@ -21,13 +22,16 @@ type Page = {
 export function EntityFiles({
   entityType,
   entityId,
+  permissions,
 }: {
   entityType: string;
   entityId: string;
+  permissions?: string[];
 }) {
   const [data, setData] = useState<Page>();
   const [message, setMessage] = useState('');
   const [uploading, setUploading] = useState(false);
+  const canUpload = permissions?.includes('file.upload') ?? true;
   const load = useCallback(
     () =>
       api<Page>(
@@ -75,7 +79,8 @@ export function EntityFiles({
                 <strong>{file.originalFilename}</strong>
                 <br />
                 <small>
-                  {file.category} · {(file.sizeBytes / 1024).toFixed(1)} KB · v
+                  {file.category} ·{' '}
+                  {(parseUploadBytes(file.sizeBytes) / 1024).toFixed(1)} KB · v
                   {file.version}
                 </small>
               </span>
@@ -91,27 +96,29 @@ export function EntityFiles({
       ) : (
         <p>Chưa có tệp đính kèm.</p>
       )}
-      <form
-        className="flex flex-wrap items-end gap-3"
-        onSubmit={(event) => void upload(event)}
-      >
-        <label>
-          Danh mục
-          <input name="category" required defaultValue="DOCUMENT" />
-        </label>
-        <label>
-          Chọn tệp
-          <input
-            name="file"
-            required
-            type="file"
-            accept=".pdf,.png,.jpg,.txt"
-          />
-        </label>
-        <button className="primary" disabled={uploading}>
-          {uploading ? 'Đang tải…' : 'Tải tệp'}
-        </button>
-      </form>
+      {canUpload && (
+        <form
+          className="flex flex-wrap items-end gap-3"
+          onSubmit={(event) => void upload(event)}
+        >
+          <label>
+            Danh mục
+            <input name="category" required defaultValue="DOCUMENT" />
+          </label>
+          <label>
+            Chọn tệp
+            <input
+              name="file"
+              required
+              type="file"
+              accept=".pdf,.png,.jpg,.txt"
+            />
+          </label>
+          <button className="primary" disabled={uploading}>
+            {uploading ? 'Đang tải…' : 'Tải tệp'}
+          </button>
+        </form>
+      )}
     </section>
   );
 }

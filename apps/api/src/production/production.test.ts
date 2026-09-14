@@ -1,5 +1,6 @@
 import {
   ForbiddenException,
+  NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
@@ -15,7 +16,7 @@ const actor = {
   email: 'user@example.test',
   displayName: 'User',
   mustChangePassword: false,
-  permissions: [],
+  permissions: ['file.read', 'project.stage1.finance.read', 'estimate.read'],
   administrationScope: 'ORGANIZATION',
   managedDepartmentIds: [],
   administrationTier: 1,
@@ -105,5 +106,82 @@ describe('Production tracking', () => {
     );
     await service.decideSample(actor, 'sample', { decision: 'APPROVED' });
     expect(update).toHaveBeenCalledOnce();
+  });
+
+  it('rejects every production file field unless it is attached to the same Project', async () => {
+    const fileId = '00000000-0000-4000-8000-000000000001';
+    const prisma = {
+      fileAsset: { findFirst: vi.fn().mockResolvedValue(null) },
+      productionMilestone: { create: vi.fn() },
+      technicalApproval: {
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue({
+          id: 'approval',
+          currentRevision: 1,
+          productionOrder: { projectId: 'project' },
+        }),
+      },
+      technicalApprovalRevision: { create: vi.fn() },
+      sampleApproval: { create: vi.fn() },
+      qualityReport: { create: vi.fn() },
+      packingRecord: { create: vi.fn() },
+    };
+    const service = new ProductionService(
+      prisma as unknown as PrismaService,
+      {
+        projectWhere: vi.fn().mockReturnValue({}),
+      } as unknown as BusinessEntityPolicy,
+    );
+    vi.spyOn(service, 'get').mockResolvedValue({
+      projectId: 'project',
+    } as never);
+
+    const commands = [
+      () =>
+        service.milestone(actor, 'production', {
+          name: 'Factory ready',
+          sequence: 1,
+          status: 'PLANNED',
+          evidenceFileId: fileId,
+        }),
+      () =>
+        service.technicalApproval(actor, 'production', {
+          type: 'SHOP_DRAWING',
+          title: 'Drawing',
+          description: 'Revision 1',
+          fileId,
+        }),
+      () =>
+        service.technicalRevision(actor, 'approval', {
+          description: 'Revision 2',
+          fileId,
+        }),
+      () => service.sample(actor, 'production', { name: 'Sample', fileId }),
+      () =>
+        service.quality(actor, 'production', {
+          reportNumber: 'QC-1',
+          inspectionDate: new Date(),
+          result: 'PASSED',
+          summary: 'Passed',
+          fileId,
+        }),
+      () =>
+        service.packing(actor, 'production', {
+          packingNumber: 'PK-1',
+          packageCount: 1,
+          packedAt: new Date(),
+          fileId,
+        }),
+    ];
+
+    for (const command of commands)
+      await expect(command()).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.fileAsset.findFirst).toHaveBeenCalledTimes(commands.length);
+    expect(prisma.productionMilestone.create).not.toHaveBeenCalled();
+    expect(prisma.technicalApproval.create).not.toHaveBeenCalled();
+    expect(prisma.technicalApprovalRevision.create).not.toHaveBeenCalled();
+    expect(prisma.sampleApproval.create).not.toHaveBeenCalled();
+    expect(prisma.qualityReport.create).not.toHaveBeenCalled();
+    expect(prisma.packingRecord.create).not.toHaveBeenCalled();
   });
 });

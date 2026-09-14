@@ -13,6 +13,8 @@ type HttpResponse = {
   status(code: number): HttpResponse;
   json(body: unknown): void;
 };
+const resourceIdentifier =
+  /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi;
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -36,12 +38,29 @@ export class HttpExceptionFilter implements ExceptionFilter {
       typeof detail === 'string'
         ? detail
         : (detail as { message?: unknown }).message;
+    const category =
+      typeof detail === 'object' && detail
+        ? (detail as { category?: unknown }).category
+        : undefined;
+    const denial = [
+      HttpStatus.UNAUTHORIZED,
+      HttpStatus.FORBIDDEN,
+      HttpStatus.NOT_FOUND,
+    ].includes(status);
+    const path = String(redact(request.url));
 
     response.status(status).json({
       statusCode: status,
       error: HttpStatus[status] ?? 'Error',
+      ...(typeof category === 'string' ? { category } : {}),
       message,
-      path: redact(request.url),
+      ...(typeof category === 'string'
+        ? {}
+        : {
+            path: denial
+              ? path.replace(resourceIdentifier, '[REDACTED]')
+              : path,
+          }),
       timestamp: new Date().toISOString(),
     });
   }

@@ -1,11 +1,12 @@
 'use client';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api, apiUrl } from '../lib/api';
+import { parseUploadBytes } from '../projects/[projectId]/documents/document-upload';
 type FileItem = {
   id: string;
   originalFilename: string;
   mimeType: string;
-  sizeBytes: number;
+  sizeBytes: string;
   category: string;
   version: number;
   createdAt: string;
@@ -148,7 +149,9 @@ export default function FilesPage() {
                     {file.attachments.map((item) => item.entityType).join(', ')}
                   </td>
                   <td>{file.uploadedBy.displayName}</td>
-                  <td>{(file.sizeBytes / 1024).toFixed(1)} KB</td>
+                  <td>
+                    {(parseUploadBytes(file.sizeBytes) / 1024).toFixed(1)} KB
+                  </td>
                   <td>{file.version}</td>
                   <td>
                     {new Date(file.createdAt).toLocaleDateString('vi-VN')}

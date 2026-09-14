@@ -16,7 +16,7 @@ const actor = {
   email: 'user@example.test',
   displayName: 'User',
   mustChangePassword: false,
-  permissions: [],
+  permissions: ['file.read', 'project.stage1.finance.read', 'estimate.read'],
   administrationScope: 'ORGANIZATION',
   managedDepartmentIds: [],
   administrationTier: 1,
@@ -196,6 +196,42 @@ describe('Inspection, handover and after-sales', () => {
         diagnosis: 'Fault found',
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects an unattached temporary asset before completing a visit', async () => {
+    const findFirst = vi.fn(({ where }) =>
+      Promise.resolve(where.attachments ? null : { id: 'file' }),
+    );
+    const service = new AfterSalesService(
+      {
+        serviceVisit: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: 'visit',
+            projectId: 'project',
+            technicianId: actor.userId,
+            status: 'IN_PROGRESS',
+            visitType: 'DIAGNOSIS',
+          }),
+          update: vi.fn(),
+        },
+        fileAsset: { findFirst },
+      } as unknown as PrismaService,
+      policy,
+    );
+
+    await expect(
+      service.completeServiceVisit(actor, 'visit', {
+        diagnosis: 'Fault found',
+        evidenceFileId: '00000000-0000-4000-8000-000000000001',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          attachments: { some: { projectId: 'project' } },
+        }),
+      }),
+    );
   });
 
   it('rejects an expired warranty claim unless it is goodwill', async () => {

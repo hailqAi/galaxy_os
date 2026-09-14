@@ -6,6 +6,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
 import { PrismaService } from '../prisma.service';
 import {
@@ -20,7 +21,19 @@ import {
 
 @Injectable()
 export class ContractsService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(BusinessEntityPolicy) private readonly policy: BusinessEntityPolicy,
+  ) {}
+
+  private async activeContract(
+    actor: CurrentActor,
+    projectId: string,
+    contractId: string,
+  ) {
+    await this.policy.assertView(actor, 'Project', projectId);
+    return this.get(actor, projectId, contractId);
+  }
   async list(actor: CurrentActor, projectId: string) {
     return this.prisma.contract.findMany({
       where: { organizationId: actor.organizationId, projectId },
@@ -47,6 +60,7 @@ export class ContractsService {
     projectId: string,
     data: CreateContractDto,
   ) {
+    await this.policy.assertView(actor, 'Project', projectId);
     const quotation = await this.prisma.quotation.findFirst({
       where: {
         id: data.quotationId,
@@ -133,7 +147,7 @@ export class ContractsService {
     id: string,
     data: ContractTransitionDto,
   ) {
-    const contract = await this.get(actor, projectId, id);
+    const contract = await this.activeContract(actor, projectId, id);
     const allowed: Record<string, string[]> = {
       DRAFT: ['INTERNAL_REVIEW', 'CANCELLED'],
       INTERNAL_REVIEW: ['NEGOTIATION', 'SIGNED', 'DRAFT'],
@@ -187,7 +201,7 @@ export class ContractsService {
     contractId: string,
     data: CreateAppendixDto,
   ) {
-    const contract = await this.get(actor, projectId, contractId);
+    const contract = await this.activeContract(actor, projectId, contractId);
     if (!['SIGNED', 'ACTIVE', 'SUSPENDED'].includes(contract.status))
       throw new ConflictException('Signed contract required');
     return this.prisma.contractAppendix
@@ -222,7 +236,7 @@ export class ContractsService {
     appendixId: string,
     data: AppendixTransitionDto,
   ) {
-    await this.get(actor, projectId, contractId);
+    await this.activeContract(actor, projectId, contractId);
     const appendix = await this.prisma.contractAppendix.findFirst({
       where: { id: appendixId, contractId },
     });
@@ -285,7 +299,7 @@ export class ContractsService {
     contractId: string,
     data: CreatePaymentSchedulesDto,
   ) {
-    const contract = await this.get(actor, projectId, contractId);
+    const contract = await this.activeContract(actor, projectId, contractId);
     const total = data.items.reduce(
       (sum, item) => sum.add(item.amount),
       new Prisma.Decimal(0),
@@ -318,6 +332,7 @@ export class ContractsService {
     projectId: string,
     data: RecordPaymentDto,
   ) {
+    await this.policy.assertView(actor, 'Project', projectId);
     const paymentAmount = new Prisma.Decimal(data.amount);
     const allocated = data.allocations.reduce(
       (sum, item) => sum.add(item.amount),
@@ -424,7 +439,7 @@ export class ContractsService {
     contractId: string,
     data: CreateGuaranteeDto,
   ) {
-    await this.get(actor, projectId, contractId);
+    await this.activeContract(actor, projectId, contractId);
     if (data.expiryDate <= data.issueDate)
       throw new UnprocessableEntityException(
         'Guarantee expiry must follow issue date',

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AccessControlModule } from '../access-control/access-control.module';
 import { AuditModule } from '../audit/audit.module';
 import { FilesModule } from '../files/files.module';
 import { PrismaService } from '../prisma.service';
@@ -7,7 +8,7 @@ import { CommercialService } from './commercial.service';
 import { QuotationDocumentsService } from './quotation-documents.service';
 
 @Module({
-  imports: [AuditModule, FilesModule],
+  imports: [AccessControlModule, AuditModule, FilesModule],
   controllers: [CommercialController],
   providers: [CommercialService, QuotationDocumentsService, PrismaService],
 })

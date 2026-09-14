@@ -194,6 +194,9 @@ enum Confidentiality {
 }
 
 enum TaskStatus {
+  NOT_INITIALIZED
+  NOT_APPLICABLE
+  BYPASSED_WITH_APPROVAL
   TODO
   IN_PROGRESS
   BLOCKED
@@ -202,11 +205,91 @@ enum TaskStatus {
   CANCELLED
 }
 
+enum ProjectStage {
+  STAGE_ONE
+  STAGE_TWO
+  STAGE_THREE
+  STAGE_FOUR
+  STAGE_FIVE
+}
+
+enum ProjectStageOneStep {
+  ASSIGNMENT
+  SURVEY
+  PROPOSAL
+  FINANCIAL_PLANNING
+  KICKOFF_APPROVAL
+}
+
+enum StageOneFundingSource {
+  PUBLIC_INVESTMENT_2026
+  ODA_CONCESSIONAL_LOAN
+  PPP
+  MIXED_OTHER
+}
+
 enum ApprovalStatus {
   DRAFT
   PENDING
   APPROVED
   REJECTED
+}
+
+enum ProjectStageApprovalDecision {
+  APPROVED
+  APPROVED_WITH_COMMENTS
+  REVISION_REQUIRED
+  REJECTED
+}
+
+enum ProjectLocationType {
+  BUILDING
+  FLOOR
+  ZONE
+  ROOM
+  AREA
+}
+
+enum ProjectProductApprovalType {
+  CUSTOMER
+  TECHNICAL
+  COMMERCIAL
+}
+
+enum ProjectProductApprovalStatus {
+  NOT_REQUIRED
+  DRAFT
+  PENDING
+  APPROVED
+  APPROVED_WITH_COMMENTS
+  REJECTED
+  SUPERSEDED
+}
+
+enum ProjectProductLifecycle {
+  REQUIREMENT
+  SHORTLISTING
+  CLIENT_REVIEW
+  CLIENT_APPROVED
+  TECHNICAL_REVIEW
+  COMMERCIAL_REVIEW
+  READY_FOR_ESTIMATE
+  ESTIMATED
+  QUOTED
+  CONTRACTED
+  READY_TO_ORDER
+  ORDERED
+  IN_PRODUCTION
+  READY_TO_SHIP
+  IN_TRANSIT
+  WAREHOUSE_RECEIVED
+  READY_FOR_INSTALLATION
+  INSTALLED
+  ACCEPTED
+  HANDED_OVER
+  UNDER_WARRANTY
+  CLOSED
+  CANCELLED
 }
 
 enum UploadStatus {
@@ -268,54 +351,60 @@ model Organization {
   contracts          Contract[]
   purchaseRequests   PurchaseRequest[]
   warehouses         Warehouse[]
+  projectRisks       ProjectRisk[]
 }
 
 model User {
-  id                  String                   @id @default(uuid()) @db.Uuid
-  email               String                   @unique
-  normalizedEmail     String                   @unique
-  displayName         String
-  avatarKey           String?
-  phone               String?
-  status              UserStatus               @default(invited)
-  externalAuthId      String?                  @unique
-  lastLoginAt         DateTime?
-  createdAt           DateTime                 @default(now())
-  updatedAt           DateTime                 @updatedAt
-  organizationMembers OrganizationMembership[]
-  departmentMembers   DepartmentMembership[]
-  roles               UserRole[]               @relation("UserRoles")
-  assignedRoles       UserRole[]               @relation("AssignedRoles")
-  auditLogs           AuditLog[]
-  credential          PasswordCredential?
-  sessions            Session[]
-  passwordResetTokens PasswordResetToken[]
-  grantedManagement   ManagedDepartment[]      @relation("ManagedDepartmentCreator")
-  createdRoles        Role[]                   @relation("RoleCreator")
-  createdCustomFields CustomFieldDefinition[]  @relation("CustomFieldCreator")
-  customData          Json                     @default("{}")
-  ownedCustomers      Customer[]               @relation("CustomerOwner")
-  ownedLeads          Lead[]                   @relation("LeadOwner")
-  convertedLeads      Lead[]                   @relation("LeadConverter")
-  ownedOpportunities  Opportunity[]            @relation("OpportunityOwner")
-  activities          Activity[]               @relation("ActivityActor")
-  notifications       Notification[]           @relation("NotificationRecipient")
-  actorNotifications  Notification[]           @relation("NotificationActor")
-  projectMemberships  ProjectMember[]
-  ownedProjects       Project[]                @relation("ProjectOwner")
-  salesProjects       Project[]                @relation("ProjectSalesOwner")
-  designProjects      Project[]                @relation("ProjectDesignOwner")
-  managedProjects     Project[]                @relation("ProjectManager")
-  assignedTasks       TaskAssignee[]
-  watchedTasks        TaskWatcher[]
-  uploadedFiles       FileAsset[]
-  authoredComments    Comment[]                @relation("CommentAuthor")
-  mentions            Mention[]
-  importJobs          ImportJob[]
-  ownedCampaigns      Campaign[]               @relation("CampaignOwner")
-  authoredContent     ContentItem[]            @relation("ContentAuthor")
-  reviewedContent     ContentItem[]            @relation("ContentReviewer")
-  approvedContent     ContentItem[]            @relation("ContentApprover")
+  id                                String                           @id @default(uuid()) @db.Uuid
+  email                             String                           @unique
+  normalizedEmail                   String                           @unique
+  displayName                       String
+  avatarKey                         String?
+  phone                             String?
+  status                            UserStatus                       @default(invited)
+  externalAuthId                    String?                          @unique
+  lastLoginAt                       DateTime?
+  createdAt                         DateTime                         @default(now())
+  updatedAt                         DateTime                         @updatedAt
+  organizationMembers               OrganizationMembership[]
+  departmentMembers                 DepartmentMembership[]
+  roles                             UserRole[]                       @relation("UserRoles")
+  assignedRoles                     UserRole[]                       @relation("AssignedRoles")
+  auditLogs                         AuditLog[]
+  credential                        PasswordCredential?
+  sessions                          Session[]
+  passwordResetTokens               PasswordResetToken[]
+  grantedManagement                 ManagedDepartment[]              @relation("ManagedDepartmentCreator")
+  createdRoles                      Role[]                           @relation("RoleCreator")
+  createdCustomFields               CustomFieldDefinition[]          @relation("CustomFieldCreator")
+  customData                        Json                             @default("{}")
+  ownedCustomers                    Customer[]                       @relation("CustomerOwner")
+  ownedLeads                        Lead[]                           @relation("LeadOwner")
+  convertedLeads                    Lead[]                           @relation("LeadConverter")
+  ownedOpportunities                Opportunity[]                    @relation("OpportunityOwner")
+  activities                        Activity[]                       @relation("ActivityActor")
+  notifications                     Notification[]                   @relation("NotificationRecipient")
+  actorNotifications                Notification[]                   @relation("NotificationActor")
+  projectMemberships                ProjectMember[]
+  ownedProjects                     Project[]                        @relation("ProjectOwner")
+  salesProjects                     Project[]                        @relation("ProjectSalesOwner")
+  designProjects                    Project[]                        @relation("ProjectDesignOwner")
+  managedProjects                   Project[]                        @relation("ProjectManager")
+  assignedTasks                     TaskAssignee[]
+  watchedTasks                      TaskWatcher[]
+  uploadedFiles                     FileAsset[]
+  authoredComments                  Comment[]                        @relation("CommentAuthor")
+  mentions                          Mention[]
+  importJobs                        ImportJob[]
+  ownedCampaigns                    Campaign[]                       @relation("CampaignOwner")
+  authoredContent                   ContentItem[]                    @relation("ContentAuthor")
+  reviewedContent                   ContentItem[]                    @relation("ContentReviewer")
+  approvedContent                   ContentItem[]                    @relation("ContentApprover")
+  submittedStageOneDocuments        ProjectStageOneDocument[]        @relation("StageOneDocumentSubmittedOfficer")
+  createdStageOneDocuments          ProjectStageOneDocument[]        @relation("StageOneDocumentActualActor")
+  submittedStageOneDocumentVersions ProjectStageOneDocumentVersion[] @relation("StageOneDocumentVersionSubmittedOfficer")
+  createdStageOneDocumentVersions   ProjectStageOneDocumentVersion[] @relation("StageOneDocumentVersionActualActor")
+  submittedUploadSessions           UploadSession[]                  @relation("UploadSessionSubmittingOfficer")
 }
 
 model PasswordCredential {
@@ -763,48 +852,52 @@ model Opportunity {
 }
 
 model Project {
-  id                     String              @id @default(uuid()) @db.Uuid
-  organizationId         String              @db.Uuid
-  opportunityId          String?             @unique @db.Uuid
+  id                     String                         @id @default(uuid()) @db.Uuid
+  organizationId         String                         @db.Uuid
+  opportunityId          String?                        @unique @db.Uuid
+  creationIdempotencyKey String?
   code                   String
   name                   String
-  customerId             String              @db.Uuid
-  primaryContactId       String?             @db.Uuid
+  customerId             String                         @db.Uuid
+  primaryContactId       String?                        @db.Uuid
   projectType            String?
   propertyType           String?
   location               String?
   address                String?
-  projectOwnerId         String?             @db.Uuid
-  salesOwnerId           String?             @db.Uuid
-  designOwnerId          String?             @db.Uuid
-  projectManagerId       String?             @db.Uuid
+  projectOwnerId         String?                        @db.Uuid
+  salesOwnerId           String?                        @db.Uuid
+  designOwnerId          String?                        @db.Uuid
+  projectManagerId       String?                        @db.Uuid
   startDate              DateTime?
   expectedCompletionDate DateTime?
   actualCompletionDate   DateTime?
-  status                 ProjectStatus       @default(PLANNING)
-  phase                  ProjectPhase        @default(SURVEY)
-  priority               WorkPriority        @default(NORMAL)
-  estimatedValue         Decimal?            @db.Decimal(20, 2)
-  contractedValue        Decimal?            @db.Decimal(20, 2)
-  currency               String              @default("VND")
+  status                 ProjectStatus                  @default(PLANNING)
+  phase                  ProjectPhase                   @default(SURVEY)
+  entryStage             ProjectStage                   @default(STAGE_ONE)
+  priority               WorkPriority                   @default(NORMAL)
+  estimatedValue         Decimal?                       @db.Decimal(20, 2)
+  contractedValue        Decimal?                       @db.Decimal(20, 2)
+  currency               String                         @default("VND")
   description            String?
-  confidentiality        Confidentiality     @default(INTERNAL)
-  healthStatus           ProjectHealth       @default(ON_TRACK)
-  progressPercentage     Int                 @default(0)
-  createdBy              String              @db.Uuid
-  updatedBy              String              @db.Uuid
-  createdAt              DateTime            @default(now())
-  updatedAt              DateTime            @updatedAt
+  confidentiality        Confidentiality                @default(INTERNAL)
+  healthStatus           ProjectHealth                  @default(ON_TRACK)
+  progressPercentage     Int                            @default(0)
+  createdBy              String                         @db.Uuid
+  updatedBy              String                         @db.Uuid
+  createdAt              DateTime                       @default(now())
+  updatedAt              DateTime                       @updatedAt
   deletedAt              DateTime?
-  version                Int                 @default(1)
-  organization           Organization        @relation(fields: [organizationId], references: [id])
-  opportunity            Opportunity?        @relation(fields: [opportunityId], references: [id])
-  customer               Customer            @relation(fields: [customerId], references: [id])
-  primaryContact         Contact?            @relation(fields: [primaryContactId], references: [id])
-  projectOwner           User?               @relation("ProjectOwner", fields: [projectOwnerId], references: [id])
-  salesOwner             User?               @relation("ProjectSalesOwner", fields: [salesOwnerId], references: [id])
-  designOwner            User?               @relation("ProjectDesignOwner", fields: [designOwnerId], references: [id])
-  projectManager         User?               @relation("ProjectManager", fields: [projectManagerId], references: [id])
+  deletedBy              String?                        @db.Uuid
+  deleteReason           String?
+  version                Int                            @default(1)
+  organization           Organization                   @relation(fields: [organizationId], references: [id])
+  opportunity            Opportunity?                   @relation(fields: [opportunityId], references: [id])
+  customer               Customer                       @relation(fields: [customerId], references: [id])
+  primaryContact         Contact?                       @relation(fields: [primaryContactId], references: [id])
+  projectOwner           User?                          @relation("ProjectOwner", fields: [projectOwnerId], references: [id])
+  salesOwner             User?                          @relation("ProjectSalesOwner", fields: [salesOwnerId], references: [id])
+  designOwner            User?                          @relation("ProjectDesignOwner", fields: [designOwnerId], references: [id])
+  projectManager         User?                          @relation("ProjectManager", fields: [projectManagerId], references: [id])
   members                ProjectMember[]
   departments            ProjectDepartment[]
   tasks                  Task[]
@@ -817,11 +910,167 @@ model Project {
   contracts              Contract[]
   purchaseRequests       PurchaseRequest[]
   warehouses             Warehouse[]
+  locations              ProjectLocation[]
+  productLines           ProjectProductLine[]
+  requiredDocuments      ProjectRequiredDocument[]
+  keyDossierMilestones   KeyDossierReferenceMilestone[]
+  uploadSessions         UploadSession[]
+  stageStates            ProjectStageState[]
+  stageSteps             ProjectStageStep[]
+  stageApprovals         ProjectStageApproval[]
+  stageOnePlan           ProjectStageOnePlan?
+  stageOneDocuments      ProjectStageOneDocument[]
+  importJobs             ImportJob[]
+  risks                  ProjectRisk[]
 
   @@unique([organizationId, code])
+  @@unique([organizationId, creationIdempotencyKey])
   @@index([organizationId, status, phase, deletedAt])
   @@index([organizationId, customerId])
   @@index([organizationId, projectManagerId])
+}
+
+model ProjectStageState {
+  id                               String       @id @default(uuid()) @db.Uuid
+  projectId                        String       @db.Uuid
+  stage                            ProjectStage
+  status                           TaskStatus   @default(TODO)
+  completedBy                      String?      @db.Uuid
+  completedAt                      DateTime?
+  decisionReason                   String?
+  decisionBy                       String?      @db.Uuid
+  decisionAt                       DateTime?
+  decisionApprovalId               String?      @db.Uuid
+  documentDefinitionsInitializedAt DateTime?
+  gateDecisionVersion              Int          @default(0)
+  version                          Int          @default(1)
+  createdAt                        DateTime     @default(now())
+  updatedAt                        DateTime     @updatedAt
+  project                          Project      @relation(fields: [projectId], references: [id])
+
+  @@unique([projectId, stage])
+  @@index([projectId, stage, status])
+}
+
+model ProjectStageStep {
+  id                  String              @id @default(uuid()) @db.Uuid
+  projectId           String              @db.Uuid
+  stage               ProjectStage
+  step                ProjectStageOneStep
+  ownerUserId         String?             @db.Uuid
+  dueDate             DateTime?
+  status              TaskStatus          @default(TODO)
+  notApplicableReason String?
+  notApplicableBy     String?             @db.Uuid
+  notApplicableAt     DateTime?
+  version             Int                 @default(1)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  project             Project             @relation(fields: [projectId], references: [id])
+
+  @@unique([projectId, stage, step])
+  @@index([projectId, stage, status])
+  @@index([ownerUserId, dueDate])
+}
+
+model ProjectStageApproval {
+  id             String                        @id @default(uuid()) @db.Uuid
+  projectId      String                        @db.Uuid
+  stage          ProjectStage                  @default(STAGE_ONE)
+  version        Int
+  status         ApprovalStatus                @default(DRAFT)
+  decision       ProjectStageApprovalDecision?
+  submittedBy    String?                       @db.Uuid
+  submittedAt    DateTime?
+  reviewedBy     String?                       @db.Uuid
+  decidedAt      DateTime?
+  comments       String?
+  evidenceFileId String?                       @db.Uuid
+  idempotencyKey String
+  createdAt      DateTime                      @default(now())
+  project        Project                       @relation(fields: [projectId], references: [id])
+
+  @@unique([projectId, stage, version])
+  @@unique([projectId, idempotencyKey])
+  @@index([projectId, stage, status, createdAt])
+}
+
+model ProjectStageOnePlan {
+  projectId                    String                 @id @db.Uuid
+  governanceCoordinatorUserIds String[]               @default([]) @db.Uuid
+  source                       String?
+  fundingSource                StageOneFundingSource?
+  legalEntityText              String?
+  scopeFlags                   Json?
+  scopeNotes                   String?
+  plannedSurveyAt              DateTime?
+  plannedProposalAt            DateTime?
+  plannedFinancialPlanAt       DateTime?
+  plannedKickoffAt             DateTime?
+  responsibilityNotes          String?
+  siteConstraints              String?
+  proposalBaseline             String?
+  proposalMilestones           Json?
+  proposalWbs                  Json?
+  riskNotes                    String?
+  resourceNotes                String?
+  preliminaryRevenue           Decimal?               @db.Decimal(20, 2)
+  preliminaryCost              Decimal?               @db.Decimal(20, 2)
+  preliminaryMargin            Decimal?               @db.Decimal(20, 2)
+  preliminaryCurrency          String?                @db.VarChar(3)
+  preliminaryFinancialPlanDate DateTime?
+  createdAt                    DateTime               @default(now())
+  updatedAt                    DateTime               @updatedAt
+  project                      Project                @relation(fields: [projectId], references: [id])
+}
+
+model ProjectStageOneDocument {
+  id                 String                           @id @default(uuid()) @db.Uuid
+  projectId          String                           @db.Uuid
+  contextType        String
+  stageKey           String
+  workstreamKey      String
+  step               ProjectStageOneStep?
+  documentType       String
+  displayName        String
+  requiredDocumentId String?                          @db.Uuid
+  currentFileAssetId String?                          @unique @db.Uuid
+  currentVersion     Int                              @default(0)
+  status             String                           @default("PENDING_UPLOAD")
+  submittedOfficerId String                           @db.Uuid
+  actualActorId      String                           @db.Uuid
+  idempotencyKey     String
+  createdAt          DateTime                         @default(now())
+  updatedAt          DateTime                         @updatedAt
+  project            Project                          @relation(fields: [projectId], references: [id])
+  requiredDocument   ProjectRequiredDocument?         @relation(fields: [requiredDocumentId], references: [id], onDelete: SetNull)
+  currentFileAsset   FileAsset?                       @relation("StageOneDocumentCurrentFile", fields: [currentFileAssetId], references: [id], onDelete: SetNull)
+  submittedOfficer   User                             @relation("StageOneDocumentSubmittedOfficer", fields: [submittedOfficerId], references: [id])
+  actualActor        User                             @relation("StageOneDocumentActualActor", fields: [actualActorId], references: [id])
+  versions           ProjectStageOneDocumentVersion[]
+  uploadSessions     UploadSession[]
+
+  @@unique([projectId, idempotencyKey])
+  @@index([projectId, step, status, createdAt])
+  @@index([requiredDocumentId])
+}
+
+model ProjectStageOneDocumentVersion {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  documentId         String                  @db.Uuid
+  version            Int
+  fileAssetId        String                  @unique @db.Uuid
+  status             String
+  submittedOfficerId String                  @db.Uuid
+  actualActorId      String                  @db.Uuid
+  createdAt          DateTime                @default(now())
+  document           ProjectStageOneDocument @relation(fields: [documentId], references: [id])
+  fileAsset          FileAsset               @relation("StageOneDocumentVersionFile", fields: [fileAssetId], references: [id])
+  submittedOfficer   User                    @relation("StageOneDocumentVersionSubmittedOfficer", fields: [submittedOfficerId], references: [id])
+  actualActor        User                    @relation("StageOneDocumentVersionActualActor", fields: [actualActorId], references: [id])
+
+  @@unique([documentId, version])
+  @@index([documentId, createdAt])
 }
 
 model Brand {
@@ -847,53 +1096,55 @@ model Brand {
 }
 
 model Product {
-  id                     String           @id @default(uuid()) @db.Uuid
-  organizationId         String           @db.Uuid
-  brandId                String           @db.Uuid
-  productCode            String
-  name                   String
-  collection             String?
-  category               String?
-  description            String?
-  unit                   String
-  dimensions             Json?
-  weight                 Decimal?         @db.Decimal(20, 3)
-  materials              String?
-  finishes               String?
-  technicalData          Json?
-  warrantyMonths         Int?
-  installationRequired   Boolean          @default(false)
-  serialTrackingRequired Boolean          @default(false)
-  lotTrackingRequired    Boolean          @default(false)
-  activeStatus           RecordStatus     @default(active)
-  createdAt              DateTime         @default(now())
-  updatedAt              DateTime         @updatedAt
-  organization           Organization     @relation(fields: [organizationId], references: [id])
-  brand                  Brand            @relation(fields: [brandId], references: [id])
-  variants               ProductVariant[]
+  id                      String                   @id @default(uuid()) @db.Uuid
+  organizationId          String                   @db.Uuid
+  brandId                 String                   @db.Uuid
+  productCode             String
+  name                    String
+  collection              String?
+  category                String?
+  description             String?
+  unit                    String
+  dimensions              Json?
+  weight                  Decimal?                 @db.Decimal(20, 3)
+  materials               String?
+  finishes                String?
+  technicalData           Json?
+  warrantyMonths          Int?
+  installationRequired    Boolean                  @default(false)
+  serialTrackingRequired  Boolean                  @default(false)
+  lotTrackingRequired     Boolean                  @default(false)
+  activeStatus            RecordStatus             @default(active)
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  organization            Organization             @relation(fields: [organizationId], references: [id])
+  brand                   Brand                    @relation(fields: [brandId], references: [id])
+  variants                ProductVariant[]
+  projectProductRevisions ProjectProductRevision[]
 
   @@unique([organizationId, productCode])
   @@index([organizationId, brandId, activeStatus])
 }
 
 model ProductVariant {
-  id           String       @id @default(uuid()) @db.Uuid
-  productId    String       @db.Uuid
-  code         String
-  name         String
-  attributes   Json
-  activeStatus RecordStatus @default(active)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  product      Product      @relation(fields: [productId], references: [id])
+  id                      String                   @id @default(uuid()) @db.Uuid
+  productId               String                   @db.Uuid
+  code                    String
+  name                    String
+  attributes              Json
+  activeStatus            RecordStatus             @default(active)
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  product                 Product                  @relation(fields: [productId], references: [id])
+  projectProductRevisions ProjectProductRevision[]
 
   @@unique([productId, code])
   @@index([productId, activeStatus])
 }
 
 model Supplier {
-  id                          String            @id @default(uuid()) @db.Uuid
-  organizationId              String            @db.Uuid
+  id                          String                   @id @default(uuid()) @db.Uuid
+  organizationId              String                   @db.Uuid
   legalName                   String
   tradingName                 String?
   country                     String
@@ -909,17 +1160,212 @@ model Supplier {
   bankInformationReference    String?
   discountAgreement           String?
   territory                   String?
-  authorizedDistributorStatus Boolean           @default(false)
-  activeStatus                RecordStatus      @default(active)
+  authorizedDistributorStatus Boolean                  @default(false)
+  activeStatus                RecordStatus             @default(active)
   riskNotes                   String?
-  createdAt                   DateTime          @default(now())
-  updatedAt                   DateTime          @updatedAt
-  organization                Organization      @relation(fields: [organizationId], references: [id])
+  createdAt                   DateTime                 @default(now())
+  updatedAt                   DateTime                 @updatedAt
+  organization                Organization             @relation(fields: [organizationId], references: [id])
   contacts                    SupplierContact[]
   proformaInvoices            ProformaInvoice[]
+  projectProductRevisions     ProjectProductRevision[]
 
   @@unique([organizationId, legalName])
   @@index([organizationId, activeStatus])
+}
+
+model ProjectLocation {
+  id           String               @id @default(uuid()) @db.Uuid
+  projectId    String               @db.Uuid
+  parentId     String?              @db.Uuid
+  type         ProjectLocationType
+  code         String
+  name         String
+  sortOrder    Int                  @default(0)
+  active       Boolean              @default(true)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  project      Project              @relation(fields: [projectId], references: [id])
+  parent       ProjectLocation?     @relation("ProjectLocationTree", fields: [parentId], references: [id])
+  children     ProjectLocation[]    @relation("ProjectLocationTree")
+  productLines ProjectProductLine[]
+
+  @@unique([projectId, code])
+  @@index([projectId, parentId, active, sortOrder])
+}
+
+model ProjectProductLine {
+  id              String                   @id @default(uuid()) @db.Uuid
+  organizationId  String                   @db.Uuid
+  projectId       String                   @db.Uuid
+  locationId      String?                  @db.Uuid
+  code            String
+  positionName    String?
+  currentRevision Int                      @default(1)
+  lifecycleStatus ProjectProductLifecycle  @default(SHORTLISTING)
+  blocker         String?
+  nextAction      String?
+  createdBy       String                   @db.Uuid
+  updatedBy       String                   @db.Uuid
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  deletedAt       DateTime?
+  project         Project                  @relation(fields: [projectId], references: [id])
+  location        ProjectLocation?         @relation(fields: [locationId], references: [id])
+  revisions       ProjectProductRevision[]
+  approvals       ProjectProductApproval[]
+
+  @@unique([projectId, code])
+  @@index([organizationId, projectId, lifecycleStatus, deletedAt])
+  @@index([projectId, locationId])
+}
+
+model ProjectProductRevision {
+  id                       String                       @id @default(uuid()) @db.Uuid
+  productLineId            String                       @db.Uuid
+  revision                 Int
+  productId                String?                      @db.Uuid
+  variantId                String?                      @db.Uuid
+  supplierId               String?                      @db.Uuid
+  customProductName        String?
+  customDescription        String?
+  material                 String?
+  finish                   String?
+  color                    String?
+  width                    Decimal?                     @db.Decimal(20, 3)
+  depth                    Decimal?                     @db.Decimal(20, 3)
+  height                   Decimal?                     @db.Decimal(20, 3)
+  length                   Decimal?                     @db.Decimal(20, 3)
+  diameter                 Decimal?                     @db.Decimal(20, 3)
+  dimensionUnit            String?
+  customDimensionNote      String?
+  quantity                 Decimal                      @db.Decimal(20, 3)
+  unit                     String
+  countryOfOrigin          String?
+  factoryName              String?
+  customerApprovalStatus   ProjectProductApprovalStatus @default(DRAFT)
+  technicalApprovalStatus  ProjectProductApprovalStatus @default(DRAFT)
+  commercialApprovalStatus ProjectProductApprovalStatus @default(DRAFT)
+  customerApprovalDueAt    DateTime?
+  technicalApprovalDueAt   DateTime?
+  commercialApprovalDueAt  DateTime?
+  lockedAt                 DateTime?
+  createdBy                String                       @db.Uuid
+  createdAt                DateTime                     @default(now())
+  productLine              ProjectProductLine           @relation(fields: [productLineId], references: [id])
+  product                  Product?                     @relation(fields: [productId], references: [id])
+  variant                  ProductVariant?              @relation(fields: [variantId], references: [id])
+  supplier                 Supplier?                    @relation(fields: [supplierId], references: [id])
+  approvals                ProjectProductApproval[]
+
+  @@unique([productLineId, revision])
+  @@index([productId, variantId])
+  @@index([supplierId])
+}
+
+model ProjectProductApproval {
+  id                     String                       @id @default(uuid()) @db.Uuid
+  organizationId         String                       @db.Uuid
+  projectId              String                       @db.Uuid
+  productLineId          String                       @db.Uuid
+  revisionId             String                       @db.Uuid
+  type                   ProjectProductApprovalType
+  status                 ProjectProductApprovalStatus
+  submittedBy            String?                      @db.Uuid
+  submittedAt            DateTime?
+  decidedBy              String?                      @db.Uuid
+  decidedAt              DateTime?
+  approvedByExternalName String?
+  approvalMethod         String?
+  evidenceFileAssetId    String?                      @db.Uuid
+  notes                  String?
+  createdAt              DateTime                     @default(now())
+  productLine            ProjectProductLine           @relation(fields: [productLineId], references: [id])
+  revision               ProjectProductRevision       @relation(fields: [revisionId], references: [id])
+
+  @@index([organizationId, projectId, type, status])
+  @@index([productLineId, revisionId, createdAt])
+}
+
+model ProjectRequiredDocument {
+  id                   String                           @id @default(uuid()) @db.Uuid
+  organizationId       String                           @db.Uuid
+  projectId            String                           @db.Uuid
+  stageKey             String
+  workstreamKey        String
+  documentType         String
+  documentName         String
+  required             Boolean                          @default(false)
+  position             Int                              @default(0)
+  initialMatrix        Boolean                          @default(false)
+  normalizedName       String?
+  status               String                           @default("MISSING")
+  ownerUserId          String?                          @db.Uuid
+  ownerRole            String?
+  dueDate              DateTime?
+  currentFileAssetId   String?                          @db.Uuid
+  currentVersion       Int                              @default(0)
+  approvedAt           DateTime?
+  approvedBy           String?                          @db.Uuid
+  notes                String?
+  notApplicableReason  String?
+  markedBy             String?                          @db.Uuid
+  markedAt             DateTime?
+  supersededAt         DateTime?
+  supersededBy         String?                          @db.Uuid
+  referenceMilestoneId String?                          @db.Uuid
+  deletedAt            DateTime?
+  deletedBy            String?                          @db.Uuid
+  deleteReason         String?
+  createdAt            DateTime                         @default(now())
+  updatedAt            DateTime                         @updatedAt
+  project              Project                          @relation(fields: [projectId], references: [id])
+  referenceMilestone   KeyDossierReferenceMilestone?    @relation(fields: [referenceMilestoneId], references: [id], onDelete: SetNull)
+  versions             ProjectRequiredDocumentVersion[]
+  uploadSessions       UploadSession[]
+  stageOneDocuments    ProjectStageOneDocument[]
+
+  @@unique([projectId, stageKey, workstreamKey, documentType, initialMatrix], map: "ProjectRequiredDocument_context_key")
+  @@index([organizationId, projectId, stageKey, status])
+  @@index([projectId, initialMatrix, deletedAt, position])
+  @@index([referenceMilestoneId])
+}
+
+model KeyDossierReferenceMilestone {
+  id             String                    @id @default(uuid()) @db.Uuid
+  organizationId String                    @db.Uuid
+  projectId      String                    @db.Uuid
+  code           String
+  name           String
+  position       Int                       @default(0)
+  active         Boolean                   @default(true)
+  createdBy      String                    @db.Uuid
+  updatedBy      String                    @db.Uuid
+  deletedAt      DateTime?
+  deletedBy      String?                   @db.Uuid
+  deleteReason   String?
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  project        Project                   @relation(fields: [projectId], references: [id])
+  items          ProjectRequiredDocument[]
+
+  @@unique([projectId, code])
+  @@index([organizationId, projectId, deletedAt, position])
+}
+
+model ProjectRequiredDocumentVersion {
+  id            String                  @id @default(uuid()) @db.Uuid
+  requirementId String                  @db.Uuid
+  version       Int
+  fileAssetId   String?                 @db.Uuid
+  status        String
+  notes         String?
+  createdBy     String                  @db.Uuid
+  createdAt     DateTime                @default(now())
+  requirement   ProjectRequiredDocument @relation(fields: [requirementId], references: [id])
+
+  @@unique([requirementId, version])
+  @@index([requirementId, createdAt])
 }
 
 model SupplierContact {
@@ -964,22 +1410,23 @@ model Estimate {
 }
 
 model EstimateVersion {
-  id              String             @id @default(uuid()) @db.Uuid
-  estimateId      String             @db.Uuid
+  id              String                   @id @default(uuid()) @db.Uuid
+  estimateId      String                   @db.Uuid
   version         Int
-  status          String             @default("DRAFT")
-  exchangeRate    Decimal            @default(1) @db.Decimal(20, 6)
-  subtotalCost    Decimal            @default(0) @db.Decimal(20, 2)
-  subtotalSelling Decimal            @default(0) @db.Decimal(20, 2)
+  status          String                   @default("DRAFT")
+  exchangeRate    Decimal                  @default(1) @db.Decimal(20, 6)
+  subtotalCost    Decimal?                 @db.Decimal(20, 2)
+  subtotalSelling Decimal                  @default(0) @db.Decimal(20, 2)
   assumptions     Json?
   submittedAt     DateTime?
   approvedAt      DateTime?
-  approvedBy      String?            @db.Uuid
-  createdBy       String             @db.Uuid
-  createdAt       DateTime           @default(now())
-  estimate        Estimate           @relation(fields: [estimateId], references: [id])
+  approvedBy      String?                  @db.Uuid
+  createdBy       String                   @db.Uuid
+  createdAt       DateTime                 @default(now())
+  estimate        Estimate                 @relation(fields: [estimateId], references: [id])
   lines           EstimateLineItem[]
   approvals       EstimateApproval[]
+  riskAllocations EstimateRiskAllocation[]
 
   @@unique([estimateId, version])
   @@index([estimateId, status])
@@ -994,23 +1441,29 @@ model EstimateLineItem {
   customDescription    String?
   supplierId           String?         @db.Uuid
   quantity             Decimal         @db.Decimal(20, 3)
+  purchaseQuantity     Decimal         @db.Decimal(20, 3)
   unit                 String
   listPrice            Decimal         @default(0) @db.Decimal(20, 2)
   supplierDiscount     Decimal         @default(0) @db.Decimal(9, 4)
-  netPurchasePrice     Decimal         @default(0) @db.Decimal(20, 2)
+  netPurchasePrice     Decimal?        @db.Decimal(20, 2)
   currency             String
   exchangeRateSnapshot Decimal         @default(1) @db.Decimal(20, 6)
-  baseCostVnd          Decimal         @default(0) @db.Decimal(20, 2)
+  baseCostVnd          Decimal?        @db.Decimal(20, 2)
   freightEstimate      Decimal         @default(0) @db.Decimal(20, 2)
   taxEstimate          Decimal         @default(0) @db.Decimal(20, 2)
   installationCost     Decimal         @default(0) @db.Decimal(20, 2)
   otherCost            Decimal         @default(0) @db.Decimal(20, 2)
-  totalCost            Decimal         @default(0) @db.Decimal(20, 2)
-  markup               Decimal         @default(0) @db.Decimal(9, 4)
-  margin               Decimal         @default(0) @db.Decimal(9, 4)
+  totalCost            Decimal?        @db.Decimal(20, 2)
+  markup               Decimal?        @db.Decimal(20, 6)
+  margin               Decimal?        @db.Decimal(20, 6)
   sellingPrice         Decimal         @default(0) @db.Decimal(20, 2)
   notes                String?
   sourceDocument       String?
+  priceSourceType      String?
+  priceStatus          String          @default("PROVISIONAL")
+  priceQuotedAt        DateTime?
+  priceValidUntil      DateTime?
+  contributesToTotal   Boolean         @default(true)
   position             Int             @default(0)
   estimateVersion      EstimateVersion @relation(fields: [estimateVersionId], references: [id])
 
@@ -1029,6 +1482,62 @@ model EstimateApproval {
   estimateVersion   EstimateVersion @relation(fields: [estimateVersionId], references: [id])
 
   @@index([estimateVersionId, createdAt])
+}
+
+model ProjectRisk {
+  id              String                   @id @default(uuid()) @db.Uuid
+  organizationId  String                   @db.Uuid
+  projectId       String                   @db.Uuid
+  code            String
+  title           String
+  cause           String
+  event           String
+  impact          String
+  category        String
+  stage           String
+  ownerId         String                   @db.Uuid
+  likelihood      Int
+  impactScore     Int
+  priorityScore   Int
+  probability     Decimal?                 @db.Decimal(7, 6)
+  financialImpact Decimal?                 @db.Decimal(20, 2)
+  emv             Decimal?                 @db.Decimal(20, 2)
+  trigger         String?
+  treatment       String?
+  response        String?
+  dueDate         DateTime?
+  status          String                   @default("OPEN")
+  occurredAt      DateTime?
+  createdBy       String                   @db.Uuid
+  updatedBy       String                   @db.Uuid
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  organization    Organization             @relation(fields: [organizationId], references: [id])
+  project         Project                  @relation(fields: [projectId], references: [id])
+  allocations     EstimateRiskAllocation[]
+
+  @@unique([projectId, code])
+  @@index([organizationId, projectId, status])
+  @@index([projectId, stage, priorityScore])
+  @@index([ownerId, status])
+}
+
+model EstimateRiskAllocation {
+  id                String          @id @default(uuid()) @db.Uuid
+  estimateVersionId String          @db.Uuid
+  riskId            String          @db.Uuid
+  approvedAmount    Decimal         @db.Decimal(20, 2)
+  basis             String
+  status            String          @default("ALLOCATED")
+  createdBy         String          @db.Uuid
+  updatedBy         String          @db.Uuid
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  estimateVersion   EstimateVersion @relation(fields: [estimateVersionId], references: [id])
+  risk              ProjectRisk     @relation(fields: [riskId], references: [id])
+
+  @@unique([estimateVersionId, riskId])
+  @@index([riskId, status])
 }
 
 model Quotation {
@@ -1142,8 +1651,9 @@ model QuotationDocument {
   quotationVersionId String           @db.Uuid
   language           String
   format             String
-  storageKey         String
+  storageKey         String           @unique
   checksum           String
+  sizeBytes          BigInt?
   generatedBy        String           @db.Uuid
   generatedAt        DateTime         @default(now())
   quotationVersion   QuotationVersion @relation(fields: [quotationVersionId], references: [id])
@@ -2620,28 +3130,50 @@ model QuotationLine {
 }
 
 model UploadSession {
-  id               String       @id @default(uuid()) @db.Uuid
-  organizationId   String       @db.Uuid
-  actorId          String       @db.Uuid
-  originalFilename String
-  declaredSize     BigInt
-  mimeType         String
-  storageProvider  String       @default("LOCAL")
-  storageKey       String
-  providerUploadId String?
-  status           UploadStatus @default(INITIATED)
-  partSize         Int
-  totalParts       Int
-  uploadedBytes    BigInt       @default(0)
-  checksum         String?
-  expiresAt        DateTime
-  createdAt        DateTime     @default(now())
-  completedAt      DateTime?
-  abortedAt        DateTime?
-  parts            UploadPart[]
+  id                        String                   @id @default(uuid()) @db.Uuid
+  organizationId            String                   @db.Uuid
+  actorId                   String                   @db.Uuid
+  projectId                 String?                  @db.Uuid
+  requiredDocumentId        String?                  @db.Uuid
+  stageOneDocumentId        String?                  @db.Uuid
+  submittingOfficerId       String?                  @db.Uuid
+  idempotencyKey            String?
+  fileAssetId               String?                  @unique @db.Uuid
+  originalFilename          String
+  declaredSize              BigInt
+  mimeType                  String
+  storageProvider           String                   @default("LOCAL")
+  storageKey                String
+  providerUploadId          String?
+  status                    UploadStatus             @default(INITIATED)
+  partSize                  Int
+  totalParts                Int
+  uploadedBytes             BigInt                   @default(0)
+  checksum                  String?
+  expiresAt                 DateTime
+  verificationClaimId       String?
+  verificationStartedAt     DateTime?
+  stagingReleasedAt         DateTime?
+  stagingCleanupAttemptedAt DateTime?
+  createdAt                 DateTime                 @default(now())
+  completedAt               DateTime?
+  abortedAt                 DateTime?
+  parts                     UploadPart[]
+  project                   Project?                 @relation(fields: [projectId], references: [id])
+  requiredDocument          ProjectRequiredDocument? @relation(fields: [requiredDocumentId], references: [id])
+  stageOneDocument          ProjectStageOneDocument? @relation(fields: [stageOneDocumentId], references: [id])
+  submittingOfficer         User?                    @relation("UploadSessionSubmittingOfficer", fields: [submittingOfficerId], references: [id], onDelete: SetNull)
+  fileAsset                 FileAsset?               @relation(fields: [fileAssetId], references: [id])
 
   @@index([organizationId, actorId, status])
   @@index([expiresAt, status])
+  @@index([projectId, requiredDocumentId])
+  @@index([projectId, requiredDocumentId, idempotencyKey])
+  @@index([projectId, stageOneDocumentId])
+  @@index([projectId, stageOneDocumentId, idempotencyKey])
+  @@index([organizationId, stagingReleasedAt])
+  @@index([stagingReleasedAt, stagingCleanupAttemptedAt])
+  @@index([status, verificationStartedAt])
 }
 
 model UploadPart {
@@ -2691,8 +3223,11 @@ model ProjectDepartment {
 model Task {
   id                String           @id @default(uuid()) @db.Uuid
   organizationId    String           @db.Uuid
+  code              String?
+  baselineVersion   Int?
   title             String
   description       String?
+  allocatedBudget   Decimal?         @db.Decimal(20, 2)
   projectId         String?          @db.Uuid
   customerId        String?          @db.Uuid
   relatedEntityType String?
@@ -2844,30 +3379,47 @@ model RequirementVersion {
 }
 
 model FileAsset {
-  id               String             @id @default(uuid()) @db.Uuid
-  organizationId   String             @db.Uuid
-  originalFilename String
-  storedFilename   String
-  mimeType         String
-  sizeBytes        Int
-  storageProvider  String             @default("LOCAL")
-  storageKey       String             @unique
-  checksum         String
-  category         String
-  confidentiality  Confidentiality    @default(INTERNAL)
-  uploadedById     String             @db.Uuid
-  version          Int                @default(1)
-  thumbnailKey     String?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-  deletedAt        DateTime?
-  organization     Organization       @relation(fields: [organizationId], references: [id])
-  uploadedBy       User               @relation(fields: [uploadedById], references: [id])
-  attachments      EntityAttachment[]
+  id                       String                           @id @default(uuid()) @db.Uuid
+  organizationId           String                           @db.Uuid
+  originalFilename         String
+  storedFilename           String
+  mimeType                 String
+  sizeBytes                BigInt
+  storageProvider          String                           @default("LOCAL")
+  storageKey               String                           @unique
+  checksum                 String
+  category                 String
+  confidentiality          Confidentiality                  @default(INTERNAL)
+  uploadedById             String                           @db.Uuid
+  version                  Int                              @default(1)
+  thumbnailKey             String?
+  createdAt                DateTime                         @default(now())
+  updatedAt                DateTime                         @updatedAt
+  deletedAt                DateTime?
+  organization             Organization                     @relation(fields: [organizationId], references: [id])
+  uploadedBy               User                             @relation(fields: [uploadedById], references: [id])
+  attachments              EntityAttachment[]
+  uploadSession            UploadSession?
+  currentStageOneDocuments ProjectStageOneDocument[]        @relation("StageOneDocumentCurrentFile")
+  stageOneDocumentVersions ProjectStageOneDocumentVersion[] @relation("StageOneDocumentVersionFile")
+  importJobs               ImportJob[]
 
   @@index([organizationId, category, deletedAt])
   @@index([organizationId, uploadedById, createdAt])
   @@index([organizationId, mimeType])
+}
+
+model FileStorageReservation {
+  id             String   @id @db.Uuid
+  organizationId String   @db.Uuid
+  actorId        String   @db.Uuid
+  storageKey     String   @unique
+  sizeBytes      BigInt
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([expiresAt])
 }
 
 model EntityAttachment {
@@ -2969,6 +3521,8 @@ model Notification {
 model ImportJob {
   id             String       @id @default(uuid()) @db.Uuid
   organizationId String       @db.Uuid
+  projectId      String?      @db.Uuid
+  fileAssetId    String?      @db.Uuid
   entityType     String
   status         ImportStatus @default(UPLOADED)
   filename       String
@@ -2983,9 +3537,12 @@ model ImportJob {
   completedAt    DateTime?
   organization   Organization @relation(fields: [organizationId], references: [id])
   uploadedBy     User         @relation(fields: [uploadedById], references: [id])
+  project        Project?     @relation(fields: [projectId], references: [id])
+  fileAsset      FileAsset?   @relation(fields: [fileAssetId], references: [id])
   rows           ImportRow[]
 
   @@index([organizationId, createdAt])
+  @@index([projectId, fileAssetId])
 }
 
 model ImportRow {

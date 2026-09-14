@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   developmentHosts,
+  internalApiUrl,
   normalizeHost,
   publicHosts,
   trustedRequestHost,
@@ -88,6 +89,23 @@ describe('Host validation', () => {
     expect(() => validateProductionEnvironment()).toThrow(
       'Development authentication',
     );
+  });
+
+  it('accepts only an exact loopback HTTP API base', () => {
+    expect(internalApiUrl('http://127.0.0.1:3001/api/v1')).toBe(
+      'http://127.0.0.1:3001/api/v1',
+    );
+    for (const value of [
+      'https://127.0.0.1:3001/api/v1',
+      'http://api:3001/api/v1',
+      'http://127.0.0.1:3001/api/v1/',
+      'http://user:secret@127.0.0.1:3001/api/v1',
+      'http://127.0.0.1:3001/api/v1?target=elsewhere',
+      'http://127.0.0.1:3001/api/v1#fragment',
+    ])
+      expect(() => internalApiUrl(value)).toThrow(
+        'INTERNAL_API_URL must be an exact loopback HTTP API base',
+      );
   });
 
   it('rejects unconfigured and malformed hosts', async () => {

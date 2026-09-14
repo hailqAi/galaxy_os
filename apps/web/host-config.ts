@@ -58,6 +58,29 @@ export function publicHosts(
   return [...new Set(hosts)];
 }
 
+export function internalApiUrl(
+  value = process.env.INTERNAL_API_URL ?? 'http://127.0.0.1:3001/api/v1',
+) {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('INTERNAL_API_URL must be an exact loopback HTTP API base');
+  }
+  if (
+    url.protocol !== 'http:' ||
+    url.hostname !== '127.0.0.1' ||
+    !url.port ||
+    url.username ||
+    url.password ||
+    url.pathname !== '/api/v1' ||
+    url.search ||
+    url.hash
+  )
+    throw new Error('INTERNAL_API_URL must be an exact loopback HTTP API base');
+  return `${url.origin}/api/v1`;
+}
+
 export function validateProductionEnvironment() {
   if (process.env.NODE_ENV !== 'production') return;
   if (process.env.ALLOW_DEV_AUTH === 'true')
@@ -67,6 +90,7 @@ export function validateProductionEnvironment() {
   if (process.env.TRUST_PROXY !== 'true')
     throw new Error('TRUST_PROXY must be true in production');
   publicHosts();
+  internalApiUrl();
   if (process.env.NEXT_PUBLIC_API_URL !== '/api/v1')
     throw new Error('NEXT_PUBLIC_API_URL must be /api/v1 in production');
 }

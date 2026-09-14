@@ -4,7 +4,17 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { FormEvent, ReactNode, useEffect, useState } from 'react';
 import { Actor, api, apiUrl } from './lib/api';
-import { visibleNavigation } from './portal-navigation';
+import { isNavigationActive, visibleNavigation } from './portal-navigation';
+import { clearProjectDocumentPendingBatchStorage } from '../features/projects/project-document-upload-queue';
+
+export const canReadNotifications = (
+  actor?: Pick<Actor, 'mustChangePassword' | 'permissions'>,
+) =>
+  Boolean(
+    actor &&
+      !actor.mustChangePassword &&
+      actor.permissions.includes('notification.read'),
+  );
 
 export default function PortalShell({ children }: { children: ReactNode }) {
   const path = usePathname();
@@ -25,7 +35,7 @@ export default function PortalShell({ children }: { children: ReactNode }) {
         );
   }, [path, publicPage, router]);
   useEffect(() => {
-    if (actor?.permissions.includes('notification.read'))
+    if (canReadNotifications(actor))
       api<{ count: number }>('/notifications/unread-count')
         .then((result) => setUnread(result.count))
         .catch(() => setUnread(0));
@@ -45,6 +55,7 @@ export default function PortalShell({ children }: { children: ReactNode }) {
     .toUpperCase();
   async function logout() {
     await api('/auth/logout', { method: 'POST' });
+    clearProjectDocumentPendingBatchStorage(sessionStorage);
     setActor(undefined);
     router.replace('/login');
     router.refresh();
@@ -58,42 +69,113 @@ export default function PortalShell({ children }: { children: ReactNode }) {
       router.push(`/search?q=${encodeURIComponent(query)}`);
   }
   return (
-    <div className="min-h-screen md:grid md:grid-cols-[240px_1fr]">
-      <aside className="bg-ink px-5 py-6 text-white">
+    <div className="portal-shell min-h-screen">
+      <aside className="portal-sidebar flex flex-col px-4 py-3 md:min-h-screen md:px-5 md:py-6">
         <Link className="text-xl font-semibold tracking-wide" href="/">
           Galaxy OS
         </Link>
-        <p className="mt-1 text-sm text-white/60">{actor.organization.name}</p>
+        <p className="mt-1 text-sm text-black/55">{actor.organization.name}</p>
         <nav
           aria-label="Điều hướng chính"
-          className="mt-8 flex flex-wrap gap-2 md:flex-col"
+          className="mt-3 flex gap-2 overflow-x-auto pb-1 md:mt-8 md:flex-col md:overflow-visible md:pb-0"
         >
           {visibleNavigation(actor.permissions, actor.administrationScope).map(
-            (item) => (
-              <Link
-                className="rounded px-3 py-2 text-sm hover:bg-white/10"
-                href={item.href}
-                key={item.href}
-              >
-                {item.label}
-              </Link>
+            (group) => (
+              <section className="grid shrink-0 gap-1" key={group.key}>
+                <Link
+                  aria-current={
+                    isNavigationActive(group, path) &&
+                    !group.children?.some((item) =>
+                      isNavigationActive(item, path),
+                    )
+                      ? 'page'
+                      : undefined
+                  }
+                  className={`rounded px-3 py-2 text-sm font-semibold hover:bg-black/5 ${
+                    isNavigationActive(group, path)
+                      ? 'portal-nav-active bg-black/5'
+                      : 'text-black/70'
+                  }`}
+                  href={group.href}
+                >
+                  <span aria-hidden="true" className="mr-2">
+                    {group.icon}
+                  </span>
+                  {group.label}
+                </Link>
+                {isNavigationActive(group, path) &&
+                  group.children?.map((item) => (
+                    <Link
+                      aria-current={
+                        isNavigationActive(item, path) ? 'page' : undefined
+                      }
+                      className={`ml-5 hidden rounded px-3 py-1.5 text-xs hover:bg-black/5 md:block ${
+                        isNavigationActive(item, path)
+                          ? 'portal-nav-active bg-black/10'
+                          : 'text-black/60'
+                      }`}
+                      href={item.href}
+                      key={item.key}
+                    >
+                      {item.label}
+                    </Link>
+                  ))}
+              </section>
             ),
           )}
         </nav>
+        <Link
+          className="portal-user-card mt-3 flex items-center gap-3 rounded-lg p-2 md:mt-auto md:p-3"
+          href="/account/profile"
+        >
+          {actor.avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- authenticated same-origin avatar path
+            <img
+              alt=""
+              className="h-9 w-9 rounded-full object-cover"
+              src={`${apiUrl}${actor.avatarUrl}`}
+            />
+          ) : (
+            <span className="portal-avatar grid h-9 w-9 place-items-center rounded-full text-xs text-white">
+              {initials}
+            </span>
+          )}
+          <span className="min-w-0">
+            <strong className="block truncate text-sm">
+              {actor.displayName}
+            </strong>
+            <small className="block truncate text-black/55">
+              {actor.roles.map(({ name }) => name).join(', ')}
+              {actor.roles.length > 0 && ' · '}
+              {actor.administrationScope}
+            </small>
+          </span>
+        </Link>
       </aside>
       <div>
-        <header className="flex min-h-16 items-center justify-between border-b border-black/10 bg-white px-6">
-          <form onSubmit={search}>
+        <header className="portal-header flex items-center justify-between gap-2 border-b border-black/10 bg-white px-3 sm:px-6">
+          <form className="min-w-0 flex-1" onSubmit={search}>
             <input
               aria-label="Tìm kiếm toàn hệ thống"
-              className="w-64"
+              autoComplete="off"
+              className="w-full sm:w-64"
+              id="portal-search"
               minLength={2}
               name="q"
               placeholder="Tìm khách hàng, dự án, công việc…"
             />
           </form>
           <div className="flex items-center gap-3">
-            {actor.permissions.includes('notification.read') && (
+            <Link
+              className="hidden text-right text-sm sm:block"
+              href="/account/profile"
+            >
+              <strong className="block">{actor.displayName}</strong>
+              <span className="block text-xs text-black/55">
+                {actor.roles[0]?.name ?? actor.administrationScope}
+              </span>
+            </Link>
+            {canReadNotifications(actor) && (
               <Link
                 aria-label={`${unread} thông báo chưa đọc`}
                 className="relative rounded px-2 py-1"
@@ -107,22 +189,10 @@ export default function PortalShell({ children }: { children: ReactNode }) {
                 )}
               </Link>
             )}
-            {actor.avatarUrl ? (
-              <img
-                alt=""
-                className="h-9 w-9 rounded-full object-cover"
-                src={`${apiUrl}${actor.avatarUrl}`}
-              />
-            ) : (
-              <span className="grid h-9 w-9 place-items-center rounded-full bg-ink text-xs text-white">
-                {initials}
-              </span>
-            )}
-            <Link href="/account/profile">{actor.displayName}</Link>
             <button onClick={() => void logout()}>Đăng xuất</button>
           </div>
         </header>
-        <main className="p-6 lg:p-10">{children}</main>
+        <main className="portal-main">{children}</main>
       </div>
     </div>
   );

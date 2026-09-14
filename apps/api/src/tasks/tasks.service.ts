@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -8,6 +9,7 @@ import { Prisma, TaskStatus } from '@prisma/client';
 import { CurrentActor } from '../access-control/current-actor';
 import { PrismaService } from '../prisma.service';
 import { ChecklistDto, CreateTaskDto, UpdateTaskDto } from './tasks.dto';
+import { STAGE_TWO_PLAN_ENTITY } from '../projects/project-stage-two.dto';
 @Injectable()
 export class TasksService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -53,6 +55,19 @@ export class TasksService {
       },
     } as const;
   }
+  private financialOmit(actor: CurrentActor) {
+    return {
+      ...(!actor.permissions.includes('estimate.read') && {
+        allocatedBudget: true,
+      }),
+    } as const;
+  }
+  private requireGenericMutation(task: { relatedEntityType?: string | null }) {
+    if (task.relatedEntityType === STAGE_TWO_PLAN_ENTITY)
+      throw new ConflictException(
+        'Stage 2 plan rows must be changed through the Project Stage 2 plan',
+      );
+  }
   async list(
     actor: CurrentActor,
     q: {
@@ -91,6 +106,7 @@ export class TasksService {
       this.prisma.task.findMany({
         where,
         include: this.include(),
+        omit: this.financialOmit(actor),
         orderBy: { [q.sort ?? 'updatedAt']: q.direction ?? 'desc' },
         skip: (q.page - 1) * q.pageSize,
         take: q.pageSize,
@@ -109,6 +125,7 @@ export class TasksService {
     const item = await this.prisma.task.findFirst({
       where: { ...this.visibleWhere(actor), id },
       include: this.include(),
+      omit: this.financialOmit(actor),
     });
     if (!item) throw new NotFoundException('Task not found');
     const activity = await this.prisma.activity.findMany({
@@ -123,6 +140,7 @@ export class TasksService {
     return { ...item, activity };
   }
   async create(actor: CurrentActor, data: CreateTaskDto) {
+    this.requireGenericMutation(data);
     await this.assertProject(actor, data.projectId);
     await this.assertUsers(actor, data.assigneeIds ?? [], data.departmentId);
     return this.prisma.$transaction(async (tx) => {
@@ -159,11 +177,14 @@ export class TasksService {
       return tx.task.findUniqueOrThrow({
         where: { id: task.id },
         include: this.include(),
+        omit: this.financialOmit(actor),
       });
     });
   }
   async update(actor: CurrentActor, id: string, data: UpdateTaskDto) {
-    await this.get(actor, id);
+    const current = await this.get(actor, id);
+    this.requireGenericMutation(current);
+    this.requireGenericMutation(data);
     await this.assertProject(actor, data.projectId);
     const { assigneeIds, ...values } = data;
     const task = await this.prisma.task.update({
@@ -176,12 +197,14 @@ export class TasksService {
         version: { increment: 1 },
       },
       include: this.include(),
+      omit: this.financialOmit(actor),
     });
     if (assigneeIds) await this.assign(actor, id, assigneeIds);
     return task;
   }
   async remove(actor: CurrentActor, id: string) {
-    await this.get(actor, id);
+    const current = await this.get(actor, id);
+    this.requireGenericMutation(current);
     return this.prisma.task.update({
       where: { id },
       data: {
@@ -189,6 +212,7 @@ export class TasksService {
         updatedBy: actor.userId,
         version: { increment: 1 },
       },
+      omit: this.financialOmit(actor),
     });
   }
   async assign(actor: CurrentActor, id: string, userIds: string[]) {
@@ -232,6 +256,7 @@ export class TasksService {
       return tx.task.findUniqueOrThrow({
         where: { id },
         include: this.include(),
+        omit: this.financialOmit(actor),
       });
     });
   }
@@ -254,6 +279,7 @@ export class TasksService {
       return tx.task.findUniqueOrThrow({
         where: { id },
         include: this.include(),
+        omit: this.financialOmit(actor),
       });
     });
   }
@@ -274,6 +300,7 @@ export class TasksService {
           version: { increment: 1 },
         },
         include: this.include(),
+        omit: this.financialOmit(actor),
       });
       await tx.activity.create({
         data: {

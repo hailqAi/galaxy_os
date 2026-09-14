@@ -14,6 +14,16 @@ import { Actor, RequirePermission } from '../access-control/access.decorators';
 import { CurrentActor } from '../access-control/current-actor';
 import { CreateImportDto, ImportMappingDto } from './imports.dto';
 import { ImportsService } from './imports.service';
+import { MultipartAdmissionInterceptor } from '../files/multipart-admission.interceptor';
+
+export const importUploadLimits = {
+  fileSize: 5 * 1024 * 1024,
+  files: 1,
+  fields: 1,
+  fieldSize: 4 * 1024,
+  parts: 2,
+  headerPairs: 50,
+};
 
 @Controller('imports')
 export class ImportsController {
@@ -26,7 +36,8 @@ export class ImportsController {
   @Post()
   @RequirePermission('import.create')
   @UseInterceptors(
-    FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }),
+    MultipartAdmissionInterceptor,
+    FileInterceptor('file', { limits: importUploadLimits }),
   )
   create(
     @Actor() actor: CurrentActor,

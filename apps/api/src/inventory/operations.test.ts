@@ -1,5 +1,6 @@
 import {
   ForbiddenException,
+  NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
@@ -17,7 +18,7 @@ const actor = {
   email: 'user@example.test',
   displayName: 'User',
   mustChangePassword: false,
-  permissions: [],
+  permissions: ['file.read', 'project.stage1.finance.read', 'estimate.read'],
   administrationScope: 'ORGANIZATION',
   managedDepartmentIds: [],
   administrationTier: 1,
@@ -171,5 +172,31 @@ describe('Inventory operations', () => {
     await expect(service.approveCount(actor, 'count')).rejects.toBeInstanceOf(
       ForbiddenException,
     );
+  });
+
+  it('rejects stock-issue evidence outside the selected Project', async () => {
+    const create = vi.fn();
+    const service = new InventoryOperationsService(
+      {
+        fileAsset: { findFirst: vi.fn().mockResolvedValue(null) },
+        stockIssue: { create },
+      } as unknown as PrismaService,
+      policy,
+      {} as InventoryService,
+    );
+    vi.spyOn(service as never, 'assertWarehouse').mockResolvedValue(undefined);
+
+    await expect(
+      service.createIssue(actor, {
+        projectId: '00000000-0000-4000-8000-000000000001',
+        warehouseId: '00000000-0000-4000-8000-000000000002',
+        issueNumber: 'ISSUE-1',
+        recipient: 'Installation team',
+        reason: 'Installation',
+        evidenceFileId: '00000000-0000-4000-8000-000000000003',
+        lines: [],
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(create).not.toHaveBeenCalled();
   });
 });

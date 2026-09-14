@@ -4,12 +4,15 @@ import { safeReturnTo } from './app/login/model';
 import { routePermissions } from './app/portal-navigation';
 import {
   developmentHosts,
+  internalApiUrl,
   publicHosts,
   trustedRequestHost,
 } from './host-config';
 
-const internalApiUrl =
-  process.env.INTERNAL_API_URL ?? 'http://127.0.0.1:3001/api/v1';
+const apiBaseUrl =
+  process.env.NODE_ENV === 'production'
+    ? internalApiUrl()
+    : (process.env.INTERNAL_API_URL ?? 'http://127.0.0.1:3001/api/v1');
 
 const allowedHosts = () => {
   return new Set(
@@ -68,7 +71,7 @@ export async function proxy(request: NextRequest) {
     }
     response = NextResponse.redirect(login);
   } else if (path !== '/forgot-password' && path !== '/reset-password') {
-    const actorResponse = await fetch(`${internalApiUrl}/me`, {
+    const actorResponse = await fetch(`${apiBaseUrl}/me`, {
       headers: { cookie: request.headers.get('cookie') ?? '' },
       cache: 'no-store',
     }).catch(() => null);

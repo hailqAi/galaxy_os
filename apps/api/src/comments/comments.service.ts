@@ -201,8 +201,9 @@ export class CommentsService {
   async remove(actor: CurrentActor, id: string) {
     const before = await this.get(actor, id);
     if (
-      before.authorId !== actor.userId &&
-      !actor.permissions.includes('comment.delete_any')
+      !actor.permissions.includes('comment.delete_any') &&
+      (before.authorId !== actor.userId ||
+        !actor.permissions.includes('comment.delete_own'))
     )
       throw new ForbiddenException('Only the author can delete this comment');
     await this.prisma.comment.update({

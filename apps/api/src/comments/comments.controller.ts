@@ -48,7 +48,7 @@ export class CommentsController {
   ) {
     return this.comments.update(a, id, d.body);
   }
-  @Delete(':id') @RequirePermission('comment.delete_own') remove(
+  @Delete(':id') remove(
     @Actor() a: CurrentActor,
     @Param('id', ParseUUIDPipe) id: string,
   ) {

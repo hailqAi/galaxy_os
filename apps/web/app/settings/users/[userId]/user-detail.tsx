@@ -622,7 +622,7 @@ function AccessProfileEditor({
   userId: string;
 }) {
   const [permissions, setPermissions] = useState<
-    { id: string; code: string }[]
+    { id: string; code: string; name: string; description?: string }[]
   >([]);
   const [departments, setDepartments] = useState<
     { id: string; name: string }[]
@@ -630,7 +630,9 @@ function AccessProfileEditor({
   const [message, setMessage] = useState('');
   useEffect(() => {
     void Promise.all([
-      api<{ id: string; code: string }[]>('/permissions'),
+      api<
+        { id: string; code: string; name: string; description?: string }[]
+      >('/permissions'),
       api<{ items: { id: string; name: string }[] }>(
         '/departments?pageSize=100',
       ),
@@ -710,7 +712,13 @@ function AccessProfileEditor({
                 type="checkbox"
                 value={permission.id}
               />
-              {permission.code}
+              <span>
+                <span className="block font-medium">{permission.name}</span>
+                <span className="block text-xs text-black/55">
+                  {permission.code}
+                  {permission.description ? ` · ${permission.description}` : ''}
+                </span>
+              </span>
             </label>
           ))}
         </div>

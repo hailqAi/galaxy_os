@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
+import { findProjectFile } from '../files/project-file';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma.service';
 import {
@@ -277,13 +278,12 @@ export class InstallationService {
     const item = await this.getWorkOrder(actor, id);
     if (
       data.evidenceFileId &&
-      !(await this.prisma.fileAsset.findFirst({
-        where: {
-          id: data.evidenceFileId,
-          organizationId: actor.organizationId,
-          deletedAt: null,
-        },
-      }))
+      !(await findProjectFile(
+        this.prisma,
+        actor,
+        item.projectId,
+        data.evidenceFileId,
+      ))
     )
       throw new NotFoundException('Punch evidence not found');
     return this.prisma.punchItem.create({

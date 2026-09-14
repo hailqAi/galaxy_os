@@ -24,6 +24,8 @@ describe.sequential('real authentication and personal account', () => {
   beforeAll(async () => {
     vi.stubEnv('ALLOW_DEV_AUTH', 'false');
     vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('UPLOAD_GLOBAL_QUOTA_BYTES', '1099511627776');
+    vi.stubEnv('UPLOAD_STAGING_CAPACITY_BYTES', '824633720832');
     vi.stubEnv('AVATAR_STORAGE_PATH', `/tmp/galaxy-auth-test-${Date.now()}`);
     const organization = await prisma.organization.findUniqueOrThrow({
       where: { slug: 'galaxy-centre' },
@@ -93,7 +95,7 @@ describe.sequential('real authentication and personal account', () => {
       .expect(401);
     expect(unknown.body.message).toBe('Email hoặc mật khẩu không đúng.');
     expect(invalid.body.message).toBe(unknown.body.message);
-    for (let attempt = 0; attempt < 4; attempt++)
+    for (let attempt = 0; attempt < 3; attempt++)
       await request(app.getHttpServer())
         .post('/api/v1/auth/login')
         .send({ email, password: randomBytes(24).toString('base64url') })

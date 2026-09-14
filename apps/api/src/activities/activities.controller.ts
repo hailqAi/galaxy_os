@@ -4,6 +4,7 @@ import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
 import { PrismaService } from '../prisma.service';
 import { ActivitiesQuery } from './activities.dto';
+import { presentPublicActivity } from './activity.presenter';
 
 @Controller('activities')
 export class ActivitiesController {
@@ -34,7 +35,7 @@ export class ActivitiesController {
       this.prisma.activity.count({ where }),
     ]);
     return {
-      items,
+      items: items.map(presentPublicActivity),
       page: query.page,
       pageSize: query.pageSize,
       total,

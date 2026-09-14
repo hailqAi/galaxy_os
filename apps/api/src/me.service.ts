@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CurrentActor } from './access-control/current-actor';
 import { AuditService } from './audit/audit.service';
@@ -23,6 +23,18 @@ const typeOf = (buffer: Buffer) =>
           buffer.subarray(8, 12).toString() === 'WEBP'
         ? ['webp', 'image/webp']
         : null;
+
+const avatarKeyPattern = /^[0-9a-f-]+\.(jpg|png|webp)$/;
+
+export async function availableAvatarUrl(
+  key: string | null,
+  storagePath = readEnvironment().AVATAR_STORAGE_PATH,
+) {
+  if (!key || !avatarKeyPattern.test(key)) return null;
+  return access(join(storagePath, key))
+    .then(() => `/me/avatar/${key}`)
+    .catch(() => null);
+}
 
 @Injectable()
 export class MeService {
@@ -66,7 +78,7 @@ export class MeService {
       email: user.email,
       displayName: user.displayName,
       organizationId: actor.organizationId,
-      avatarUrl: user.avatarKey ? `/me/avatar/${user.avatarKey}` : null,
+      avatarUrl: await availableAvatarUrl(user.avatarKey),
       status: user.status,
       lastLoginAt: user.lastLoginAt,
       createdAt: user.createdAt,
@@ -183,7 +195,7 @@ export class MeService {
     const user = await this.prisma.user.findFirst({
       where: { id: actor.userId, avatarKey: key },
     });
-    if (!user || !/^[0-9a-f-]+\.(jpg|png|webp)$/.test(key))
+    if (!user || !avatarKeyPattern.test(key))
       throw new NotFoundException();
     const data = await readFile(
       join(readEnvironment().AVATAR_STORAGE_PATH, key),

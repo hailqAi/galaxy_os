@@ -13,6 +13,7 @@ export type CurrentActor = {
     roleName: string;
     scopeType: 'SYSTEM' | 'ORGANIZATION' | 'DEPARTMENT' | 'SELF';
     departmentId: string | null;
+    managedDepartmentIds?: string[];
   }[];
   administrationScope:
     | 'SYSTEM'

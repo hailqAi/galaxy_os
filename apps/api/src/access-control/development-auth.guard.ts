@@ -169,9 +169,15 @@ export class DevelopmentAuthGuard implements CanActivate {
     const assignments = user.roles.filter(
       ({ organizationId }) => organizationId === membership.organizationId,
     );
-    const managedDepartmentIds = membership.managedDepartments.map(
-      ({ departmentId }) => departmentId,
+    const managedDepartmentScopes = new Map(
+      membership.managedDepartments.map(({ departmentId }) => [
+        departmentId,
+        [departmentId],
+      ]),
     );
+    const managedDepartmentIds = [
+      ...new Set([...managedDepartmentScopes.values()].flat()),
+    ];
     if (
       membership.managedDepartments.some(
         ({ includeChildren }) => includeChildren,
@@ -183,15 +189,24 @@ export class DevelopmentAuthGuard implements CanActivate {
       });
       for (let changed = true; changed; ) {
         changed = false;
-        for (const unit of units)
+        for (const [departmentId, ids] of managedDepartmentScopes)
           if (
-            unit.parentId &&
-            managedDepartmentIds.includes(unit.parentId) &&
-            !managedDepartmentIds.includes(unit.id)
-          ) {
-            managedDepartmentIds.push(unit.id);
-            changed = true;
-          }
+            membership.managedDepartments.find(
+              (managed) =>
+                managed.departmentId === departmentId &&
+                managed.includeChildren,
+            )
+          )
+            for (const unit of units)
+              if (
+                unit.parentId &&
+                ids.includes(unit.parentId) &&
+                !ids.includes(unit.id)
+              ) {
+                ids.push(unit.id);
+                managedDepartmentIds.push(unit.id);
+                changed = true;
+              }
       }
     }
     const actor: CurrentActor = {
@@ -212,6 +227,10 @@ export class DevelopmentAuthGuard implements CanActivate {
           roleName: assignment.role.name,
           scopeType: assignment.scopeType,
           departmentId: assignment.departmentId,
+          managedDepartmentIds:
+            assignment.scopeType === 'DEPARTMENT' && assignment.departmentId
+              ? (managedDepartmentScopes.get(assignment.departmentId) ?? [])
+              : [],
         })),
       ),
       administrationScope: assignments.some(

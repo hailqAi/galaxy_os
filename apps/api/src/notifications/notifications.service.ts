@@ -40,12 +40,20 @@ export class NotificationsService {
     ]);
     return {
       items: await Promise.all(
-        items.map(async (item) => ({
-          ...item,
-          href: (await this.canOpen(actor, item.entityType, item.entityId))
-            ? item.href
-            : null,
-        })),
+        items.map(async (item) => {
+          if (await this.canOpen(actor, item.entityType, item.entityId))
+            return item;
+          return {
+            ...item,
+            actor: null,
+            body: null,
+            entityId: null,
+            entityType: null,
+            href: null,
+            projectId: null,
+            title: 'Thông báo không còn khả dụng',
+          };
+        }),
       ),
       page: query.page,
       pageSize: query.pageSize,

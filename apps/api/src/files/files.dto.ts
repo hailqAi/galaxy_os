@@ -9,7 +9,7 @@ import {
 } from 'class-validator';
 import { PartialType } from '@nestjs/swagger';
 import { PageQuery } from '../common.dto';
-const entityTypes = [
+const uploadEntityTypes = [
   'Customer',
   'Contact',
   'Lead',
@@ -18,20 +18,22 @@ const entityTypes = [
   'Task',
   'Survey',
   'Requirement',
+  'ProjectProductLine',
   'Comment',
   'MarketingContent',
 ] as const;
+const entityTypes = [...uploadEntityTypes, 'ProjectRequiredDocument'] as const;
 export class UploadFileDto {
-  @IsIn(entityTypes) entityType!: (typeof entityTypes)[number];
+  @IsIn(uploadEntityTypes) entityType!: (typeof uploadEntityTypes)[number];
   @IsUUID() entityId!: string;
   @IsString() @Length(1, 100) category!: string;
   @IsOptional()
-  @IsIn(['INTERNAL', 'RESTRICTED', 'CONFIDENTIAL'])
+  @IsIn(['INTERNAL'])
   confidentiality?: 'INTERNAL' | 'RESTRICTED' | 'CONFIDENTIAL';
 }
 class FileMetadataDto {
   @IsString() @Length(1, 100) category!: string;
-  @IsIn(['INTERNAL', 'RESTRICTED', 'CONFIDENTIAL']) confidentiality!:
+  @IsIn(['INTERNAL']) confidentiality!:
     | 'INTERNAL'
     | 'RESTRICTED'
     | 'CONFIDENTIAL';

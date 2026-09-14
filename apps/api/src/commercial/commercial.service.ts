@@ -7,6 +7,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma.service';
@@ -16,99 +17,234 @@ import {
   EstimateLineDto,
   ReviseQuotationDto,
 } from './commercial.dto';
+import {
+  calculateEstimateLine,
+  sumEstimateCosts,
+} from './project-financial-calculations';
 
 @Injectable()
 export class CommercialService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(BusinessEntityPolicy)
+    private readonly policy: BusinessEntityPolicy,
   ) {}
 
-  private project(actor: CurrentActor, projectId: string) {
-    return this.prisma.project.findFirst({
+  private project(
+    actor: CurrentActor,
+    projectId: string,
+    requiredPermissions: string | readonly string[],
+    db: Pick<Prisma.TransactionClient, 'project'> = this.prisma,
+  ) {
+    return db.project.findFirst({
       where: {
         id: projectId,
-        organizationId: actor.organizationId,
-        deletedAt: null,
+        ...this.policy.projectWhere(actor, requiredPermissions),
       },
       select: { id: true, customerId: true },
     });
   }
 
-  private line(data: EstimateLineDto, position: number) {
-    const quantity = new Prisma.Decimal(data.quantity);
-    const purchase = new Prisma.Decimal(data.netPurchasePrice);
-    const rate = new Prisma.Decimal(data.exchangeRateSnapshot);
-    const extras = [
-      'freightEstimate',
-      'taxEstimate',
-      'installationCost',
-      'otherCost',
-    ].map((key) => new Prisma.Decimal(data[key as keyof EstimateLineDto] || 0));
-    if (quantity.lte(0) || purchase.lt(0) || rate.lte(0))
-      throw new UnprocessableEntityException('Invalid estimate amount');
-    const baseCostVnd = quantity.mul(purchase).mul(rate);
-    const totalCost = extras.reduce(
-      (sum, value) => sum.add(value),
-      baseCostVnd,
+  private async lockProjectFor(
+    tx: Prisma.TransactionClient,
+    actor: CurrentActor,
+    projectId: string,
+    requiredPermissions: string | readonly string[],
+  ) {
+    const locked = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT "id" FROM "Project"
+      WHERE "id" = ${projectId}::uuid
+        AND "organizationId" = ${actor.organizationId}::uuid
+        AND "deletedAt" IS NULL
+      FOR UPDATE
+    `);
+    if (!locked.length) throw new NotFoundException('Project not found');
+    const project = await this.project(
+      actor,
+      projectId,
+      requiredPermissions,
+      tx,
     );
-    const selling = quantity.mul(new Prisma.Decimal(data.sellingPrice));
+    if (!project) throw new NotFoundException('Project not found');
+    return project;
+  }
+
+  private line(data: EstimateLineDto, position: number) {
+    const priceStatus =
+      data.priceStatus ??
+      (data.netPurchasePrice === undefined ? 'MISSING' : 'PROVISIONAL');
+    const sourceDocument = data.sourceDocument?.trim() || undefined;
+    if ((priceStatus === 'MISSING') !== (data.netPurchasePrice === undefined))
+      throw new UnprocessableEntityException('Invalid estimate price state');
+    if (
+      priceStatus === 'CONFIRMED' &&
+      (!data.priceSourceType || !data.priceQuotedAt || !sourceDocument)
+    )
+      throw new UnprocessableEntityException(
+        'Confirmed price requires dated source evidence',
+      );
+    const priceQuotedAt = data.priceQuotedAt
+      ? new Date(data.priceQuotedAt)
+      : undefined;
+    const priceValidUntil = data.priceValidUntil
+      ? new Date(data.priceValidUntil)
+      : undefined;
+    if (priceQuotedAt && priceValidUntil && priceValidUntil < priceQuotedAt)
+      throw new UnprocessableEntityException(
+        'Price validity cannot predate its source',
+      );
+    let calculation: ReturnType<typeof calculateEstimateLine>;
+    try {
+      calculation = calculateEstimateLine({
+        sellQuantity: data.quantity,
+        purchaseQuantity: data.purchaseQuantity,
+        purchaseUnitPrice: data.netPurchasePrice ?? null,
+        exchangeRate: data.exchangeRateSnapshot,
+        sellingUnitPrice: data.sellingPrice,
+        freight: data.freightEstimate,
+        tax: data.taxEstimate,
+        installation: data.installationCost,
+        other: data.otherCost,
+      });
+    } catch {
+      throw new UnprocessableEntityException('Invalid estimate amount');
+    }
+    const quantity = new Prisma.Decimal(data.quantity);
+    const purchaseQuantity = new Prisma.Decimal(
+      data.purchaseQuantity ?? data.quantity,
+    );
+    const purchase =
+      data.netPurchasePrice === undefined
+        ? null
+        : new Prisma.Decimal(data.netPurchasePrice);
+    const rate = new Prisma.Decimal(data.exchangeRateSnapshot);
     return {
       ...data,
       quantity,
+      purchaseQuantity,
       netPurchasePrice: purchase,
       exchangeRateSnapshot: rate,
-      baseCostVnd,
-      totalCost,
+      baseCostVnd: purchase ? purchaseQuantity.mul(purchase).mul(rate) : null,
+      totalCost:
+        calculation.totalCost === null
+          ? null
+          : new Prisma.Decimal(calculation.totalCost),
       sellingPrice: new Prisma.Decimal(data.sellingPrice),
-      freightEstimate: extras[0],
-      taxEstimate: extras[1],
-      installationCost: extras[2],
-      otherCost: extras[3],
-      margin: selling.eq(0) ? 0 : selling.sub(totalCost).div(selling),
+      freightEstimate: new Prisma.Decimal(data.freightEstimate ?? 0),
+      taxEstimate: new Prisma.Decimal(data.taxEstimate ?? 0),
+      installationCost: new Prisma.Decimal(data.installationCost ?? 0),
+      otherCost: new Prisma.Decimal(data.otherCost ?? 0),
+      margin:
+        calculation.margin === null
+          ? null
+          : new Prisma.Decimal(calculation.margin),
+      markup:
+        calculation.markup === null
+          ? null
+          : new Prisma.Decimal(calculation.markup),
+      priceStatus,
+      sourceDocument,
+      priceQuotedAt,
+      priceValidUntil,
+      contributesToTotal: data.contributesToTotal ?? true,
       position,
     };
   }
 
   async listEstimates(actor: CurrentActor, projectId: string) {
-    if (!(await this.project(actor, projectId)))
+    if (!(await this.project(actor, projectId, 'estimate.read')))
       throw new NotFoundException('Project not found');
     return this.prisma.estimate.findMany({
       where: { organizationId: actor.organizationId, projectId },
       orderBy: { updatedAt: 'desc' },
+      include: {
+        versions: {
+          orderBy: { version: 'desc' },
+          take: 1,
+          select: { id: true, version: true, status: true },
+        },
+      },
     });
   }
 
   async getEstimate(actor: CurrentActor, projectId: string, id: string) {
     const item = await this.prisma.estimate.findFirst({
-      where: { id, projectId, organizationId: actor.organizationId },
+      where: {
+        id,
+        projectId,
+        organizationId: actor.organizationId,
+        project: this.policy.projectWhere(actor, 'estimate.read'),
+      },
       include: {
         versions: {
           include: {
             lines: { orderBy: { position: 'asc' } },
             approvals: { orderBy: { createdAt: 'desc' } },
+            riskAllocations: {
+              include: {
+                risk: {
+                  select: { id: true, code: true, title: true, status: true },
+                },
+              },
+              orderBy: { createdAt: 'asc' },
+            },
           },
           orderBy: { version: 'desc' },
         },
       },
     });
     if (!item) throw new NotFoundException('Estimate not found');
-    if (!actor.permissions.includes('financial_margin.read'))
+    const withContingency = {
+      ...item,
+      versions: item.versions.map((version) => {
+        const approvedContingency = version.riskAllocations
+          .filter(({ status }) => status === 'ALLOCATED')
+          .reduce(
+            (sum, allocation) => sum.add(allocation.approvedAmount),
+            new Prisma.Decimal(0),
+          );
+        return {
+          ...version,
+          approvedContingency: approvedContingency.toFixed(2),
+          totalCostWithContingency:
+            version.subtotalCost === null
+              ? null
+              : new Prisma.Decimal(version.subtotalCost)
+                  .add(approvedContingency)
+                  .toFixed(2),
+        };
+      }),
+    };
+    if (
+      !actor.permissions.includes('financial_margin.read') ||
+      !(await this.project(actor, projectId, 'financial_margin.read'))
+    )
       return {
-        ...item,
-        versions: item.versions.map((version) => ({
+        ...withContingency,
+        versions: withContingency.versions.map((version) => ({
           ...version,
           subtotalCost: undefined,
+          approvedContingency: undefined,
+          totalCostWithContingency: undefined,
+          riskAllocations: undefined,
           lines: version.lines.map((line) => ({
             ...line,
+            listPrice: undefined,
+            supplierDiscount: undefined,
             netPurchasePrice: undefined,
             baseCostVnd: undefined,
+            freightEstimate: undefined,
+            taxEstimate: undefined,
+            installationCost: undefined,
+            otherCost: undefined,
             totalCost: undefined,
             margin: undefined,
+            markup: undefined,
           })),
         })),
       };
-    return item;
+    return withContingency;
   }
 
   async createEstimate(
@@ -116,18 +252,26 @@ export class CommercialService {
     projectId: string,
     data: CreateEstimateDto,
   ) {
-    if (!(await this.project(actor, projectId)))
-      throw new NotFoundException('Project not found');
     const lines = data.lines.map((line, index) => this.line(line, index));
-    const subtotalCost = lines.reduce(
-      (sum, line) => sum.add(line.totalCost),
-      new Prisma.Decimal(0),
+    const subtotal = sumEstimateCosts(
+      lines.map((line) => ({
+        totalCost: line.totalCost?.toFixed(2) ?? null,
+        contributesToTotal: line.contributesToTotal,
+      })),
     );
-    const subtotalSelling = lines.reduce(
-      (sum, line) => sum.add(line.quantity.mul(line.sellingPrice)),
-      new Prisma.Decimal(0),
-    );
+    const subtotalCost =
+      subtotal === null ? null : new Prisma.Decimal(subtotal);
+    const subtotalSelling = lines
+      .filter(({ contributesToTotal }) => contributesToTotal)
+      .reduce(
+        (sum, line) => sum.add(line.quantity.mul(line.sellingPrice)),
+        new Prisma.Decimal(0),
+      );
     return this.prisma.$transaction(async (tx) => {
+      await this.lockProjectFor(tx, actor, projectId, [
+        'estimate.create',
+        'financial_margin.read',
+      ]);
       const item = await tx.estimate.create({
         data: {
           organizationId: actor.organizationId,
@@ -174,29 +318,42 @@ export class CommercialService {
     decision: 'SUBMIT' | 'APPROVE' | 'REJECT',
     comment?: string,
   ) {
-    const item = await this.prisma.estimate.findFirst({
-      where: { id, projectId, organizationId: actor.organizationId },
-    });
-    if (!item) throw new NotFoundException('Estimate not found');
-    const version = await this.prisma.estimateVersion.findUniqueOrThrow({
-      where: {
-        estimateId_version: { estimateId: id, version: item.currentVersion },
-      },
-    });
-    const next =
-      decision === 'SUBMIT'
-        ? 'PENDING'
-        : decision === 'APPROVE'
-          ? 'APPROVED'
-          : 'REJECTED';
-    if (
-      (decision === 'SUBMIT' && version.status !== 'DRAFT') ||
-      (decision !== 'SUBMIT' && version.status !== 'PENDING')
-    )
-      throw new ConflictException('Invalid estimate transition');
-    if (decision === 'APPROVE' && version.createdBy === actor.userId)
-      throw new ForbiddenException('Creator cannot approve this estimate');
     return this.prisma.$transaction(async (tx) => {
+      await this.lockProjectFor(
+        tx,
+        actor,
+        projectId,
+        decision === 'SUBMIT' ? 'estimate.update' : 'estimate.approve',
+      );
+      const item = await tx.estimate.findFirst({
+        where: { id, projectId, organizationId: actor.organizationId },
+      });
+      if (!item) throw new NotFoundException('Estimate not found');
+      const version = await tx.estimateVersion.findFirst({
+        where: { estimateId: id, version: item.currentVersion },
+        include: { lines: { select: { priceStatus: true } } },
+      });
+      if (!version) throw new NotFoundException('Estimate not found');
+      const next =
+        decision === 'SUBMIT'
+          ? 'PENDING'
+          : decision === 'APPROVE'
+            ? 'APPROVED'
+            : 'REJECTED';
+      if (
+        (decision === 'SUBMIT' && version.status !== 'DRAFT') ||
+        (decision !== 'SUBMIT' && version.status !== 'PENDING')
+      )
+        throw new ConflictException('Invalid estimate transition');
+      if (decision === 'APPROVE' && version.createdBy === actor.userId)
+        throw new ForbiddenException('Creator cannot approve this estimate');
+      if (
+        decision === 'APPROVE' &&
+        version.lines.some(({ priceStatus }) => priceStatus !== 'CONFIRMED')
+      )
+        throw new UnprocessableEntityException(
+          'Confirmed price sources are required',
+        );
       const updated = await tx.estimateVersion.update({
         where: { id: version.id },
         data: {
@@ -234,40 +391,6 @@ export class CommercialService {
     projectId: string,
     data: CreateQuotationDto,
   ) {
-    const project = await this.project(actor, projectId);
-    if (!project) throw new NotFoundException('Project not found');
-    const estimate = await this.prisma.estimate.findFirst({
-      where: {
-        id: data.estimateId,
-        projectId,
-        organizationId: actor.organizationId,
-        status: 'APPROVED',
-      },
-      include: {
-        versions: {
-          where: { status: 'APPROVED' },
-          include: { lines: true },
-          take: 1,
-          orderBy: { version: 'desc' },
-        },
-      },
-    });
-    if (!estimate?.versions[0])
-      throw new UnprocessableEntityException('Approved estimate required');
-    const source = estimate.versions[0];
-    const lines = source.lines.map((line) => ({
-      section: line.section,
-      description: line.customDescription || line.itemType,
-      quantity: line.quantity,
-      unit: line.unit,
-      unitPrice: line.sellingPrice,
-      lineTotal: line.quantity.mul(line.sellingPrice),
-      position: line.position,
-    }));
-    const subtotal = lines.reduce(
-      (sum, line) => sum.add(line.lineTotal),
-      new Prisma.Decimal(0),
-    );
     const discount = new Prisma.Decimal(data.discount || 0);
     const tax = new Prisma.Decimal(data.tax || 0);
     const shipping = new Prisma.Decimal(data.shipping || 0);
@@ -278,15 +401,57 @@ export class CommercialService {
       !actor.permissions.includes('quotation.discount.approve')
     )
       throw new ForbiddenException('Discount permission is required');
-    const grandTotal = subtotal
-      .sub(discount)
-      .add(tax)
-      .add(shipping)
-      .add(installation)
-      .add(warranty);
-    if (grandTotal.lt(0))
-      throw new UnprocessableEntityException('Invalid quotation total');
     return this.prisma.$transaction(async (tx) => {
+      const project = await this.lockProjectFor(
+        tx,
+        actor,
+        projectId,
+        discount.gt(0)
+          ? ['quotation.create', 'quotation.discount.approve']
+          : 'quotation.create',
+      );
+      const estimate = await tx.estimate.findFirst({
+        where: {
+          id: data.estimateId,
+          projectId,
+          organizationId: actor.organizationId,
+          status: 'APPROVED',
+        },
+        include: {
+          versions: {
+            where: { status: 'APPROVED' },
+            include: { lines: true },
+            take: 1,
+            orderBy: { version: 'desc' },
+          },
+        },
+      });
+      if (!estimate?.versions[0])
+        throw new UnprocessableEntityException('Approved estimate required');
+      const source = estimate.versions[0];
+      const lines = source.lines
+        .filter(({ contributesToTotal }) => contributesToTotal)
+        .map((line) => ({
+          section: line.section,
+          description: line.customDescription || line.itemType,
+          quantity: line.quantity,
+          unit: line.unit,
+          unitPrice: line.sellingPrice,
+          lineTotal: line.quantity.mul(line.sellingPrice),
+          position: line.position,
+        }));
+      const subtotal = lines.reduce(
+        (sum, line) => sum.add(line.lineTotal),
+        new Prisma.Decimal(0),
+      );
+      const grandTotal = subtotal
+        .sub(discount)
+        .add(tax)
+        .add(shipping)
+        .add(installation)
+        .add(warranty);
+      if (grandTotal.lt(0))
+        throw new UnprocessableEntityException('Invalid quotation total');
       const item = await tx.quotation.create({
         data: {
           organizationId: actor.organizationId,
@@ -359,7 +524,7 @@ export class CommercialService {
   }
 
   async listQuotations(actor: CurrentActor, projectId: string) {
-    if (!(await this.project(actor, projectId)))
+    if (!(await this.project(actor, projectId, 'quotation.read')))
       throw new NotFoundException('Project not found');
     return this.prisma.quotation.findMany({
       where: { organizationId: actor.organizationId, projectId },
@@ -376,7 +541,12 @@ export class CommercialService {
 
   async getQuotation(actor: CurrentActor, projectId: string, id: string) {
     const item = await this.prisma.quotation.findFirst({
-      where: { id, projectId, organizationId: actor.organizationId },
+      where: {
+        id,
+        projectId,
+        organizationId: actor.organizationId,
+        project: this.policy.projectWhere(actor, 'quotation.read'),
+      },
       include: {
         versions: {
           include: {
@@ -392,7 +562,20 @@ export class CommercialService {
       },
     });
     if (!item) throw new NotFoundException('Quotation not found');
-    return item;
+    return {
+      ...item,
+      versions: item.versions.map((version) => ({
+        ...version,
+        documents: version.documents.map(
+          ({ storageKey, checksum, sizeBytes, ...document }) => {
+            void storageKey;
+            void checksum;
+            void sizeBytes;
+            return document;
+          },
+        ),
+      })),
+    };
   }
 
   async transitionQuotation(
@@ -402,30 +585,34 @@ export class CommercialService {
     next: string,
     comment?: string,
   ) {
-    const item = await this.prisma.quotation.findFirst({
-      where: { id, projectId, organizationId: actor.organizationId },
-    });
-    if (!item) throw new NotFoundException('Quotation not found');
-    const version = await this.prisma.quotationVersion.findUniqueOrThrow({
-      where: {
-        quotationId_version: {
-          quotationId: id,
-          version: item.currentVersion,
-        },
-      },
-    });
-    const allowed: Record<string, string[]> = {
-      DRAFT: ['INTERNAL_REVIEW', 'CANCELLED'],
-      INTERNAL_REVIEW: ['APPROVED', 'REJECTED', 'DRAFT'],
-      APPROVED: ['SENT', 'CANCELLED'],
-      SENT: ['ACCEPTED', 'REJECTED', 'EXPIRED'],
-    };
-    if (!allowed[version.status]?.includes(next))
-      throw new ConflictException('Invalid quotation transition');
-    if (next === 'APPROVED' && version.createdBy === actor.userId)
-      throw new ForbiddenException('Creator cannot approve this quotation');
-    const now = new Date();
     return this.prisma.$transaction(async (tx) => {
+      await this.lockProjectFor(
+        tx,
+        actor,
+        projectId,
+        ['APPROVED', 'REJECTED'].includes(next)
+          ? 'quotation.approve'
+          : 'quotation.update',
+      );
+      const item = await tx.quotation.findFirst({
+        where: { id, projectId, organizationId: actor.organizationId },
+      });
+      if (!item) throw new NotFoundException('Quotation not found');
+      const version = await tx.quotationVersion.findFirst({
+        where: { quotationId: id, version: item.currentVersion },
+      });
+      if (!version) throw new NotFoundException('Quotation not found');
+      const allowed: Record<string, string[]> = {
+        DRAFT: ['INTERNAL_REVIEW', 'CANCELLED'],
+        INTERNAL_REVIEW: ['APPROVED', 'REJECTED', 'DRAFT'],
+        APPROVED: ['SENT', 'CANCELLED'],
+        SENT: ['ACCEPTED', 'REJECTED', 'EXPIRED'],
+      };
+      if (!allowed[version.status]?.includes(next))
+        throw new ConflictException('Invalid quotation transition');
+      if (next === 'APPROVED' && version.createdBy === actor.userId)
+        throw new ForbiddenException('Creator cannot approve this quotation');
+      const now = new Date();
       const updated = await tx.quotationVersion.update({
         where: { id: version.id },
         data: {
@@ -483,29 +670,50 @@ export class CommercialService {
     id: string,
     data: ReviseQuotationDto,
   ) {
-    const item = await this.getQuotation(actor, projectId, id);
-    const source = item.versions[0];
-    if (!source || !['APPROVED', 'SENT', 'REJECTED'].includes(source.status))
-      throw new ConflictException('Quotation cannot be revised');
-    const discount = new Prisma.Decimal(data.discount ?? source.discount);
-    if (
-      discount.gt(0) &&
-      !actor.permissions.includes('quotation.discount.approve')
-    )
-      throw new ForbiddenException('Discount permission is required');
-    const tax = new Prisma.Decimal(data.tax ?? source.tax);
-    const shipping = new Prisma.Decimal(data.shipping ?? source.shipping);
-    const installation = new Prisma.Decimal(
-      data.installation ?? source.installation,
-    );
-    const warranty = new Prisma.Decimal(data.warranty ?? source.warranty);
-    const grandTotal = source.subtotal
-      .sub(discount)
-      .add(tax)
-      .add(shipping)
-      .add(installation)
-      .add(warranty);
     return this.prisma.$transaction(async (tx) => {
+      await this.lockProjectFor(tx, actor, projectId, 'quotation.update');
+      const item = await tx.quotation.findFirst({
+        where: { id, projectId, organizationId: actor.organizationId },
+      });
+      if (!item) throw new NotFoundException('Quotation not found');
+      const source = await tx.quotationVersion.findFirst({
+        where: { quotationId: id, version: item.currentVersion },
+        include: {
+          lines: { orderBy: { position: 'asc' } },
+          sections: { orderBy: { position: 'asc' } },
+          terms: { orderBy: { position: 'asc' } },
+        },
+      });
+      if (!source || !['APPROVED', 'SENT', 'REJECTED'].includes(source.status))
+        throw new ConflictException('Quotation cannot be revised');
+      const discount = new Prisma.Decimal(data.discount ?? source.discount);
+      if (
+        discount.gt(0) &&
+        !actor.permissions.includes('quotation.discount.approve')
+      )
+        throw new ForbiddenException('Discount permission is required');
+      if (
+        discount.gt(0) &&
+        !(await this.project(
+          actor,
+          projectId,
+          ['quotation.update', 'quotation.discount.approve'],
+          tx,
+        ))
+      )
+        throw new NotFoundException('Project not found');
+      const tax = new Prisma.Decimal(data.tax ?? source.tax);
+      const shipping = new Prisma.Decimal(data.shipping ?? source.shipping);
+      const installation = new Prisma.Decimal(
+        data.installation ?? source.installation,
+      );
+      const warranty = new Prisma.Decimal(data.warranty ?? source.warranty);
+      const grandTotal = source.subtotal
+        .sub(discount)
+        .add(tax)
+        .add(shipping)
+        .add(installation)
+        .add(warranty);
       await tx.quotationVersion.update({
         where: { id: source.id },
         data: { status: 'SUPERSEDED' },

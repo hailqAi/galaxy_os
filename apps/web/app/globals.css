@@ -5,22 +5,86 @@
 :root {
   color-scheme: light;
   font-family: Arial, Helvetica, sans-serif;
+  --shell-sidebar-width: 272px;
+  --shell-header-height: 76px;
+  --shell-canvas: #f4f7fb;
+  --shell-primary: #1760ff;
+  --shell-navy: #0b1328;
+  --shell-status-success: #079b67;
+  --shell-status-warning: #d97706;
+  --shell-status-danger: #e10d1a;
+  --shell-status-purple: #8b16f4;
 }
 
 body {
   margin: 0;
-  background: #f4f1ea;
-  color: #17211d;
+  background: var(--shell-canvas);
+  color: var(--shell-navy);
 }
 
 :focus-visible {
-  outline: 3px solid #9a7848;
+  outline: 3px solid var(--shell-primary);
   outline-offset: 3px;
+}
+
+.portal-sidebar {
+  background: white;
+  border-right: 1px solid rgb(23 33 29 / 0.1);
+  color: var(--shell-navy);
+}
+
+.portal-nav-active {
+  color: var(--shell-navy);
+}
+
+.portal-avatar {
+  background: var(--shell-navy);
+}
+
+.portal-header {
+  min-height: var(--shell-header-height);
+}
+
+.portal-main {
+  padding: 1.5rem;
+}
+
+.portal-user-card {
+  background: var(--shell-canvas);
+}
+
+@media (min-width: 768px) {
+  .portal-shell {
+    display: grid;
+    grid-template-columns: var(--shell-sidebar-width) minmax(0, 1fr);
+  }
+
+  .portal-sidebar {
+    height: 100vh;
+    overflow: hidden;
+    position: sticky;
+    top: 0;
+  }
+
+  .portal-sidebar nav {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .portal-shell > div {
+    min-width: 0;
+  }
+
+  .portal-main {
+    padding: 2rem;
+  }
 }
 
 @layer components {
   .panel {
-    @apply rounded-lg border border-black/10 bg-white p-6 shadow-sm;
+    @apply rounded-2xl border bg-white p-6 shadow-sm;
+    border-color: #dce4ee;
   }
   label {
     @apply grid gap-1 text-sm font-medium;
@@ -28,13 +92,15 @@ body {
   input,
   select,
   textarea {
-    @apply rounded border border-black/20 bg-white px-3 py-2 font-normal;
+    @apply min-w-0 max-w-full rounded-xl border border-black/20 bg-white px-3 py-2 font-normal;
   }
   button {
-    @apply rounded border border-black/20 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply rounded-xl border border-black/20 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .primary {
-    @apply border-brass bg-brass text-white;
+    @apply border text-white;
+    background: var(--shell-primary);
+    border-color: var(--shell-primary);
   }
   table {
     @apply w-full border-collapse text-left text-sm;
@@ -42,5 +108,8 @@ body {
   th,
   td {
     @apply border-b border-black/10 px-3 py-3 align-top;
+  }
+  th {
+    background: #f0f4f8;
   }
 }

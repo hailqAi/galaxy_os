@@ -2,6 +2,7 @@ import { Controller, Get, Inject, Query } from '@nestjs/common';
 import { Actor, RequirePermission } from '../access-control/access.decorators';
 import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
+import { hiddenProjectFileIds } from '../files/project-file';
 import { PrismaService } from '../prisma.service';
 import { SearchQuery } from './search.dto';
 
@@ -114,36 +115,43 @@ export class SearchController {
       query.pageSize,
     );
     if (selected.has('File') && actor.permissions.includes('file.read')) {
+      const hiddenFileIds = await hiddenProjectFileIds(this.prisma, actor);
       const candidates = await this.prisma.fileAsset.findMany({
         where: {
+          id: { notIn: hiddenFileIds },
           organizationId: actor.organizationId,
           deletedAt: null,
           originalFilename: contains,
+          attachments: {
+            some: {
+              OR: [
+                {
+                  projectId: { not: null },
+                  project: this.entities.projectWhere(actor),
+                },
+                {
+                  projectId: null,
+                  customer: {
+                    organizationId: actor.organizationId,
+                    deletedAt: null,
+                  },
+                },
+                {
+                  projectId: null,
+                  fileAsset: { uploadedById: actor.userId },
+                },
+              ],
+            },
+          },
         },
-        include: { attachments: true },
+        select: { id: true, originalFilename: true, category: true },
         orderBy: { createdAt: 'desc' },
-        take: Math.min(query.pageSize * 5, 100),
+        take: query.pageSize,
       });
-      const visible = [];
-      for (const file of candidates) {
-        const attachment = file.attachments[0];
-        if (!attachment) continue;
-        try {
-          await this.entities.assertView(
-            actor,
-            attachment.entityType,
-            attachment.entityId,
-          );
-          visible.push(file);
-        } catch {
-          continue;
-        }
-        if (visible.length === query.pageSize) break;
-      }
       groups.push({
         entityType: 'File',
-        total: visible.length,
-        items: visible.map((item) => ({
+        total: candidates.length,
+        items: candidates.map((item) => ({
           id: item.id,
           title: item.originalFilename,
           subtitle: item.category,
