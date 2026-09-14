@@ -1,9 +1,10 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
-import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { deleteFixtureFileAssets } from './stage-one-playwright-fixture-storage.mjs';
+import { assertG00Isolation } from './g00-isolated-environment.mjs';
 
+const isolated = assertG00Isolation();
 const prisma = new PrismaClient();
 const ids = {
   pm: '10000000-0000-4000-8000-000000000191',
@@ -275,10 +276,7 @@ async function cleanupCreatedProject(organizationId) {
       prisma.fileAsset.deleteMany({
         where: { id: { in: ownedFiles.map(({ id }) => id) }, organizationId },
       }),
-    resolve(
-      process.env.FILE_STORAGE_PATH ??
-        join(process.cwd(), '../../.runtime/files'),
-    ),
+    `${isolated.testRoot}/files`,
     ownedFiles.map(({ storageKey }) => storageKey),
   );
 }
@@ -647,10 +645,7 @@ async function cleanup() {
           organizationId: organization.id,
         },
       }),
-    resolve(
-      process.env.FILE_STORAGE_PATH ??
-        join(process.cwd(), '../../.runtime/files'),
-    ),
+    `${isolated.testRoot}/files`,
     ownedFiles.map(({ storageKey }) => storageKey),
   );
   await prisma.session.deleteMany({ where: { userId: { in: users } } });

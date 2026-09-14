@@ -630,9 +630,9 @@ function AccessProfileEditor({
   const [message, setMessage] = useState('');
   useEffect(() => {
     void Promise.all([
-      api<
-        { id: string; code: string; name: string; description?: string }[]
-      >('/permissions'),
+      api<{ id: string; code: string; name: string; description?: string }[]>(
+        '/permissions',
+      ),
       api<{ items: { id: string; name: string }[] }>(
         '/departments?pageSize=100',
       ),

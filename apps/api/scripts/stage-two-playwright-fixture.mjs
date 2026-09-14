@@ -1,19 +1,18 @@
 import { PrismaClient } from '@prisma/client';
 import ExcelJS from 'exceljs';
 import { mkdir, rm } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import process from 'node:process';
 import { deleteFixtureFileAssets } from './stage-one-playwright-fixture-storage.mjs';
+import { assertG00Isolation } from './g00-isolated-environment.mjs';
 
+const isolated = assertG00Isolation();
 const prisma = new PrismaClient();
 const ids = {
   project: '20000000-0000-4000-8000-000000000291',
   department: '20000000-0000-4000-8000-000000000294',
 };
-const workbookPath = resolve(
-  process.cwd(),
-  '../../.runtime/playwright/stage-two-valid.xlsx',
-);
+const workbookPath = resolve(isolated.testRoot, 'stage-two-valid.xlsx');
 
 async function cleanup() {
   const organization = await prisma.organization.findUnique({
@@ -168,10 +167,7 @@ async function cleanup() {
           organizationId: organization.id,
         },
       }),
-    resolve(
-      process.env.FILE_STORAGE_PATH ??
-        join(process.cwd(), '../../.runtime/files'),
-    ),
+    `${isolated.testRoot}/files`,
     ownedFiles.map(({ storageKey }) => storageKey),
   );
   await rm(workbookPath, { force: true });

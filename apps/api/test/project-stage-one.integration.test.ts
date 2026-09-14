@@ -5,6 +5,7 @@ import request, { Test as SuperTest } from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module';
 import { SIMPLE_STAGE_ONE_STEPS } from '../src/projects/project-stage-one.rules';
+import { assertG00Isolation } from '../scripts/g00-isolated-environment.mjs';
 
 const initialDocumentMatrix = [
   ['Văn bản chủ trương / Quyết định giao nhiệm vụ', 'ASSIGNMENT'],
@@ -14,8 +15,7 @@ const initialDocumentMatrix = [
   ['Quyết định phê duyệt Báo cáo Kinh tế - Kỹ thuật', 'KICKOFF_APPROVAL'],
 ] as const;
 
-process.env.DATABASE_URL ??=
-  'postgresql://galaxy:galaxy_local@localhost:5432/galaxy_os?schema=public';
+assertG00Isolation();
 
 describe.sequential('Project Stage 1 PostgreSQL integration', () => {
   const prisma = new PrismaClient();

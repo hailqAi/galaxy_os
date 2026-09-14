@@ -5,9 +5,9 @@ import request, { Test as SuperTest } from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module';
 import { ProjectsService } from '../src/projects/projects.service';
+import { assertG00Isolation } from '../scripts/g00-isolated-environment.mjs';
 
-process.env.DATABASE_URL ??=
-  'postgresql://galaxy:galaxy_local@localhost:5432/galaxy_os?schema=public';
+assertG00Isolation();
 
 describe.sequential(
   'Project generic stage access PostgreSQL integration',

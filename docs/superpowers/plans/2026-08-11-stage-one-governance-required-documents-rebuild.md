@@ -66,7 +66,7 @@ Vitest 3, Playwright 1.51, TypeScript strict mode.
   `responsibilityNoteMaxLength: 1000`.
 - `PATCH /projects/:projectId/stage-1/governance` accepts exactly
   `{ principalUserId: UUID, coordinatorUserIds: UUID[], responsibilityNotes:
-  string | null }` and returns the saved authoritative governance view.
+string | null }` and returns the saved authoritative governance view.
 
 - [ ] Add DTO/controller/service unit tests that fail because the governance
       route/field do not exist. Cover one active principal, multiple active

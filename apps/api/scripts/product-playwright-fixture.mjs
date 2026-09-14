@@ -1,7 +1,9 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import process from 'node:process';
+import { assertG00Isolation } from './g00-isolated-environment.mjs';
 
+assertG00Isolation();
 const prisma = new PrismaClient();
 const ids = {
   creator: '10000000-0000-4000-8000-000000000101',

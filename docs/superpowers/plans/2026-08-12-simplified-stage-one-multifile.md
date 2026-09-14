@@ -35,7 +35,7 @@ Vitest, Playwright, existing local resumable upload/FileStorage.
 - Preserve approved/history files and records; never reset the database or
   rewrite an applied migration.
 - Any migration is additive, reviewed SQL, and applied with `prisma migrate
-  deploy` only.
+deploy` only.
 - No new dependency, second uploader, second FileAsset store, second Customer
   store, generic workflow engine, Stage 2–5 expansion, unrelated refactor, or
   formatting churn.
@@ -262,7 +262,7 @@ type StageOneUploadQueueItem = {
   file: File;
   documentType: string;
   customName: string;
-  status: 'QUEUED'|'UPLOADING'|'COMPLETED'|'FAILED'|'ABORTED';
+  status: 'QUEUED' | 'UPLOADING' | 'COMPLETED' | 'FAILED' | 'ABORTED';
   progress: number;
 };
 ```

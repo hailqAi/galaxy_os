@@ -12,9 +12,9 @@ import {
   vi,
 } from 'vitest';
 import { AppModule } from '../src/app.module';
+import { assertG00Isolation } from '../scripts/g00-isolated-environment.mjs';
 
-process.env.DATABASE_URL ??=
-  'postgresql://galaxy:galaxy_local@localhost:5432/galaxy_os?schema=public';
+assertG00Isolation();
 process.env.PASSWORD_BCRYPT_ROUNDS = '4';
 
 describe.sequential('Sprint 1 API integration', () => {

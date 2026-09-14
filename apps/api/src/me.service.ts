@@ -195,8 +195,7 @@ export class MeService {
     const user = await this.prisma.user.findFirst({
       where: { id: actor.userId, avatarKey: key },
     });
-    if (!user || !avatarKeyPattern.test(key))
-      throw new NotFoundException();
+    if (!user || !avatarKeyPattern.test(key)) throw new NotFoundException();
     const data = await readFile(
       join(readEnvironment().AVATAR_STORAGE_PATH, key),
     ).catch(() => null);

@@ -4,6 +4,9 @@ import { spawnSync } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { assertG00Isolation } from '../scripts/g00-isolated-environment.mjs';
+
+assertG00Isolation();
 
 describe.sequential('admin:reset-password', () => {
   const prisma = new PrismaClient();

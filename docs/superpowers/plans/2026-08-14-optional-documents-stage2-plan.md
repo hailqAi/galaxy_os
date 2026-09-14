@@ -119,7 +119,12 @@ ExcelJS, Vitest, Playwright, existing local resumable upload/storage adapter.
 ```ts
 type ProjectDocumentDefinitionDto = {
   name: string;
-  workstreamKey: 'ASSIGNMENT'|'SURVEY'|'PROPOSAL'|'FINANCIAL_PLANNING'|'KICKOFF_APPROVAL';
+  workstreamKey:
+    | 'ASSIGNMENT'
+    | 'SURVEY'
+    | 'PROPOSAL'
+    | 'FINANCIAL_PLANNING'
+    | 'KICKOFF_APPROVAL';
   description?: string;
   position: number;
   initialMatrix: boolean;
@@ -165,7 +170,7 @@ type ProjectDocumentDefinitionDto = {
 ```ts
 type CompleteOptionalStepResult = {
   completed: true;
-  nextStep: 1|2|3|4|5|null;
+  nextStep: 1 | 2 | 3 | 4 | 5 | null;
   stageCompleted: boolean;
 };
 ```
@@ -206,7 +211,7 @@ type CompleteOptionalStepResult = {
 ```ts
 type ProjectStageDocumentTargetDto = {
   definitionId: string;
-  stageKey: 'STAGE_1'|'STAGE_2';
+  stageKey: 'STAGE_1' | 'STAGE_2';
   workstreamKey: string;
   displayName?: string;
   submittedOfficerId: string;

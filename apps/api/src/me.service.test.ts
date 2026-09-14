@@ -22,6 +22,8 @@ describe('availableAvatarUrl', () => {
     await expect(
       availableAvatarUrl('22222222-2222-4222-8222-222222222222.jpg', directory),
     ).resolves.toBeNull();
-    await expect(availableAvatarUrl('../secret.jpg', directory)).resolves.toBeNull();
+    await expect(
+      availableAvatarUrl('../secret.jpg', directory),
+    ).resolves.toBeNull();
   });
 });

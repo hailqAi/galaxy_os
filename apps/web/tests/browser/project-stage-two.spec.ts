@@ -8,10 +8,9 @@ const projectCode = 'PW-STAGE-ONE';
 const password = 'Playwright-password-1';
 const pm = 'playwright.stage-one.pm@example.test';
 const outsider = 'playwright.stage-one.outsider@example.test';
-const workbookPath = resolve(
-  process.cwd(),
-  '../../.runtime/playwright/stage-two-valid.xlsx',
-);
+const testRoot = process.env.G00_TEST_ROOT;
+if (!testRoot) throw new Error('G00_TEST_ROOT is required');
+const workbookPath = resolve(testRoot, 'stage-two-valid.xlsx');
 const pdf = (text: string) => Buffer.from(`%PDF-1.4\n${text}\n%%EOF`);
 
 type StageTwoData = {

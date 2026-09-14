@@ -3,7 +3,6 @@ import { PrismaClient } from '@prisma/client';
 import { Test } from '@nestjs/testing';
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import request, { Test as SuperTest } from 'supertest';
 import ExcelJS from 'exceljs';
@@ -12,9 +11,9 @@ import { AppModule } from '../src/app.module';
 import { FileStorage } from '../src/files/file-storage';
 import { STAGE_TWO_PLAN_HEADERS } from '../src/projects/project-stage-two.dto';
 import { STAGE_TWO_DOCUMENT_DEFAULTS } from '../src/projects/project-stage-two.service';
+import { assertG00Isolation } from '../scripts/g00-isolated-environment.mjs';
 
-process.env.DATABASE_URL ??=
-  'postgresql://galaxy:galaxy_local@localhost:5432/galaxy_os?schema=public';
+const isolated = assertG00Isolation();
 
 describe.sequential('Project Stage 2 PostgreSQL API integration', () => {
   const prisma = new PrismaClient();
@@ -163,7 +162,7 @@ describe.sequential('Project Stage 2 PostgreSQL API integration', () => {
   };
 
   beforeAll(async () => {
-    runtimePath = await mkdtemp(join(tmpdir(), 'galaxy-stage-two-'));
+    runtimePath = await mkdtemp(join(isolated.testRoot, 'stage-two-'));
     vi.stubEnv('ALLOW_DEV_AUTH', 'true');
     vi.stubEnv('NODE_ENV', 'test');
     vi.stubEnv('DEV_AUTH_USER_EMAIL', 'admin@galaxy.local');

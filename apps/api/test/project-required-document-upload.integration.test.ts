@@ -6,7 +6,6 @@ import {
 import { PrismaClient } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -19,9 +18,9 @@ import { ProjectApproverResolver } from '../src/projects/project-approver-resolv
 import { ProjectProductsService } from '../src/projects/project-products.service';
 import { ProjectStageOneService } from '../src/projects/project-stage-one.service';
 import { UploadsService } from '../src/uploads/uploads.service';
+import { assertG00Isolation } from '../scripts/g00-isolated-environment.mjs';
 
-process.env.DATABASE_URL ??=
-  'postgresql://galaxy:galaxy_local@localhost:5432/galaxy_os?schema=public';
+const isolated = assertG00Isolation();
 
 describe.sequential(
   'Project required document resumable upload integration',
@@ -162,7 +161,9 @@ describe.sequential(
 
     beforeAll(async () => {
       await prisma.$connect();
-      runtimePath = await mkdtemp(join(tmpdir(), 'galaxy-upload-integration-'));
+      runtimePath = await mkdtemp(
+        join(isolated.testRoot, 'upload-integration-'),
+      );
       vi.stubEnv('LOCAL_UPLOAD_PATH', join(runtimePath, 'parts'));
       vi.stubEnv('FILE_STORAGE_PATH', join(runtimePath, 'files'));
       const organization = await prisma.organization.findUniqueOrThrow({

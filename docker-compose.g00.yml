@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    pull_policy: never
+    environment:
+      POSTGRES_USER: galaxy_g00_test
+      POSTGRES_PASSWORD: ${G00_POSTGRES_PASSWORD:?G00_POSTGRES_PASSWORD is required}
+      POSTGRES_DB: galaxy_os_g00_${G00_TEST_RUN_ID:?G00_TEST_RUN_ID is required}
+    ports:
+      - 127.0.0.1:${G00_POSTGRES_PORT:?G00_POSTGRES_PORT is required}:5432
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          CMD-SHELL,
+          'pg_isready -U galaxy_g00_test -d galaxy_os_g00_${G00_TEST_RUN_ID}',
+        ]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    pull_policy: never
+    command: [redis-server, --save, '', --appendonly, 'no']
+    ports:
+      - 127.0.0.1:${G00_REDIS_PORT:?G00_REDIS_PORT is required}:6379
+    tmpfs:
+      - /data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 1s
+      timeout: 3s
+      retries: 30

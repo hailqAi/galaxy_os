@@ -4,9 +4,9 @@ import { Test } from '@nestjs/testing';
 import request, { Test as SuperTest } from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module';
+import { assertG00Isolation } from '../scripts/g00-isolated-environment.mjs';
 
-process.env.DATABASE_URL ??=
-  'postgresql://galaxy:galaxy_local@localhost:5432/galaxy_os?schema=public';
+assertG00Isolation();
 
 describe.sequential('Project Product and required document integration', () => {
   const prisma = new PrismaClient();

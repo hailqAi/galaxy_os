@@ -30,7 +30,9 @@
     "admin:reset-password": "pnpm --filter @galaxy/api admin:reset-password",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "env:check": "node scripts/check-environment.mjs"
+    "env:check": "node scripts/check-environment.mjs",
+    "test:g00:check": "node --env-file=scripts/g00-isolated.env.example scripts/g00-isolated-test.mjs check",
+    "test:g00": "node --env-file=scripts/g00-isolated.env.example scripts/g00-isolated-test.mjs run"
   },
   "devDependencies": {
     "prettier": "3.6.2"
