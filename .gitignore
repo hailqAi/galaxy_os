@@ -24,3 +24,4 @@ venv/
 .local/
 .runtime/
 .env.edge
+.worktrees/
