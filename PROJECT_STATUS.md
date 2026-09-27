@@ -1,5 +1,17 @@
 # Project status
 
+## M0 — Cốt lõi và điểm tiếp tục — 2026-09-28
+
+- Phạm vi: tài liệu phát triển Galaxy OS, không thay đổi ứng dụng hoặc xây bộ nhớ
+  vận hành khách hàng. Điểm đọc canonical: [READ-FIRST](docs/galaxy-os/00-READ-FIRST.md).
+- Trạng thái/bằng chứng và handoff mới nhất:
+  [STATUS M0](docs/galaxy-os/05-IMPLEMENTATION-STATUS.md).
+- Baseline trước M0: `g00/build-test-isolation-20260914`,
+  `73fe7e8f6c3e3c7b20257857a48f1f173f186144`; G01/G02 có báo cáo trên nhánh riêng,
+  chưa nằm trong baseline này. Runtime hiện nay chưa xác minh.
+- M1–M7 là kế hoạch, không được thực hiện trong M0. Bước đề nghị: M1 có scope
+  được giao; không tự merge/sửa ứng dụng. Giữ nguyên các báo cáo lịch sử bên dưới.
+
 ## G00 build/typecheck and isolated verification foundation — 2026-09-14
 
 - Implementation is `IMPLEMENTED`; verification remains `PARTIAL` because the
