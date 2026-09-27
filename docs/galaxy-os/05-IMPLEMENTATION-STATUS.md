@@ -1,5 +1,30 @@
 # Trạng thái triển khai và điểm tiếp tục
 
+## Hiện tại — M1, 2026-09-28
+
+- Việc được giao mới: M1 khảo sát baseline, tái sử dụng và draft M2; không chạy lại M0.
+- **M1_AUDIT_STATUS: COMPLETE** trong phạm vi khảo sát; **M2_DESIGN_STATUS: NEEDS_DECISION**;
+  **IMPLEMENTATION_READINESS: BLOCKED**. Kết quả khảo sát không cấp quyền triển khai.
+- Handoff mới nhất: [M1](handoffs/2026-09-28-043124-M1.md).
+- [Baseline](milestones/M1/01-BASELINE.md): branch `g00/build-test-isolation-20260914`,
+  HEAD đầu M1 `0cbf986300fafe687b3c83c328adf14eff6eb66b`, tree `ff757f307d42091f519d44680253ada4b87ace51`.
+  G01/G02 chưa tích hợp vào HEAD; G02 chứa G01. Dirty next-env ở worktree G02 được giữ.
+- [Reuse map](milestones/M1/02-REUSE-MAP.md) có đường source/API/UI/test thực tế và rủi ro.
+  [Verification](milestones/M1/03-VERIFICATION.md): 65 ca chọn lọc mới đạt, không full/E2E;
+  `/me` và upload timeout lịch sử vẫn mở. Test SHA/tree là baseline trước docs M1.
+- Runtime: chỉ Edge được quan sát chạy, commit build không xác định;
+  Web/API NOT_RUNNING_OBSERVED, **RUNTIME_VERSION_UNVERIFIED**. DB/Redis chung không dùng để test.
+- bwrap vẫn thiếu; không package mới, không lặp sudo. NEEDS_OS_AUTHORIZATION chỉ việc cài;
+  executor vẫn đọc và chạy kiểm chọn lọc. Không tuyên bố sandbox toàn diện đã được kiểm chứng.
+- [Draft M2](milestones/M1/04-M2-DESIGN-DRAFT.md) đề nghị Project đã có → room nội bộ/khách →
+  tin/file bền vững theo quyền, polling trước, dùng lại domain. B1–B5 cần chủ dự án duyệt;
+  Lead-only intake chưa được giải quyết bằng lát cắt này. Không triển khai M2–M7 trong lượt M1;
+  mức hoàn tất ngoài phạm vi khảo sát vẫn UNKNOWN; 14 ca M2 NOT_RUN.
+- Bước tiếp: duyệt B1–B5 và giao riêng integration/preflight/implementation plan; không tự merge/code.
+  D01–D08 vẫn OPEN. Chỉ docs/handoff thay đổi; không push/merge/deploy.
+
+## Lưu trữ trạng thái M0 — không phải công việc hiện tại
+
 Quan sát M0: 2026-09-28T03:41:48+07:00 (Asia/Bangkok), tức 2026-09-27T20:41:48Z. Bản này được lập ngày thực 2026-09-28, không ghi lùi ngày các test lịch sử.
 
 - Việc được giao: **M0 — tài liệu, kiến thức và điểm tiếp tục**.
@@ -12,7 +37,7 @@ Quan sát M0: 2026-09-28T03:41:48+07:00 (Asia/Bangkok), tức 2026-09-27T20:41:4
 
 ## Tiếp tục M0 — 2026-09-28T04:06:55+07:00
 
-Handoff mới nhất: [M0-RESUME](handoffs/2026-09-28-040655-M0-RESUME.md). M0 đã hoàn tất trước lượt tiếp tục; kiểm lại cấu trúc/nội dung/link và định dạng trên commit e8b3144 đều PASS. Giữ nguyên bộ cốt lõi và handoff gốc bên trên, chỉ bổ sung bằng chứng môi trường.
+Handoff M0 cuối: [M0-RESUME](handoffs/2026-09-28-040655-M0-RESUME.md). M0 đã hoàn tất trước lượt tiếp tục; kiểm lại cấu trúc/nội dung/link và định dạng trên commit e8b3144 đều PASS. Giữ nguyên bộ cốt lõi và handoff gốc bên trên, chỉ bổ sung bằng chứng môi trường.
 
 Ubuntu 22.04/WSL2, Codex 0.157.1: executor hiện hoạt động; bwrap chưa cài. Ứng viên bubblewrap 0.6.1-1ubuntu0.3 từ kho Ubuntu chính thức, mô phỏng chỉ thêm một gói. Lệnh cài qua phê duyệt hợp lệ dừng tại sudo: a password is required (exit 1), không cài gói nào. ENVIRONMENT_REPAIR=NEEDS_OS_AUTHORIZATION; M0 không bị chặn. Không có nguyên văn cảnh báo bwrap trước khi người dùng dừng; không suy đoán đó là lỗi namespace/AppArmor. Không thay sandbox hay cấu hình bảo mật.
 
@@ -22,7 +47,7 @@ OWNER_REQUIREMENT là yêu cầu; USER_REPORTED là kết quả người dùng c
 
 M0 không chạy test ứng dụng, DB hoặc browser. Các số test dưới đây là **nội dung báo cáo lịch sử đã đọc**, không phải test chạy lại trong phiên này. Chỉ kiểm tài liệu M0 được ghi TEST_VERIFIED sau khi thực chạy. Không coi PARTIAL là VERIFIED, test worktree khác là tích hợp/deploy, hoặc không tìm thấy report là chưa từng code.
 
-## Git hiện tại — REPO_OBSERVED
+## Git quan sát trong M0 — REPO_OBSERVED lịch sử
 
 | Phạm vi              | Giá trị quan sát                                                                                                                                                            |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -88,7 +113,7 @@ G03 có inventory đọc-only trong report này, không có kết luận toàn r
 
 Đây là kiểm tra đủ để ghi nguồn, **chưa phải bản đồ KEEP/ADAPT/ADD/RETIRE_CANDIDATE của M1**.
 
-## Việc còn mở và bước tiếp
+## Việc còn mở và bước tiếp ghi tại M0 (lịch sử)
 
 M0 kiểm tài liệu/handoff/commit local; trạng thái kiểm mới ở handoff. D01–D08 đều OPEN; các OD lịch sử giữ ở [sổ quyết định](02-SCOPE-AND-DECISIONS.md). Thiếu raw v0.2 không chặn M0.
 

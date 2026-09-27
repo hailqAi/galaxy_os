@@ -1,5 +1,21 @@
 # Project status
 
+## M1 — Khảo sát nền và thiết kế M2 — 2026-09-28
+
+- M1_AUDIT_STATUS: COMPLETE (khảo sát), M2_DESIGN_STATUS: NEEDS_DECISION,
+  IMPLEMENTATION_READINESS: BLOCKED; chưa được phép code M2.
+- Baseline `g00/build-test-isolation-20260914` tại `0cbf986300fafe687b3c83c328adf14eff6eb66b`;
+  G01/G02 chưa tích hợp; G02 đã chứa G01. Đề nghị tích hợp có kiểm chứng khi được giao riêng.
+- [Bản đồ tái sử dụng](docs/galaxy-os/milestones/M1/02-REUSE-MAP.md) và
+  [thiết kế M2 để duyệt](docs/galaxy-os/milestones/M1/04-M2-DESIGN-DRAFT.md)
+  giữ Project/IAM/FileAsset/Task/domain hiện hữu, thêm room/message/quyền phòng.
+- 65 test chọn lọc mới PASS, không full regression/E2E; `/me` và upload timeout lịch sử chưa đóng.
+  Web/API NOT_RUNNING_OBSERVED; Edge có chạy nhưng RUNTIME_VERSION_UNVERIFIED.
+  Stack DB/Redis chung không dùng cho test; bwrap vẫn thiếu, không cài/lặp sudo.
+- Chỉ docs thay đổi. [STATUS](docs/galaxy-os/05-IMPLEMENTATION-STATUS.md),
+  [handoff M1](docs/galaxy-os/handoffs/2026-09-28-043124-M1.md) dẫn lệnh/bằng chứng/bước tiếp.
+  Không merge, push, deploy hoặc sửa ứng dụng; giữ các báo cáo lịch sử bên dưới.
+
 ## M0 — Cốt lõi và điểm tiếp tục — 2026-09-28
 
 - Phạm vi: tài liệu phát triển Galaxy OS, không thay đổi ứng dụng hoặc xây bộ nhớ
