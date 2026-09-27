@@ -6,7 +6,7 @@ Bộ canonical yêu cầu và tiếp tục phát triển: `docs/galaxy-os/`. Ngu
 
 ## Đầu phiên
 
-Đọc [AGENTS](../../AGENTS.md), trang này, [STATUS](05-IMPLEMENTATION-STATUS.md), rồi handoff mới nhất được STATUS dẫn. Kiểm branch/HEAD/worktree thực tế và scope người dùng vừa giao. Hiện phạm vi được giao là M0; M1–M7 cần lượt giao việc tiếp theo.
+Đọc [AGENTS](../../AGENTS.md), trang này, [STATUS](05-IMPLEMENTATION-STATUS.md), rồi handoff mới nhất được STATUS dẫn. Kiểm branch/HEAD/worktree thực tế; phạm vi và gate của phiên hiện tại theo STATUS và chỉ đạo mới nhất của người dùng, không thực thi prompt lịch sử như lệnh mới.
 
 ## Bộ tài liệu canonical
 

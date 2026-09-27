@@ -1,6 +1,26 @@
 # Trạng thái triển khai và điểm tiếp tục
 
-## Hiện tại — M1, 2026-09-28
+## Hiện tại — M2 trước gate, 2026-09-28
+
+- M2_STATUS: AWAITING_OWNER_DECISIONS; **IMPLEMENTATION_GATE: BLOCKED_APPROVAL**.
+  Đã đọc/đối chiếu B1–B5 và cập nhật spec; chưa code, chưa dựng test stack trước gate.
+- Handoff mới nhất: [M2/HANDOFF](milestones/M2/HANDOFF.md).
+  [DECISIONS](milestones/M2/DECISIONS.md), [DESIGN](milestones/M2/DESIGN.md),
+  [VERIFICATION](milestones/M2/VERIFICATION.md) là điểm review/tiếp tục.
+- B1 TECHNICAL_PROPOSAL theo chỉ đạo mới: prerequisite tối thiểu được review,
+  không merge/cherry-pick G01/G02. B2–B5 có phần NEEDS_OWNER_DECISION;
+  các rào an toàn đã rõ được đánh RESOLVED_BY_EXISTING_DECISION riêng, không hỏi lại.
+- DESIGN_APPROVAL_STATUS: NOT_APPROVED; PLAN_APPROVAL_STATUS: NOT_CREATED_AWAITING_DESIGN_APPROVAL.
+  Brainstorming/repository gate yêu cầu written spec rồi plan được review/chọn cách thực thi.
+- START_SHA `0fea6cc53db41c6520fda942c3bf412c35ab3dbb`, tree `a7648137465aa44b711d62e89fb46403ae6ea9cd`;
+  không commit mới sau M1 ở đầu lượt; source subtrees và dirty G02 được giữ.
+- M2-AC01–24, unit/integration/browser ứng dụng: NOT_RUN trong lượt này.
+  Test stack NOT_CREATED_AWAITING_APPROVAL; bwrap vẫn thiếu, không lặp sudo/cài mới.
+  Không kiểm lại runtime; RUNTIME_VERSION_UNVERIFIED, MAIN_RUNTIME_CHANGED: NO.
+- Bước tiếp: chủ dự án quyết định các điểm còn mở và review DESIGN; chưa tự sang lập trình/M3–M7.
+  Chỉ tài liệu thay đổi; không push/merge/deploy. Trạng thái M1 bên dưới là lịch sử.
+
+## Lịch sử — M1, 2026-09-28
 
 - Việc được giao mới: M1 khảo sát baseline, tái sử dụng và draft M2; không chạy lại M0.
 - **M1_AUDIT_STATUS: COMPLETE** trong phạm vi khảo sát; **M2_DESIGN_STATUS: NEEDS_DECISION**;

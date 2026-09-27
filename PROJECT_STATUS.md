@@ -1,5 +1,18 @@
 # Project status
 
+## M2 — Điều kiện vào và quyết định thiết kế — 2026-09-28
+
+- M2_STATUS: AWAITING_OWNER_DECISIONS; IMPLEMENTATION_GATE: BLOCKED_APPROVAL.
+  Không diễn giải “tiếp tục M2” thành duyệt toàn bộ B1–B5.
+- [Đối chiếu B1–B5](docs/galaxy-os/milestones/M2/DECISIONS.md) giữ nguyên văn M1;
+  [thiết kế cập nhật](docs/galaxy-os/milestones/M2/DESIGN.md) chưa duyệt, PLAN chưa lập.
+- Chỉ đạo mới không cho merge/cherry-pick; đề nghị prerequisite tối thiểu có review
+  thay cho hợp nhất G02 vào main. B2–B5 vẫn còn lựa chọn lịch sử/phạm vi/khách/phát hành.
+- HEAD đầu lượt `0fea6cc53db41c6520fda942c3bf412c35ab3dbb`, workspace sạch;
+  source giữ nguyên M1. Test stack/worktree code chưa tạo trước gate, 24 ca M2 NOT_RUN.
+- Chỉ docs cập nhật; không app/main-runtime/DB/AI thật, không push/merge/deploy.
+  [Handoff hiện tại](docs/galaxy-os/milestones/M2/HANDOFF.md).
+
 ## M1 — Khảo sát nền và thiết kế M2 — 2026-09-28
 
 - M1_AUDIT_STATUS: COMPLETE (khảo sát), M2_DESIGN_STATUS: NEEDS_DECISION,
