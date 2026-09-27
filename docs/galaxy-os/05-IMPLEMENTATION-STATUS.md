@@ -3,12 +3,18 @@
 Quan sát M0: 2026-09-28T03:41:48+07:00 (Asia/Bangkok), tức 2026-09-27T20:41:48Z. Bản này được lập ngày thực 2026-09-28, không ghi lùi ngày các test lịch sử.
 
 - Việc được giao: **M0 — tài liệu, kiến thức và điểm tiếp tục**.
-- M0: COMPLETE_DOCS_VERIFIED; kiểm tài liệu lúc 2026-09-28T03:57:17+07:00 đạt, kết quả/lệnh tại [handoff M0 mới nhất](handoffs/2026-09-28-035232-M0.md). Đây không phải nghiệm thu ứng dụng.
+- M0: COMPLETE_DOCS_VERIFIED; kiểm tài liệu lúc 2026-09-28T03:57:17+07:00 đạt, kết quả/lệnh tại [handoff M0 gốc](handoffs/2026-09-28-035232-M0.md). Đây không phải nghiệm thu ứng dụng.
 - Canonical yêu cầu: [READ-FIRST](00-READ-FIRST.md), [OWNER_BRIEF](sources/OWNER_BRIEF_2026-09-28.md). Raw v0.2: SOURCE_RAW_NOT_FOUND trong phạm vi đã đọc.
 - M1–M7: PLANNED; mức hoàn tất theo brief mới UNKNOWN. Phiên này chưa thực hiện các mốc đó.
 - Bước đề nghị: M1 có scope được giao; không tự sửa app/merge/deploy.
-- Push: NOT_REQUESTED. Không kiểm remote visibility hiện tại, không truy cập dịch vụ ngoài.
-- Commit docs: đã đủ điều kiện review/check để commit local; kết quả và SHA của commit chứa handoff được trả ở phản hồi cuối, không tự ghi vào nội dung commit.
+- Push: NOT_REQUESTED. Không kiểm remote visibility hiện tại. M0 gốc không truy cập dịch vụ ngoài; lượt tiếp tục chỉ tra tài liệu công khai OpenAI, không gửi dữ liệu dự án.
+- Commit M0 gốc: e8b3144c8993a7609ce5523db4b3753b57cb8cad, đã xác nhận trong lượt tiếp tục; không push.
+
+## Tiếp tục M0 — 2026-09-28T04:06:55+07:00
+
+Handoff mới nhất: [M0-RESUME](handoffs/2026-09-28-040655-M0-RESUME.md). M0 đã hoàn tất trước lượt tiếp tục; kiểm lại cấu trúc/nội dung/link và định dạng trên commit e8b3144 đều PASS. Giữ nguyên bộ cốt lõi và handoff gốc bên trên, chỉ bổ sung bằng chứng môi trường.
+
+Ubuntu 22.04/WSL2, Codex 0.157.1: executor hiện hoạt động; bwrap chưa cài. Ứng viên bubblewrap 0.6.1-1ubuntu0.3 từ kho Ubuntu chính thức, mô phỏng chỉ thêm một gói. Lệnh cài qua phê duyệt hợp lệ dừng tại sudo: a password is required (exit 1), không cài gói nào. ENVIRONMENT_REPAIR=NEEDS_OS_AUTHORIZATION; M0 không bị chặn. Không có nguyên văn cảnh báo bwrap trước khi người dùng dừng; không suy đoán đó là lỗi namespace/AppArmor. Không thay sandbox hay cấu hình bảo mật.
 
 ## Nhãn và giới hạn bằng chứng
 

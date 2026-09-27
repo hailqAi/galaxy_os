@@ -6,6 +6,9 @@
   vận hành khách hàng. Điểm đọc canonical: [READ-FIRST](docs/galaxy-os/00-READ-FIRST.md).
 - Trạng thái/bằng chứng và handoff mới nhất:
   [STATUS M0](docs/galaxy-os/05-IMPLEMENTATION-STATUS.md).
+- Lượt tiếp tục xác nhận M0 đã commit tại `e8b3144` và kiểm lại đạt;
+  [handoff môi trường](docs/galaxy-os/handoffs/2026-09-28-040655-M0-RESUME.md)
+  ghi executor hoạt động, cài bubblewrap còn cần xác thực sudo của hệ điều hành.
 - Baseline trước M0: `g00/build-test-isolation-20260914`,
   `73fe7e8f6c3e3c7b20257857a48f1f173f186144`; G01/G02 có báo cáo trên nhánh riêng,
   chưa nằm trong baseline này. Runtime hiện nay chưa xác minh.
