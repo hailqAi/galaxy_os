@@ -8,7 +8,7 @@ import { Reflector } from '@nestjs/core';
 import { describe, expect, it, vi } from 'vitest';
 import { PrismaService } from '../prisma.service';
 import { BusinessEntityPolicy } from './business-entity.policy';
-import { CurrentActor } from './current-actor';
+import { actorsForPermission, CurrentActor } from './current-actor';
 import { DevelopmentAuthGuard } from './development-auth.guard';
 import { PermissionGuard } from './permission.guard';
 
@@ -43,6 +43,94 @@ describe('access control', () => {
     managedDepartmentIds: [],
     administrationTier: 0,
   } satisfies CurrentActor;
+
+  it('keeps administration scope and tier tied to the permission assignment', () => {
+    const actor = {
+      ...selfProjectUploader,
+      permissions: ['role.assign', 'organization.read'],
+      administrationScope: 'ORGANIZATION' as const,
+      administrationTier: 100,
+      permissionSources: [
+        {
+          permission: 'role.assign',
+          assignmentId: 'a1',
+          roleId: 'r1',
+          roleName: 'Scoped',
+          scopeType: 'SELF' as const,
+          departmentId: null,
+          administrationTier: 1,
+        },
+        {
+          permission: 'organization.read',
+          assignmentId: 'a2',
+          roleId: 'r2',
+          roleName: 'Reader',
+          scopeType: 'ORGANIZATION' as const,
+          departmentId: null,
+          administrationTier: 100,
+        },
+      ],
+    };
+    const scoped = actorsForPermission(actor, 'role.assign');
+    expect(scoped).toHaveLength(1);
+    expect(scoped[0]).toMatchObject({
+      permissions: ['role.assign'],
+      administrationScope: 'SELF',
+      administrationTier: 1,
+    });
+    expect(
+      new BusinessEntityPolicy({} as PrismaService).projectWhere(
+        scoped[0]!,
+        'role.assign',
+      ),
+    ).toMatchObject({
+      AND: [
+        {
+          OR: expect.arrayContaining([
+            { members: { some: { userId: actor.userId } } },
+          ]),
+        },
+      ],
+    });
+  });
+
+  it('does not merge two assignments to the same role or trust incomplete source identity', () => {
+    const base = {
+      permission: 'role.assign',
+      roleId: 'r1',
+      roleName: 'Role',
+      departmentId: null,
+      administrationTier: 2,
+    };
+    const actor = {
+      ...selfProjectUploader,
+      permissions: ['role.assign'],
+      permissionSources: [
+        { ...base, assignmentId: 'a1', scopeType: 'SELF' as const },
+        { ...base, assignmentId: 'a2', scopeType: 'ORGANIZATION' as const },
+      ],
+    };
+    expect(
+      actorsForPermission(actor, 'role.assign').map(
+        (a) => a.administrationScope,
+      ),
+    ).toEqual(['SELF', 'ORGANIZATION']);
+    expect(
+      actorsForPermission(
+        { ...actor, permissionSources: [{ ...base, scopeType: 'SYSTEM' }] },
+        'role.assign',
+      ),
+    ).toEqual([]);
+    expect(
+      actorsForPermission(
+        { ...actor, permissionSources: undefined },
+        'role.assign',
+      ),
+    ).toEqual([]);
+    expect(
+      actorsForPermission({ ...actor, permissions: [] }, 'role.assign'),
+    ).toEqual([]);
+  });
 
   it('does not let a Task assignee upload into another Project', async () => {
     const findFirst = vi.fn(async ({ where }) =>
@@ -348,6 +436,7 @@ describe('access control', () => {
           ],
           roles: [
             {
+              id: 'assignment-valid',
               organizationId: 'organization-1',
               scopeType: 'SELF',
               departmentId: null,
@@ -372,6 +461,13 @@ describe('access control', () => {
     expect(request.actor).toMatchObject({
       userId: 'user-1',
       permissions: ['file.upload'],
+      permissionSources: [
+        {
+          assignmentId: 'assignment-valid',
+          administrationTier: 0,
+          permission: 'file.upload',
+        },
+      ],
     });
     expect(vi.mocked(prisma.user.findUnique)).toHaveBeenCalledWith(
       expect.objectContaining({

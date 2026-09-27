@@ -223,6 +223,8 @@ export class DevelopmentAuthGuard implements CanActivate {
       permissionSources: assignments.flatMap((assignment) =>
         assignment.role.permissions.map(({ permission }) => ({
           permission: permission.code,
+          assignmentId: assignment.id,
+          administrationTier: assignment.role.administrationTier,
           roleId: assignment.role.id,
           roleName: assignment.role.name,
           scopeType: assignment.scopeType,
