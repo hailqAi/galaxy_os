@@ -1,6 +1,15 @@
 # Trạng thái triển khai và điểm tiếp tục
 
-## Hiện tại — M2-A triển khai một phần, 2026-09-28
+## Hiện tại — M2-A continuation, 2026-09-28
+
+- **M2_A_STATUS: PARTIAL; M2_OVERALL_STATUS: PARTIAL.** B1–B5 giữ nguyên; thực thi INLINE, hai reviewer độc lập chỉ đọc, local commit được giao. Không làm lại M0/M1.
+- Code `e4b3570e63367a84cef41f1823c9ad1d530ee10d`, tree `c7e416c60dd3559fc7737f0e6e09196621cb89c7` tại worktree `/home/galaxy_os/.worktrees/m2-a-20260928`, branch `m2/project-chat-20260928`. Bổ sung publication QUOTATION/TECHNICAL/SAMPLE/HANDOVER, trusted binary/recipient, source writer race/quota, draft Back/Forward và reconnect; không domain thứ hai.
+- Full API1120PASS rồi1117PASS/3FAIL; repeat55PASS/1FAIL dừng lần1; Web507PASS; browser12PASS/1FAIL. Build/typecheck/schema/format PASS. TS lint PASS; Python ruff dùng venv hiện có vì root script thiếu venv tại worktree. Không lấy targeted/review thay full.
+- Test isolation đạt; **ENVIRONMENT_CLOCK_UNSTABLE** có probe ngoài Vitest và browser timestamp lùi. Contract/payment/delivery-install source contract còn thiếu; BFCache/một số race/mobile còn thiếu bằng chứng. Chưa đạt ngưỡng nghiệm thu.
+- Bản thử loopback33002 đang chạy đúng worktree sau build; PID/identity, cách chạy/dừng, SHA và toàn bộ lỗi cuối trong [HANDOFF](milestones/M2/HANDOFF.md), [VERIFICATION](milestones/M2/VERIFICATION.md). Không copy code về main.
+- Lead-only/lifecycle DEFERRED_BY_EXPLICIT_SLICE_SCOPE; M3–M7 NOT_STARTED. MAIN_RUNTIME_CHANGED:NO; PUSH_MERGE_DEPLOY:NOT_PERFORMED. Các phần bên dưới là lịch sử.
+
+## Lịch sử trước continuation — M2-A triển khai một phần, 2026-09-28
 
 - OWNER_REQUIREMENT mới chốt B1–B5 và thực thi INLINE; [DECISIONS](milestones/M2/DECISIONS.md). DESIGN owner-directed đúng M2-A; PLAN technical reviewed theo ủy quyền, không PLAN_APPROVED_BY_OWNER.
 - M2_ENTRY_GATE: READY cho code test; **M2_A_STATUS: PARTIAL; M2_OVERALL_STATUS: PARTIAL**. Đã code chat nội bộ/khách trên Project hiện hữu, IAM/file/history/expiry/publication PROPOSAL/UI. Không AI/memory runtime hoặc M3–M7.

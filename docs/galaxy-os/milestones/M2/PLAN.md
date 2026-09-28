@@ -18,6 +18,26 @@ Review độc lập (chỉ đọc) đã thực hiện: năm điểm important. N
 - Source actor: guard bổ sung `assignmentId`, `administrationTier` vào từng permission source từ UserRole/Role thật, không lấy merged tier; projection chỉ permissions của chính assignment. Sau lock phải reload active assignment/role/member/session rồi kiểm lại. Hai bindings cùng role vẫn phân biệt ID/expiry.
 - Publication: Task4 còn technical gate ánh xạ từng source có approval flow/asset/version/quyền cụ thể. Không dùng filename, client approval hoặc mặc định APPROVED. Nguồn chưa ánh xạ failclosed, không báo publication complete; giữ ca positive qua service approval thật và source-race/financialdeny.
 
+## Tiếp tục M2-A — phạm vi đã được giao
+
+RESUME_START_SHA: `b2c8fe440c0e4b5ca53940d9c8ded34ed00ab5b8`. INLINE; giữ B1–B5, không xin lại approval. Hai reviewer chỉ đọc: publication/provenance và regression/navigation. Không chạy DB/browser/build đồng thời.
+
+1. **Hồi quy:** khôi phục log gốc 13 lỗi; tái hiện `test/m2-project-chat.integration.test.ts`, `test/project-required-document-upload.integration.test.ts`, `test/admin-reset-password.integration.test.ts`; điều tra cả lỗi mới từ full suite. Giữ timeout/assertion, ghi thao tác đang chờ và phép đo clock/DB. Sửa source hoặc fixture đúng nguyên nhân, targeted → nhóm → full; lặp có giới hạn 10 lần nhóm từng lỗi sau sửa. Log trong `.superpowers/sdd/PLAN/` (ignored).
+2. **Publication:** `apps/api/src/project-chat/{project-chat.service,project-chat.dto,project-chat.controller}.ts`, schema/migration additive nếu cần, domain adapter thực sự có nguồn. Test approval khác binary/version, thay bytes sau preview/publish, recipient/permission đổi, publish đồng thời; tải bytes thật qua khách. Map từng nguồn B5, loại thiếu source contract fail-closed và vẫn là blocker. Không generic fallback.
+3. **Nháp/navigation:** `apps/web/features/project-chat/project-chat.tsx`, browser `apps/web/tests/browser/m2-project-chat.spec.ts`. Dùng API tương thích Next đang cài, không sửa history.state hoặc thêm history entries giả. RED browser Back/Forward thật → sửa → xác nhận ở lại giữ RAM, rời bỏ nháp, reload không lưu, bfcache reauthorize; không prompt sau revoke.
+4. **Race/reconnect/mobile:** bổ sung barrier có kiểm soát vào integration M2 và browser hiện có; send/lock/revoke, stale response, offline/reconnect, một polling loop, mobile tiếng Việt/file/publication. Assertion riêng cho hành vi còn thiếu, giữ IDs 24+30.
+5. **Chốt:** targeted/API, Web, browser mở rộng, build/typecheck/lint/format/schema và full API hai lần liên tiếp cùng source/config; không retry tự động. Review correctness/security/authorization/UX/Ponytail, commit source local rồi docs riêng. M2-A chỉ VERIFIED khi không còn ca bắt buộc thiếu.
+
+Lệnh giữ recipe trong VERIFICATION; không thay DB/stack. Expected: các assertion deny/persistence/binary/navigation đạt, exit 0; mọi failure hoặc nguồn chưa đủ ghi PARTIAL, không miễn nghiệm thu.
+
+### Bổ sung kỹ thuật publication đã review trong continuation
+
+- `project-chat.dto.ts/service.ts`, `prisma/schema.prisma` và migration additive: sourceType PROPOSAL/QUOTATION/TECHNICAL/SAMPLE/HANDOVER, FK cụ thể + snapshot trạng thái nguồn; không generic approval. File/binary luôn digest server và pinned.
+- `production/production.service.ts`: khóa Project trước đọc lại revise/decide; adapter chỉ nhận SHOP_DRAWING/SAMPLE đã APPROVED, decider khác submitter của revision; SampleApproval pin ID và phiên bản binary.
+- `after-sales/after-sales.service.ts/module.ts`: add/sign/complete dùng cùng Project lock; tạo version mới đối chiếu checksum bytes server. Adapter allowlist HANDOVER*MINUTES/PRODUCT_LIST/WARRANTY_DOCUMENT/AS_BUILT_DRAWING, chỉ NOT_REQUIRED hoặc SIGNED*\* có thời điểm; snapshot/UI mô tả trạng thái nguồn, không tạo tác động ký/nghiệm thu.
+- Test `m2-project-chat.integration.test.ts`: nguồn chưa duyệt, approval/file khác, Project khác, checksum client giả, stale sau revise/sign, bytes khách đúng bản cũ, quota không cộng đôi quote export; unit production/after-sales hồi quy writers. Lệnh trong apps/api: `E node_modules/vitest/vitest.mjs run test/m2-project-chat.integration.test.ts src/production/production.test.ts src/after-sales/after-sales.test.ts --no-file-parallelism --poolOptions.forks.singleFork`.
+- Reviewer `/root/publication_review` đã rà điều kiện/phạm vi khóa và XOR; đây là review kỹ thuật, không bằng chứng chạy test. Contract/phụ lục/payment/kế hoạch giao-lắp vẫn MISSING_SOURCE_CONTRACT, không xây domain mới.
+
 ## Global Constraints
 
 ### Đối chiếu thực thi inline ngày 2026-09-28
@@ -125,3 +145,11 @@ Lệnh/test/exit và phần chưa đạt là [VERIFICATION](VERIFICATION.md). Kh
 - [ ] Fresh whole-branch reviewer đọc spec/plan/diff/evidence, Ponytail/correctness/security/authorization/UX. Fix important bằng RED→GREEN; ghi mọi blocker/giới hạn.
 - [ ] Commit source/test theo scope sau checks. Ghi CODE_SHA/TESTED_SHA/TESTED_TREE, nếu đổi source rerun. Docs commit riêng sau đó, không selfhash.
 - [ ] Handoff worktree/ports/start-stop nếu app thật chạy; giữ stack hoặc dừng đúng owned namespace sau lưu evidence. Không gỡ worktree, không merge/deploy. M2-A VERIFIED chỉ khi đủ internal+guest+file+browser; M2 overall PARTIAL.
+
+### Chốt continuation đã thực thi
+
+- A: sửa env leak và barrier cleanup; inventory13 đúng log, full bình thường1120PASS rồi1117PASS/3FAIL. Repeat3file dừng lần1 với55PASS/1FAIL; còn clock/runtime stability, không miễn hồi quy.
+- B: thêm QUOTATION/TECHNICAL/SAMPLE/HANDOVER vào publication service hiện hữu, FK/snapshot/checksum server, hai migration bổ sung đã review/test-only. Sửa writer revision/handover lock tối thiểu và quota không đếm lại binary. Contract/payment/install vẫn MISSING_SOURCE_CONTRACT.
+- C: custom dialog bỏ nháp RAM, cancelable Navigation API cho Back/Forward, hash không đổi ngữ cảnh, native beforeunload; không state/history hack.
+- D: barrier source-revision/send-lock/revoke và browser lost response/delayed poll/offline revoke/mobile; các biến thể BFCache/keyboard/file lỗi còn PARTIAL.
+- E: code commit `e4b3570e63367a84cef41f1823c9ad1d530ee10d`; review độc lập quyền/provenance và navigation/isolation, INLINE thực thi. Ma trận, lệnh và từng failure cuối ở VERIFICATION; không nghiệm thu VERIFIED. Bước tiếp: ổn định clock, tái chạy ngưỡng đã giao, đóng biến thể và xác định source contract còn thiếu; không cần duyệt lại B1–B5.

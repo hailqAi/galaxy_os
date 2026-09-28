@@ -30,7 +30,13 @@ Migration additive tạo chat/release tables + membership kind, FKs/indexes/uniq
 
 Môi trường dùng G00 harness với namespace `galaxy_os_g00_20260928m2a`, PG55433/Redis56380/API33001/Web33002 loopback, cookie riêng, storage `/tmp/galaxy-os-g00-20260928m2a`. Kiểm collision/ownership/context/DB identity trước write; credentials chỉ test, external effects tắt. Hai tenant O1/O2, O1 P1/P2, O2 P3+room/file/actor, hai actor prepare/publish. Giữ ma trận24 bên dưới: phần Lead-only của ca22 DEFERRED_BY_EXPLICIT_SLICE_SCOPE; roundtrip reference trên Project đã có vẫn phải kiểm. Thêm 30 ca prompt M2-A trong PLAN/VERIFICATION, không gắn PASS trước test.
 
-### Đối chiếu với phần đã code — không mở rộng approval
+### Bổ sung kỹ thuật continuation đã review
+
+Publication giữ một ChatDocumentRelease, thêm sourceType QUOTATION/TECHNICAL/SAMPLE/HANDOVER với FK nguồn riêng, snapshot/fingerprint server cho các nguồn artifact; mapping/gate chi tiết ở VERIFICATION. Quotation đăng ký cùng storageKey thành FileAsset, quota không cộng đôi bytes. Nguồn/writer cùng Project lock; decision technical không được chuyển sang revision khác sau chờ khóa. Binary xác minh lại trước publish/download, giới hạn10MiB; recipients đã phát hành không tự mở rộng qua chat history grant. Handover nguồn NOT_REQUIRED được ghi rõ không yêu cầu ký, không tự tạo hiệu lực ký/nghiệm thu.
+
+Nháp dùng dialog Ở lại/Rời và bỏ nháp cho room/group/link và native traversal cancelable trước popstate; không sửa lịch sử router. Hash-only không rời scope. Pagehide clear RAM và pageshow persisted reauthorize đã có code, nhưng BFCache/browser thiếu Navigation API chưa có nghiệm thu thực. Không thay B1–B5 hay mở Lead-only/M3.
+
+### Lịch sử đối chiếu trước continuation — không mở rộng approval
 
 Code đặt trong worktree riêng nêu ở [HANDOFF](HANDOFF.md). Trạng thái kiểm chứng và ma trận hiện hành ở [VERIFICATION](VERIFICATION.md); bảng NOT_RUN phía dưới giữ nguyên làm lịch sử lúc thiết kế, không là kết quả cuối lượt.
 

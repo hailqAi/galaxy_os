@@ -1,6 +1,73 @@
 # M2 — Bàn giao triển khai
 
-## Hiện hành: M2-A — 2026-09-28, Asia/Bangkok
+## Hiện hành — M2-A continuation, 2026-09-28
+
+**M2_A_STATUS: PARTIAL; M2_OVERALL_STATUS: PARTIAL.** Đã tiếp tục code, TDD/review và commit local đúng worktree; chưa đủ điều kiện nghiệm thu. Không làm lại M0/M1, không đổi các quyết định B1–B5. Implementation INLINE; hai reviewer thực tế chỉ đọc `/root/publication_review` và `/root/regression_navigation_review`, sửa các finding env leak, source revision race, hash navigation. Review không thay bằng chứng test.
+
+### Định danh source và kiểm thử
+
+- WORKTREE: `/home/galaxy_os/.worktrees/m2-a-20260928`; BRANCH: `m2/project-chat-20260928`.
+- RESUME_START_SHA: `b2c8fe440c0e4b5ca53940d9c8ded34ed00ab5b8`. Ban đầu sạch, giữ toàn bộ code/docs trước; không reset/cherry-pick.
+- CODE_SHA = TESTED_SHA: `e4b3570e63367a84cef41f1823c9ad1d530ee10d`; TESTED_TREE: `c7e416c60dd3559fc7737f0e6e09196621cb89c7`.
+- Full/browser trên source ngay trước commit; SHA256 manifest xác minh17file code/test/migration giống commit và working tree sau commit. Post-commit unit30/30. Các tests thất bại vẫn gắn cây này; TESTED không đồng nghĩa VERIFIED.
+- Docs-only commit sau code chỉ sửa `PROJECT_STATUS.md`, `docs/galaxy-os/05-IMPLEMENTATION-STATUS.md`, M2 `DESIGN.md`, `PLAN.md`, `VERIFICATION.md`, `HANDOFF.md`. DOCS_COMMIT_SHA lấy từ `git log -1 --format=%H -- docs/galaxy-os/milestones/M2/HANDOFF.md` sau commit; trả hash thật trong phản hồi, không tự tham chiếu/amend.
+
+### Người dùng nhận được trong bản thử
+
+- Giữ chat nội bộ/khách, file bền vững, lịch sử/expiry/quyền sẵn có. Publication thêm báo giá khách, bản vẽ/mẫu đã duyệt và tài liệu bàn giao/bảo hành có nguồn hợp lệ. Không thêm domain/IAM/FileAsset/Approval thứ hai.
+- Preview/publish/download kiểm bytes thực, pin source/version/digest/recipient; người mới có history không tự nhận publication cũ. Quotation dùng export khách sẵn có, không note/giá vốn qua bản XLSX đã kiểm, không cộng quota binary hai lần. UI hiển thị trạng thái nguồn, không biến NOT_REQUIRED thành “đã ký”.
+- Đồng bộ writer nguồn với publication; decision chờ revision đổi trả409, không tự duyệt bản mới. Checksum bàn giao lấy từ storage server, không tin client.
+- Đổi phòng/nhóm/link hoặc Back/Forward được hỗ trợ hỏi “Ở lại”/“Rời và bỏ nháp”; nháp RAM giữ khi ở lại, bỏ khi rời/reload. Hash cùng trang không chặn sai. Mất response sau gửi retry cùng key không tạo tin thứ hai; polling lỗi phục hồi được, response cũ không dựng lại phòng đã rời.
+- Không có AI giả, không đổi nghĩa vụ hợp đồng/tiền/PO, không mời/gửi thư khách thật.
+
+### Kết quả cuối và blockers
+
+[VERIFICATION](VERIFICATION.md) có inventory đúng13lỗi gốc, ma trận nguồn publication, log RED/GREEN và overlay24+30 cùng giới hạn.
+
+| Hạng mục                                    | Kết quả thật                                                                                                                        |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| TEST_ENVIRONMENT_STATUS                     | VERIFIED_ISOLATED / ENVIRONMENT_CLOCK_UNSTABLE                                                                                      |
+| INTERNAL_CHAT / CUSTOMER_CHAT / ATTACHMENT  | IMPLEMENTED; API/browser có PASS; nghiệm thu tổng thể PARTIAL                                                                       |
+| PROPOSAL                                    | IMPLEMENTED_TESTED; giữ khả năng dùng, tăng kiểm bytes/recipient                                                                    |
+| OTHER_B5_SOURCES                            | QUOTATION/TECHNICAL/SAMPLE/HANDOVER đã code + API binary thật; CONTRACT/PAYMENT/DELIVERY_INSTALL MISSING_SOURCE_CONTRACT            |
+| APPROVAL_VERSION_BINARY_LINK                | Đã pin/check nguồn hỗ trợ, ca nhầm version/binary/project/nguồn đổi + tải khách; PARTIAL cho toàn B5 và mọi type/sign-state         |
+| HISTORY_READD_EXPIRY / READ_ONLY_REVOCATION | PASS theo lớp API; read-only/revoke đang mở có browser; không tuyên bố mọi race đã đạt                                              |
+| RACE_RECONNECT                              | Barrier send/lock/revoke, stale-decision, I/O và lost response/delayed poll/offline revoke có test; PARTIAL độ ổn định/mọi biến thể |
+| DRAFT_BACK_FORWARD                          | PASS Chromium desktop/mobile viewport+reload trên13suite; Navigation API không cancelable và BFCache thực NOT_RUN                   |
+| MOBILE                                      | PASS các ca viewport390×844 đã ghi; PARTIAL publication/keyboard/mọi persona; chưa thiết bị vật lý                                  |
+| FULL_API_RUN_1                              | PASS1120/1120,60files,exit0                                                                                                         |
+| FULL_API_RUN_2                              | FAIL3/PASS1117,59/60files,exit1                                                                                                     |
+| FLAKY_REPEAT_RESULTS                        | Tối đa10, stop-on-first-failure: lần1 PASS55/FAIL1; lần2–10 NOT_RUN                                                                 |
+| WEB_TESTS / BROWSER_TESTS                   | PASS507/507; browser PASS12/FAIL1,13tests,retries0                                                                                  |
+| BUILD / TYPECHECK / SCHEMA / FORMAT         | PASS; logs cuối trong VERIFICATION                                                                                                  |
+| LINT                                        | TypeScript PASS(1warning cũ); root script thiếu venv trong worktree; Python ruff qua executable hiện có PASS                        |
+| Edge / Python                               | PASS4/4 và1/1                                                                                                                       |
+| ACCEPTANCE24+30                             | 36PASS theo lớp,17PARTIAL,1DEFERRED; biến thể NOT_RUN nằm trongPARTIAL; các FAIL regression không bị ma trận xóa                    |
+
+**Những việc còn chặn M2-A:**
+
+1. ContractDocument/ContractApproval, phụ lục/thanh toán và InstallationPlan/SiteDelivery chưa có source contract chứng minh đúng approval–version–customer binary. Giữ fail closed và UI “chưa đủ nguồn/căn cứ phát hành”; không generic fallback. Không gọi4adapter mới là toàn bộ B5 đã đủ. Cần bổ sung contract nguồn tối thiểu trong scope cho phép; nếu buộc xây quy trình nghiệp vụ mới thì cần giao prerequisite riêng, không hỏi lại B1–B5.
+2. Chưa đạt ổn định: full2 M2 `pins approved drawing...` guest download404, `publishes handover...` tạo room404, `blocks a waiting send...` tạo room404 trước barrier. Repeat upload `links independent logical Stage 1 files...` timeout5000/duration867ms. Browser `domain link choices disappear...` management404. File/path/tên nguyên văn trong VERIFICATION. Cả13ca gốc đã pass full1/full2 nhưng không đủ đóng issue ổn định.
+3. Clock lùi~183giây đã tái hiện ngoài Vitest. Browser trace có management200 lúc04:51:35, rồi404 lúc04:48:35 trong khi chỉ taskRole bị archived. Giữ predicate hiệu lực quyền, không sửa giờ/timeout hoặc backdate fixture để qua. Cần môi trường có thời gian ổn định trước acceptance lại; không tự quy mọi timeout gốc cho clock.
+4. Ca BFCache thực, max in-flight sau reconnect, browser upload-error/retry, filename độc hại, mobile publication/keyboard và đủ type/sign-state publication còn NOT_RUN/PARTIAL. Các ca đã đạt giữ nguyên, không báo mọi navigation/race/mobile đã đủ.
+
+Lead-only/lifecycle là **DEFERRED_BY_EXPLICIT_SLICE_SCOPE** của M2 tổng thể, không bị nhập làm tính năng mới của lượt này. M3_STATUS:NOT_STARTED; không tự chuyển milestone.
+
+### Bản thử đang chạy và cách quản lý
+
+Xác minh trực tiếp sau build: API PID86693, cwd `W/apps/api`, argv `node dist/main.js`; Web launcher child86736 và Next server86747, cwd `W/apps/web`, dev webpack port33002. `/api/v1/health` và `/login` đều HTTP200. PID chỉ là quan sát, **phải xác minh lại trước signal**, không dùng như lệnh kill về sau.
+
+- URL thử: **http://127.0.0.1:33002/work**; API http://127.0.0.1:33001/api/v1. Không tài khoản/mật khẩu trong handoff; fixture synthetic do `apps/api/test/m2-browser.fixture.ts` tạo theo recipe.
+- API dist/main.js SHA256 `baff2384276602bf63cba1337b0749ab4b1b1135512847acd346d5523ace7720`; Web dev chạy source CODE_SHA, không gọi bundle production. Web build-manifest lúc kiểm `d2eb22a1d553abf206922cfee3e3681b64de18d3818b8b08dadf481dae7832da`; file dev có thể đổi khi compile route. Build root thành công trước restart, không dùng bundle cũ để kiểm source mới.
+- Recipe hiện hữu: `node scripts/m2-a-serve.mjs api` / `node scripts/m2-a-serve.mjs web` từ W, sau kiểm cổng/owned process và API build. Launcher guard+env sạch, không `.env.local` main. Dừng bằng Ctrl-C đúng terminal launcher thử; không kill theo tên/port mù quáng.
+- Giữ stack `galaxy_os_g00_20260928m2a`, PG55433/Redis56380/storage riêng; không tạo stack mới, không dừng container/volume, prune/reset/seed main. Hai migration mới đã review/deploy chỉ test,78migration hiện hành. Bwrap không cài, không công việc code/DB/browser nào bị chứng minh phụ thuộc lần này.
+- Raw log/trace/manifest ignored ở `.superpowers/sdd/PLAN/` và `apps/web/test-results/m2-a/`, có thể chứa cookie fixture nên không commit raw. Báo cáo không chứa secrets.
+
+### Tiếp tục đúng điểm
+
+Đọc phần **hiện hành** của HANDOFF/VERIFICATION/PLAN, kiểm Git và owned runtime. Ưu tiên ổn định clock rồi tái chạy3file từng lỗi10lần có giới hạn, full2lần liên tiếp và browser13trên cùng source; gặp lỗi giữ log và điều tra, không retry-until-green. Tiếp tục các ca còn thiếu và mapping contract nguồn B5, không viết lại M2-A. Code local được giữ nguyên để review. Main worktree kiểm cuối sạch tại `7faeb58eea534dbb6c11238906ede6df84ce0302`; **MAIN_RUNTIME_CHANGED:NO**, runtime chính vẫn RUNTIME_VERSION_UNVERIFIED. **PUSH_MERGE_DEPLOY:NOT_PERFORMED**.
+
+## Lịch sử trước continuation: M2-A — 2026-09-28, Asia/Bangkok
 
 **M2_A_STATUS: PARTIAL; M2_OVERALL_STATUS: PARTIAL.** Không quay về main để làm lại M0/M1. Tiếp tục tại `/home/galaxy_os/.worktrees/m2-a-20260928`, branch `m2/project-chat-20260928`. Source, docs và stack test giữ tại đây; chưa tích hợp vào ứng dụng chính.
 
