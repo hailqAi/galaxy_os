@@ -3245,6 +3245,9 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
         s.sourceType === 'SITE_DELIVERY' && s.sourceId === delivery.id,
     );
     expect(source).toBeDefined();
+    expect(source.name).toContain(workOrder.workOrderNumber);
+    expect(source.name).toContain(deliveryInput.recipient);
+    expect(source.name).toContain(deliveryInput.deliveryDate.slice(0, 10));
     const prepared = (
       await post('sender', `/rooms/${room.id}/releases`, {
         sourceType: 'SITE_DELIVERY',
@@ -4575,6 +4578,397 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       });
     }
   });
+  it('publishes a recorded signed contract copy with distinct purpose and no business side effects', async () => {
+    const { room, contract, contracts, actor, input, otherProjectId, bytes } =
+      await customerFileFixture();
+    for (const status of ['INTERNAL_REVIEW', 'SIGNED'])
+      await contracts.transition(actor, otherProjectId, contract.id, {
+        status,
+        ...(status === 'SIGNED' ? { signedDate: new Date('2026-01-02Z') } : {}),
+      });
+    const path = `/rooms/${room.id}/contract-files?sourceId=${contract.id}`;
+    const signed = (
+      await get('sender', `${path}&purpose=RECORDED_SIGNED_COPY`).expect(200)
+    ).body;
+    const review = (await get('sender', path).expect(200)).body;
+    expect(signed.sourceFingerprint).not.toBe(review.sourceFingerprint);
+    const sources = (
+      await get('sender', `/rooms/${room.id}/release-sources`).expect(200)
+    ).body;
+    for (const purpose of ['CUSTOMER_REVIEW_FILE', 'RECORDED_SIGNED_COPY'])
+      expect(sources).toContainEqual(
+        expect.objectContaining({
+          sourceType: 'CONTRACT_FILE',
+          sourceId: contract.id,
+          purpose,
+        }),
+      );
+    const before = {
+      contract: await db.contract.findUniqueOrThrow({
+        where: { id: contract.id },
+      }),
+      payments: await db.customerPayment.count({
+        where: { projectId: otherProjectId },
+      }),
+      history: await db.contractStatusHistory.count({
+        where: { contractId: contract.id },
+      }),
+    };
+    const payload = {
+      ...input,
+      purpose: 'RECORDED_SIGNED_COPY',
+      sourceFingerprint: signed.sourceFingerprint,
+    };
+    const prepared = (
+      await post('sender', `/rooms/${room.id}/releases`, payload).expect(201)
+    ).body;
+    expect(
+      (await post('sender', `/rooms/${room.id}/releases`, payload).expect(201))
+        .body.id,
+    ).toBe(prepared.id);
+    await post('sender', `/rooms/${room.id}/releases`, {
+      ...payload,
+      purpose: 'CUSTOMER_REVIEW_FILE',
+      sourceFingerprint: review.sourceFingerprint,
+    }).expect(409);
+    const other = (
+      await post('sender', `/rooms/${room.id}/releases`, {
+        ...payload,
+        purpose: 'CUSTOMER_REVIEW_FILE',
+        sourceFingerprint: review.sourceFingerprint,
+        clientKey: randomUUID(),
+      }).expect(201)
+    ).body;
+    expect(other.id).not.toBe(prepared.id);
+    const stored = await db.chatDocumentRelease.findUniqueOrThrow({
+      where: { id: prepared.id },
+      include: { contractDocument: true },
+    });
+    expect(stored.sourceSnapshot).toMatchObject({
+      purpose: 'RECORDED_SIGNED_COPY',
+    });
+    expect(stored.contractDocument?.sourceSnapshot).toEqual(
+      stored.sourceSnapshot,
+    );
+    await post('sender', `/releases/${prepared.id}/publish`, {
+      confirmed: true,
+    }).expect(403);
+    expect(
+      (
+        await getBinary('publisher', `/releases/${prepared.id}/preview`).expect(
+          200,
+        )
+      ).body,
+    ).toEqual(bytes);
+    const checked = (
+      await get('publisher', `/releases/${prepared.id}/review`).expect(200)
+    ).body;
+    await post('publisher', `/releases/${prepared.id}/publish`, {
+      confirmed: true,
+      recipientHash: checked.recipientHash,
+    }).expect(201);
+    expect(
+      (
+        await getBinary('guest', `/releases/${prepared.id}/download`).expect(
+          200,
+        )
+      ).body,
+    ).toEqual(bytes);
+    expect({
+      contract: await db.contract.findUniqueOrThrow({
+        where: { id: contract.id },
+      }),
+      payments: await db.customerPayment.count({
+        where: { projectId: otherProjectId },
+      }),
+      history: await db.contractStatusHistory.count({
+        where: { contractId: contract.id },
+      }),
+    }).toEqual(before);
+    expect(
+      await db.contractDocument.count({ where: { contractId: contract.id } }),
+    ).toBe(2);
+  });
+  it('requires recorded signed contract states and dates and rejects foreign purpose inputs', async () => {
+    const { room, contract, contracts, actor, otherProjectId, input, payment } =
+      await customerFileFixture();
+    const path = `/rooms/${room.id}/contract-files?sourceId=${contract.id}&purpose=RECORDED_SIGNED_COPY`;
+    await get('sender', path).expect(409);
+    for (const status of [
+      'INTERNAL_REVIEW',
+      'SIGNED',
+      'ACTIVE',
+      'SUSPENDED',
+      'ACTIVE',
+      'COMPLETED',
+    ]) {
+      await contracts.transition(actor, otherProjectId, contract.id, {
+        status,
+      });
+      await get('sender', path).expect(
+        status === 'INTERNAL_REVIEW' ? 409 : 200,
+      );
+    }
+    for (const data of [
+      { signedDate: null },
+      { status: 'CANCELLED', signedDate: new Date() },
+      { status: 'TERMINATED', signedDate: new Date() },
+    ]) {
+      await db.contract.update({ where: { id: contract.id }, data });
+      await get('sender', path).expect(409);
+    }
+    await get(
+      'sender',
+      `/rooms/${room.id}/contract-files?sourceId=${contract.id}&purpose=VERIFIED_SIGNATURE`,
+    ).expect(400);
+    await get(
+      'sender',
+      `/rooms/${room.id}/payment-files?sourceId=${payment.id}&purpose=RECORDED_SIGNED_COPY`,
+    ).expect(400);
+    await post('sender', `/rooms/${room.id}/releases`, {
+      ...input,
+      sourceType: 'CUSTOMER_PAYMENT_FILE',
+      sourceId: payment.id,
+      purpose: 'RECORDED_SIGNED_COPY',
+    }).expect(400);
+  });
+  it('publishes recorded signed appendices with appendix-only authority and pins their actual signing date', async () => {
+    const {
+      room,
+      contract,
+      contracts,
+      actor,
+      input,
+      otherProjectId,
+      role,
+      bytes,
+    } = await customerFileFixture(false, [
+      'appendix.create',
+      'appendix.approve',
+    ]);
+    for (const status of ['INTERNAL_REVIEW', 'SIGNED'])
+      await contracts.transition(actor, otherProjectId, contract.id, {
+        status,
+      });
+    const appendix = await contracts.createAppendix(
+      actor,
+      otherProjectId,
+      contract.id,
+      {
+        appendixNumber: randomUUID(),
+        type: 'SCHEDULE_CHANGE',
+        title: 'Phụ lục ghi nhận ký',
+        valueChange: '0',
+        currency: 'VND',
+        idempotencyKey: randomUUID(),
+      },
+    );
+    const path = `/rooms/${room.id}/contract-files?sourceId=${contract.id}&appendixId=${appendix.id}&purpose=RECORDED_SIGNED_COPY`;
+    for (const status of ['INTERNAL_REVIEW', 'APPROVED'])
+      await contracts.transitionAppendix(
+        actor,
+        otherProjectId,
+        contract.id,
+        appendix.id,
+        { status },
+      );
+    await get('sender', path).expect(409);
+    await contracts.transitionAppendix(
+      actor,
+      otherProjectId,
+      contract.id,
+      appendix.id,
+      { status: 'SIGNED', signedDate: new Date('2026-01-03Z') },
+    );
+    const original = await db.contractAppendix.findUniqueOrThrow({
+      where: { id: appendix.id },
+    });
+    await db.contractAppendix.update({
+      where: { id: appendix.id },
+      data: { signedDate: null },
+    });
+    await get('sender', path).expect(409);
+    await db.contractAppendix.update({
+      where: { id: appendix.id },
+      data: { signedDate: original.signedDate, updatedAt: original.updatedAt },
+    });
+    const assignments = await db.userRole.findMany({
+      where: {
+        userId: { in: [actor.userId, users.publisher!.id] },
+        roleId: { not: role.id },
+        status: 'active',
+      },
+      select: { id: true },
+    });
+    await db.userRole.updateMany({
+      where: { id: { in: assignments.map((a) => a.id) } },
+      data: { status: 'archived' },
+    });
+    await db.rolePermission.deleteMany({
+      where: {
+        roleId: role.id,
+        permission: { code: { in: ['contract.update', 'appendix.approve'] } },
+      },
+    });
+    const signingRole = await db.role.create({
+      data: {
+        organizationId: orgId,
+        code: randomUUID(),
+        name: 'Ghi nhận phụ lục',
+        permissions: {
+          create: { permission: { connect: { code: 'appendix.approve' } } },
+        },
+      },
+    });
+    const signingAssignment = await db.userRole.create({
+      data: {
+        organizationId: orgId,
+        userId: actor.userId,
+        roleId: signingRole.id,
+        scopeType: 'SELF',
+      },
+    });
+    try {
+      await get('sender', path).expect(404);
+      await db.userRole.update({
+        where: { id: signingAssignment.id },
+        data: { scopeType: 'ORGANIZATION' },
+      });
+      const candidates = (await get('sender', path).expect(200)).body;
+      const sources = (
+        await get('sender', `/rooms/${room.id}/release-sources`).expect(200)
+      ).body;
+      expect(sources).toContainEqual(
+        expect.objectContaining({
+          sourceType: 'CONTRACT_FILE',
+          appendixId: appendix.id,
+          purpose: 'RECORDED_SIGNED_COPY',
+        }),
+      );
+      expect(sources).not.toContainEqual(
+        expect.objectContaining({
+          sourceType: 'CONTRACT_FILE',
+          appendixId: appendix.id,
+          purpose: 'CUSTOMER_REVIEW_FILE',
+        }),
+      );
+      const prepared = (
+        await post('sender', `/rooms/${room.id}/releases`, {
+          ...input,
+          appendixId: appendix.id,
+          purpose: 'RECORDED_SIGNED_COPY',
+          sourceFingerprint: candidates.sourceFingerprint,
+        }).expect(201)
+      ).body;
+      expect(
+        (
+          await getBinary(
+            'publisher',
+            `/releases/${prepared.id}/preview`,
+          ).expect(200)
+        ).body,
+      ).toEqual(bytes);
+      const review = (
+        await get('publisher', `/releases/${prepared.id}/review`).expect(200)
+      ).body;
+      await db.contractAppendix.update({
+        where: { id: appendix.id },
+        data: {
+          signedDate: new Date('2026-01-04Z'),
+          updatedAt: original.updatedAt,
+        },
+      });
+      await post('publisher', `/releases/${prepared.id}/publish`, {
+        confirmed: true,
+        recipientHash: review.recipientHash,
+      }).expect(409);
+      await db.contractAppendix.update({
+        where: { id: appendix.id },
+        data: {
+          signedDate: original.signedDate,
+          updatedAt: original.updatedAt,
+        },
+      });
+      await post('publisher', `/releases/${prepared.id}/publish`, {
+        confirmed: true,
+        recipientHash: review.recipientHash,
+      }).expect(201);
+      expect(
+        (
+          await getBinary('guest', `/releases/${prepared.id}/download`).expect(
+            200,
+          )
+        ).body,
+      ).toEqual(bytes);
+      expect(
+        await db.contractAppendix.findUniqueOrThrow({
+          where: { id: appendix.id },
+        }),
+      ).toEqual(original);
+    } finally {
+      await db.userRole.updateMany({
+        where: { id: { in: assignments.map((a) => a.id) } },
+        data: { status: 'active' },
+      });
+    }
+  });
+  it.each(['source', 'permission'] as const)(
+    'rechecks recorded signed copy %s after storage I/O',
+    async (change) => {
+      const { room, contract, contracts, actor, input, otherProjectId } =
+        await customerFileFixture();
+      for (const status of ['INTERNAL_REVIEW', 'SIGNED'])
+        await contracts.transition(actor, otherProjectId, contract.id, {
+          status,
+        });
+      const candidates = (
+        await get(
+          'sender',
+          `/rooms/${room.id}/contract-files?sourceId=${contract.id}&purpose=RECORDED_SIGNED_COPY`,
+        ).expect(200)
+      ).body;
+      const assignments = await db.userRole.findMany({
+        where: { userId: actor.userId, status: 'active' },
+        select: { id: true },
+      });
+      const storage = app.get(FileStorage),
+        stream = storage.stream.bind(storage);
+      const reading = vi
+        .spyOn(storage, 'stream')
+        .mockImplementationOnce(async (key) => {
+          if (change === 'source')
+            await contracts.transition(actor, otherProjectId, contract.id, {
+              status: 'ACTIVE',
+            });
+          else
+            await db.userRole.updateMany({
+              where: { id: { in: assignments.map((a) => a.id) } },
+              data: { status: 'archived' },
+            });
+          return stream(key);
+        });
+      try {
+        await post('sender', `/rooms/${room.id}/releases`, {
+          ...input,
+          purpose: 'RECORDED_SIGNED_COPY',
+          sourceFingerprint: candidates.sourceFingerprint,
+        }).expect(change === 'permission' ? 404 : 409);
+      } finally {
+        reading.mockRestore();
+        if (change === 'permission')
+          await db.userRole.updateMany({
+            where: { id: { in: assignments.map((a) => a.id) } },
+            data: { status: 'active' },
+          });
+      }
+      expect(
+        await db.contractDocument.count({ where: { contractId: contract.id } }),
+      ).toBe(0);
+      expect(
+        await db.chatDocumentRelease.count({ where: { roomId: room.id } }),
+      ).toBe(0);
+    },
+  );
   it('registers a contract appendix review file against its exact appendix source', async () => {
     const { room, contract, contracts, actor, input, otherProjectId, bytes } =
       await customerFileFixture();

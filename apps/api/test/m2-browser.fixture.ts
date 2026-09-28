@@ -349,6 +349,19 @@ export async function createM2BrowserFixture() {
       contractFilename,
       contractFileText,
     );
+    for (const status of ['INTERNAL_REVIEW', 'SIGNED'])
+      await domain(
+        'sender',
+        `/projects/${project.id}/contracts/${contract.id}/transition`,
+        { status },
+      );
+    const recordedSignedFilename = 'ban-luu-ho-so-da-ky.txt';
+    const recordedSignedFileText =
+      'Bản lưu theo hồ sơ đã ký; trạng thái do người có quyền ghi nhận, không xác minh chữ ký.';
+    const recordedSignedFile = await uploadProjectFile(
+      recordedSignedFilename,
+      recordedSignedFileText,
+    );
     const schedules = await domain<{ id: string }[]>(
       'sender',
       `/projects/${project.id}/contracts/${contract.id}/payment-schedules`,
@@ -535,6 +548,9 @@ export async function createM2BrowserFixture() {
       contractFileId: contractFile.id,
       contractFilename,
       contractFileText,
+      recordedSignedFileId: recordedSignedFile.id,
+      recordedSignedFilename,
+      recordedSignedFileText,
       paymentId: payment.id,
       paymentFileId: paymentFile.id,
       paymentFilename,

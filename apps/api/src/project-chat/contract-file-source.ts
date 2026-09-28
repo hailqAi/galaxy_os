@@ -18,6 +18,7 @@ export type CustomerFileInput = {
   sourceType: 'CONTRACT_FILE' | 'CUSTOMER_PAYMENT_FILE' | 'SITE_DELIVERY';
   sourceId: string;
   appendixId?: string;
+  purpose?: 'CUSTOMER_REVIEW_FILE' | 'RECORDED_SIGNED_COPY';
 };
 
 export async function lockCustomerFileOwnership(tx: Prisma.TransactionClient) {
@@ -53,6 +54,9 @@ export async function customerFileSource(
   input: CustomerFileInput,
   registration = false,
 ) {
+  if (input.purpose && input.sourceType !== 'CONTRACT_FILE')
+    throw new BadRequestException('Mục đích này chỉ dành cho file hợp đồng');
+  const signedCopy = input.purpose === 'RECORDED_SIGNED_COPY';
   if (input.sourceType === 'SITE_DELIVERY') {
     if (input.appendixId)
       throw new BadRequestException('Giao hàng không có phụ lục');
@@ -142,7 +146,9 @@ export async function customerFileSource(
     throw new BadRequestException('Khoản thu không có phụ lục');
   const permission = paymentFile
     ? 'receivable.payment.record'
-    : 'contract.update';
+    : signedCopy && input.appendixId
+      ? 'appendix.approve'
+      : 'contract.update';
   if (registration) {
     const bindings = actorsForPermission(actor, permission);
     if (
@@ -163,13 +169,59 @@ export async function customerFileSource(
     sourceId: input.sourceId,
     appendixId: input.appendixId,
   });
+  let recordedSigning: Prisma.InputJsonObject | undefined;
+  if (signedCopy) {
+    const contract = await tx.contract.findUniqueOrThrow({
+      where: { id: input.sourceId },
+      select: { status: true, signedDate: true },
+    });
+    if (
+      !['SIGNED', 'ACTIVE', 'SUSPENDED', 'COMPLETED'].includes(
+        contract.status,
+      ) ||
+      !contract.signedDate
+    )
+      throw new ConflictException(
+        'Hợp đồng chưa ghi nhận trạng thái và ngày ký',
+      );
+    const appendix = input.appendixId
+      ? await tx.contractAppendix.findFirst({
+          where: { id: input.appendixId, contractId: input.sourceId },
+          select: { id: true, status: true, signedDate: true, updatedAt: true },
+        })
+      : null;
+    if (
+      input.appendixId &&
+      (!appendix ||
+        !['SIGNED', 'EFFECTIVE'].includes(appendix.status) ||
+        !appendix.signedDate)
+    )
+      throw new ConflictException(
+        'Phụ lục chưa ghi nhận trạng thái và ngày ký',
+      );
+    recordedSigning = {
+      contractStatus: contract.status,
+      contractSignedDate: contract.signedDate.toISOString(),
+      ...(appendix
+        ? {
+            appendix: {
+              id: appendix.id,
+              status: appendix.status,
+              signedDate: appendix.signedDate!.toISOString(),
+              updatedAt: appendix.updatedAt.toISOString(),
+            },
+          }
+        : {}),
+    };
+  }
   const snapshot = {
     ...source.snapshot,
     sourceType: input.sourceType,
     purpose: paymentFile
       ? 'Chứng từ khoản thu do nhân viên cung cấp'
-      : 'CUSTOMER_REVIEW_FILE',
+      : (input.purpose ?? 'CUSTOMER_REVIEW_FILE'),
     sourceUpdatedAt: source.updatedAt.toISOString(),
+    ...(recordedSigning ? { recordedSigning } : {}),
   };
   return {
     snapshot,

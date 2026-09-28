@@ -493,32 +493,6 @@ export class ProjectChatService {
             version: 1,
             name: source.title,
           });
-          if (
-            input.sourceType === 'CONTRACT' ||
-            input.sourceType === 'CUSTOMER_PAYMENT_RECORD'
-          ) {
-            const fileInput: CustomerFileInput = {
-              ...input,
-              sourceType:
-                input.sourceType === 'CONTRACT'
-                  ? 'CONTRACT_FILE'
-                  : 'CUSTOMER_PAYMENT_FILE',
-            };
-            const review = await customerFileSource(
-              tx,
-              await this.freshActor(tx, actor),
-              projectId,
-              fileInput,
-              true,
-            );
-            result.push({
-              ...input,
-              sourceType: fileInput.sourceType,
-              sourceFingerprint: review.fingerprint,
-              version: 1,
-              name: `${source.title} · ${fileInput.sourceType === 'CONTRACT_FILE' ? 'file gửi khách xem xét' : 'chứng từ do nhân viên cung cấp'}`,
-            });
-          }
         } catch (e) {
           if (
             !(
@@ -528,6 +502,58 @@ export class ProjectChatService {
             )
           )
             throw e;
+        }
+      }
+      // Purpose eligibility is independent: appendix.approve need not imply contract.update.
+      for (const input of snapshots) {
+        if (
+          input.sourceType !== 'CONTRACT' &&
+          input.sourceType !== 'CUSTOMER_PAYMENT_RECORD'
+        )
+          continue;
+        const purposes =
+          input.sourceType === 'CONTRACT'
+            ? (['CUSTOMER_REVIEW_FILE', 'RECORDED_SIGNED_COPY'] as const)
+            : [undefined];
+        for (const purpose of purposes) {
+          const fileInput: CustomerFileInput = {
+            ...input,
+            sourceType:
+              input.sourceType === 'CONTRACT'
+                ? 'CONTRACT_FILE'
+                : 'CUSTOMER_PAYMENT_FILE',
+            ...(purpose ? { purpose } : {}),
+          };
+          try {
+            const source = await customerFileSource(
+              tx,
+              await this.freshActor(tx, actor),
+              projectId,
+              fileInput,
+              true,
+            );
+            result.push({
+              ...fileInput,
+              sourceFingerprint: source.fingerprint,
+              version: 1,
+              name: `${source.snapshot.title} · ${
+                purpose === 'RECORDED_SIGNED_COPY'
+                  ? 'Bản lưu theo hồ sơ đã ký (trạng thái do người có quyền ghi nhận)'
+                  : purpose === 'CUSTOMER_REVIEW_FILE'
+                    ? 'file gửi khách xem xét'
+                    : 'chứng từ do nhân viên cung cấp'
+              }`,
+            });
+          } catch (error) {
+            if (
+              !(
+                error instanceof ForbiddenException ||
+                error instanceof NotFoundException ||
+                error instanceof ConflictException
+              )
+            )
+              throw error;
+          }
         }
       }
       const deliveries = await tx.siteDelivery.findMany({
@@ -563,7 +589,7 @@ export class ProjectChatService {
             fileId: file.id,
             version: file.version,
             sourceFingerprint: source.fingerprint,
-            name: 'Nhân viên ghi nhận giao tại công trường',
+            name: `${source.snapshot.title} · ${delivery.deliveryDate.toISOString().slice(0, 10)} · ${delivery.recipient} · Nhân viên ghi nhận`,
           });
         } catch (error) {
           if (
@@ -1898,6 +1924,9 @@ export class ProjectChatService {
           fileId: input.fileId,
           version: input.version,
           sourceFingerprint: input.sourceFingerprint,
+          ...(input.purpose === 'RECORDED_SIGNED_COPY'
+            ? { purpose: input.purpose }
+            : {}),
         }),
       )
       .digest('hex');
@@ -2281,6 +2310,8 @@ export class ProjectChatService {
     roomId: string,
     input: ChatReleaseDto,
   ) {
+    if (input.purpose && input.sourceType !== 'CONTRACT_FILE')
+      throw new BadRequestException('Mục đích này chỉ dành cho file hợp đồng');
     if (
       input.sourceType === 'CONTRACT_FILE' ||
       input.sourceType === 'CUSTOMER_PAYMENT_FILE' ||
@@ -2407,6 +2438,19 @@ export class ProjectChatService {
         paymentFile ||
         r.siteDeliveryId
       ) {
+        const persistedPurpose =
+          document?.sourceSnapshot &&
+          typeof document.sourceSnapshot === 'object' &&
+          !Array.isArray(document.sourceSnapshot)
+            ? document.sourceSnapshot.purpose
+            : undefined;
+        if (
+          document &&
+          persistedPurpose !== undefined &&
+          persistedPurpose !== 'CUSTOMER_REVIEW_FILE' &&
+          persistedPurpose !== 'RECORDED_SIGNED_COPY'
+        )
+          throw new ConflictException('Mục đích file hợp đồng không hợp lệ');
         const fileInput: CustomerFileInput = r.siteDeliveryId
           ? { sourceType: 'SITE_DELIVERY', sourceId: r.siteDeliveryId }
           : paymentFile
@@ -2418,6 +2462,10 @@ export class ProjectChatService {
                 sourceType: 'CONTRACT_FILE',
                 sourceId: document!.contractId,
                 appendixId: document!.appendixId ?? undefined,
+                purpose:
+                  persistedPurpose === 'RECORDED_SIGNED_COPY'
+                    ? 'RECORDED_SIGNED_COPY'
+                    : 'CUSTOMER_REVIEW_FILE',
               };
         await tx.$queryRaw(
           Prisma.sql`SELECT "id" FROM "FileAsset" WHERE "id"=${r.fileAssetId}::uuid AND "organizationId"=${actor.organizationId}::uuid FOR UPDATE`,

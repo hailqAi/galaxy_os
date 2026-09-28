@@ -152,12 +152,18 @@ export class ChatReleaseDto {
   @Min(1)
   version!: number;
   @IsOptional() @IsUUID() appendixId?: string;
+  @IsOptional()
+  @IsIn(['CUSTOMER_REVIEW_FILE', 'RECORDED_SIGNED_COPY'])
+  purpose?: 'CUSTOMER_REVIEW_FILE' | 'RECORDED_SIGNED_COPY';
   @IsOptional() @IsUUID() clientKey?: string;
   @IsOptional() @Matches(/^[0-9a-f]{64}$/) sourceFingerprint?: string;
 }
 export class ChatCustomerFilesQuery {
   @IsUUID() sourceId!: string;
   @IsOptional() @IsUUID() appendixId?: string;
+  @IsOptional()
+  @IsIn(['CUSTOMER_REVIEW_FILE', 'RECORDED_SIGNED_COPY'])
+  purpose?: 'CUSTOMER_REVIEW_FILE' | 'RECORDED_SIGNED_COPY';
 }
 export class ChatPublishDto {
   @IsIn([true]) confirmed!: boolean;
