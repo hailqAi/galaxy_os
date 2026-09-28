@@ -1,4 +1,4 @@
-name = "galaxy_security_review"
+name = "galaxy_astra"
 description = "T3: review quyền, clock, publication, race và browser lifecycle"
 model = "gpt-6-astra"
 model_reasoning_effort = "high"

@@ -1,4 +1,4 @@
-name = "galaxy_coding"
+name = "galaxy_sol"
 description = "T2: UI/test/service nhỏ với contract đã chốt"
 model = "gpt-6-sol"
 model_reasoning_effort = "medium"
