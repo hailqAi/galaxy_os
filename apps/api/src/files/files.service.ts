@@ -798,14 +798,24 @@ export class FilesService {
     fileId: string,
     includeDeleted = false,
   ) {
-    const rows = includeDeleted
-      ? await tx.$queryRaw<
-          { id: string }[]
-        >`SELECT "id" FROM "FileAsset" WHERE "id" = ${fileId}::uuid AND "organizationId" = ${actor.organizationId}::uuid FOR UPDATE`
-      : await tx.$queryRaw<
-          { id: string }[]
-        >`SELECT "id" FROM "FileAsset" WHERE "id" = ${fileId}::uuid AND "organizationId" = ${actor.organizationId}::uuid AND "deletedAt" IS NULL FOR UPDATE`;
+    const rows = await tx.$queryRaw<
+      { id: string; publicationBound: boolean }[]
+    >(Prisma.sql`
+      SELECT "id", EXISTS (
+        SELECT 1 FROM "ChatDocumentRelease" r
+        WHERE r."fileAssetId" = f."id" AND r."publishedAt" IS NOT NULL
+      ) AS "publicationBound"
+      FROM "FileAsset" f
+      WHERE f."id" = ${fileId}::uuid AND f."organizationId" = ${actor.organizationId}::uuid
+        ${includeDeleted ? Prisma.empty : Prisma.sql`AND f."deletedAt" IS NULL`}
+      FOR UPDATE OF f
+    `);
     if (!rows.length) throw new NotFoundException('File not found');
+    // Access revocation belongs to publication; generic file commands cannot rewrite history.
+    if (rows[0]!.publicationBound)
+      throw new ConflictException(
+        'Tài liệu đã phát hành cho khách không được sửa hoặc xóa qua thao tác file.',
+      );
   }
   private projectAttachmentGuard(
     actor: CurrentActor,

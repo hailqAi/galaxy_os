@@ -894,6 +894,42 @@ describe('FilesService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
     expect(tx.fileAsset.update).not.toHaveBeenCalled();
   });
+  it.each(['remove', 'update', 'restore'] as const)(
+    'blocks generic %s of a binary pinned by a customer publication',
+    async (operation) => {
+      const item = {
+        id: 'file',
+        deletedAt: operation === 'restore' ? new Date() : null,
+        attachments: [{ entityType: 'Project', entityId: 'project' }],
+      };
+      const tx = {
+        $queryRaw: vi
+          .fn()
+          .mockResolvedValue([{ id: 'file', publicationBound: true }]),
+        fileAsset: { update: vi.fn().mockResolvedValue(item) },
+        projectRequiredDocument: { findMany: vi.fn().mockResolvedValue([]) },
+        entityAttachment: { findMany: vi.fn().mockResolvedValue([]) },
+        activity: { create: vi.fn() },
+      };
+      const prisma = {
+        fileAsset: { findFirst: vi.fn().mockResolvedValue(item) },
+        projectRequiredDocument: { findMany: vi.fn().mockResolvedValue([]) },
+        entityAttachment: { findMany: vi.fn().mockResolvedValue([]) },
+        $transaction: vi.fn((work) => work(tx)),
+      } as unknown as PrismaService;
+      const entities = {
+        assertView: vi.fn().mockResolvedValue({}),
+      } as unknown as BusinessEntityPolicy;
+      const service = new FilesService(prisma, entities, {} as FileStorage);
+      const command =
+        operation === 'update'
+          ? service.update(actor, 'file', { category: 'Changed' })
+          : service[operation](actor, 'file');
+      await expect(command).rejects.toBeInstanceOf(ConflictException);
+      expect(tx.fileAsset.update).not.toHaveBeenCalled();
+    },
+  );
+
   it('soft deletes and prevents normal reads', async () => {
     const item = {
       id: 'file',

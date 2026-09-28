@@ -1785,11 +1785,30 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
     ).toEqual(bytes);
   });
   it('pins approved drawing and sample sources without borrowing another approval or Project', async () => {
+    // This regression must also run by itself; do not borrow the proposal test's grants.
+    await post('authority', `/projects/${otherProjectId}/authorities`, {
+      userId: users.manager!.id,
+      actions: ['CREATE', 'ACCESS_ADMIN', 'HISTORY'],
+      roomCeiling: ['READ', 'SEND', 'UPLOAD', 'DOWNLOAD', 'HISTORY'],
+    }).expect(201);
+    await post('authority', `/projects/${otherProjectId}/authorities`, {
+      userId: users.publisher!.id,
+      actions: ['PUBLISH'],
+      roomCeiling: [],
+    }).expect(201);
+    await db.organizationMembership.updateMany({
+      where: { organizationId: orgId, userId: users.guest!.id },
+      data: { kind: 'EXTERNAL' },
+    });
+    await post('authority', `/projects/${otherProjectId}/participants`, {
+      userId: users.guest!.id,
+    }).expect(201);
     const rights = [
       'production.read',
       'file.read',
       'file.download',
       'file.upload',
+      'file.delete',
     ];
     const role = await db.role.create({
       data: {
@@ -1971,6 +1990,16 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       confirmed: true,
       recipientHash: review.recipientHash,
     }).expect(201);
+    expect(
+      (await get('guest', `/releases/${release.id}/download`).expect(200)).text,
+    ).toBe(bytes.toString());
+    await expect(
+      app.get(FilesService).remove(creator, file.id),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(
+      (await db.fileAsset.findUniqueOrThrow({ where: { id: file.id } }))
+        .deletedAt,
+    ).toBeNull();
     expect(
       (await get('guest', `/releases/${release.id}/download`).expect(200)).text,
     ).toBe(bytes.toString());

@@ -5,7 +5,27 @@ let fixture: Awaited<ReturnType<typeof createM2BrowserFixture>>;
 test.beforeAll(async () => {
   fixture = await createM2BrowserFixture();
 });
-async function login(page: Page, actor: string) {
+async function login(page: Page, actor: string, throughUi = false) {
+  if (!throughUi) {
+    // Reuse the fixture's real login session in this persona's own context.
+    // Logging in again for every scenario exhausts the production login limiter.
+    const cookie = fixture.users[actor]!.cookie;
+    const separator = cookie.indexOf('=');
+    expect(separator).toBeGreaterThan(0);
+    await page.context().addCookies([
+      {
+        name: cookie.slice(0, separator),
+        value: cookie.slice(separator + 1),
+        url: process.env.APP_PUBLIC_ORIGIN!,
+        httpOnly: true,
+        secure: process.env.APP_PUBLIC_ORIGIN!.startsWith('https:'),
+        sameSite: 'Lax',
+      },
+    ]);
+    await page.goto('/work');
+    await page.getByRole('link', { name: 'Project browser M2-A' }).click();
+    return;
+  }
   await page.goto('/login?returnTo=/work');
   await page.getByLabel('Email đăng nhập').fill(fixture.users[actor]!.email);
   await page.getByLabel('Mật khẩu', { exact: true }).fill(fixture.password);
@@ -21,7 +41,7 @@ test('sender persists text/file across reload; viewer cannot send; revoke clears
   const page = await sender.newPage(),
     readOnly = await viewer.newPage();
   try {
-    await login(page, 'sender');
+    await login(page, 'sender', true);
     await page.getByRole('button', { name: /Nội bộ thử nghiệm/ }).click();
     await expect(page.getByLabel('Tin nhắn', { exact: true })).toBeEnabled();
     await page
@@ -137,13 +157,14 @@ test('explicit Project admin manages access without receiving conversation conte
 test('management without an open room clears identities after a cross-tab account change', async ({
   page,
 }) => {
-  await login(page, 'manager');
+  // Logout must revoke this browser session, not the fixture's API control session.
+  await login(page, 'manager', true);
   await page.getByText('Quản trị cuộc trao đổi', { exact: true }).click();
   await expect(page.getByLabel('Người được cấp')).toBeVisible();
   const other = await page.context().newPage();
   await other.goto('/work');
   await other.getByRole('button', { name: 'Đăng xuất', exact: true }).click();
-  await login(other, 'guest');
+  await login(other, 'guest', true);
   await expect(page.getByLabel('Người được cấp')).toHaveCount(0);
   await other.close();
 });
@@ -569,7 +590,7 @@ test('reload warns only for a dirty draft and never restores it from storage', a
   expect(cleanDialogs).toBe(0);
 });
 
-test('restores a real BFCache document and rechecks revoked room access before showing content', async ({
+test('real document Back revalidates access after restore or confirmed no-store reload', async ({
   page,
   browser,
 }) => {
@@ -607,10 +628,25 @@ test('restores a real BFCache document and rechecks revoked room access before s
       reasons,
     }),
   );
-  expect(
-    restored.some((e: { persisted: boolean }) => e.persisted),
-    'Yêu cầu pageshow.persisted từ browser thật',
-  ).toBe(true);
+  const assertNavigation = async (shows: { persisted: boolean }[]) => {
+    if (shows.some((e) => e.persisted)) return 'RESTORED_VERIFIED';
+    // OWNER_DIRECTION 2026-09-28: no-store stays; real reload must still authorize.
+    expect(JSON.stringify(reasons)).toMatch(
+      /MainResourceHasCacheControlNoStore|JsNetworkRequestReceivedCacheControlNoStoreResource/,
+    );
+    expect(
+      await page.evaluate(
+        () =>
+          (
+            performance.getEntriesByType(
+              'navigation',
+            )[0] as PerformanceNavigationTiming
+          ).type,
+      ),
+    ).toBe('back_forward');
+    return 'NOT_ELIGIBLE_CONFIRMED';
+  };
+  console.log('NAVIGATION_SECURITY', await assertNavigation(restored));
   expect(
     restored
       .filter((e: { persisted: boolean }) => e.persisted)
@@ -647,12 +683,29 @@ test('restores a real BFCache document and rechecks revoked room access before s
     },
   );
   expect(revoked.status).toBe(201);
+  reasons.length = 0;
+  const revalidated = page.waitForResponse(
+    (response) =>
+      response
+        .url()
+        .endsWith(`/project-chat/projects/${fixture.projectId}/rooms`) &&
+      response.request().method() === 'GET',
+  );
   await page.goBack();
-  expect(
-    (await page.evaluate(() => Reflect.get(window, 'm2PageShows'))).some(
-      (e: { persisted: boolean }) => e.persisted,
+  const access = await revalidated;
+  expect([200, 404]).toContain(access.status());
+  if (access.status() === 200)
+    expect(
+      (await access.json()).rooms.some(
+        (r: { id: string }) => r.id === fixture.roomId,
+      ),
+    ).toBe(false);
+  console.log(
+    'NAVIGATION_AFTER_REVOKE',
+    await assertNavigation(
+      await page.evaluate(() => Reflect.get(window, 'm2PageShows')),
     ),
-  ).toBe(true);
+  );
   await expect(
     page.getByRole('button', { name: /Nội bộ thử nghiệm/ }),
   ).toHaveCount(0);
