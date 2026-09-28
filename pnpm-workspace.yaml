@@ -5,3 +5,5 @@ onlyBuiltDependencies:
   - '@prisma/client'
   - '@prisma/engines'
   - prisma
+patchedDependencies:
+  '@vitest/runner@3.2.6': patches/@vitest__runner@3.2.6.patch
