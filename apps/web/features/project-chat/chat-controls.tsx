@@ -443,6 +443,7 @@ export type ReleaseList = {
 };
 type Source = {
   appendixId?: string;
+  purpose?: 'CUSTOMER_REVIEW_FILE' | 'RECORDED_SIGNED_COPY';
   sourceFingerprint?: string;
   sourceType?:
     | 'PROPOSAL'
@@ -455,6 +456,7 @@ type Source = {
     | 'PAYMENT'
     | 'CUSTOMER_PAYMENT_RECORD'
     | 'CUSTOMER_PAYMENT_FILE'
+    | 'SITE_DELIVERY'
     | 'DELIVERY_INSTALL';
   sourceId: string;
   fileId?: string;
@@ -474,12 +476,16 @@ export function releaseSourceKey(source: Source) {
     'CONTRACT_FILE',
     'CUSTOMER_PAYMENT_RECORD',
     'CUSTOMER_PAYMENT_FILE',
+    'SITE_DELIVERY',
   ].includes(source.sourceType ?? '')
     ? JSON.stringify([
         source.sourceType,
         source.sourceId,
         source.appendixId,
         source.sourceFingerprint,
+        source.purpose,
+        source.sourceType === 'SITE_DELIVERY' ? source.fileId : undefined,
+        source.sourceType === 'SITE_DELIVERY' ? source.version : undefined,
       ])
     : source.appendixId
       ? `${source.sourceId}:${source.appendixId}`
@@ -498,10 +504,13 @@ export function releasePrepareBody(
       source.sourceType ?? '',
     )
       ? file?.version
-      : source.sourceFingerprint
-        ? undefined
-        : source.version,
+      : source.sourceType === 'SITE_DELIVERY'
+        ? source.version
+        : source.sourceFingerprint
+          ? undefined
+          : source.version,
     appendixId: source.appendixId,
+    purpose: source.sourceType === 'CONTRACT_FILE' ? source.purpose : undefined,
     sourceFingerprint: source.sourceFingerprint,
     clientKey: source.sourceFingerprint ? clientKey : undefined,
   };
@@ -519,8 +528,10 @@ export function releasePrepareIdentity(
     source.sourceId,
     source.appendixId,
     source.sourceFingerprint,
-    file?.id,
-    file?.version,
+    source.purpose,
+    file?.id ?? source.fileId,
+    file?.version ??
+      (source.sourceType === 'SITE_DELIVERY' ? source.version : undefined),
   ]);
 }
 type Review = {
@@ -535,6 +546,7 @@ type Review = {
     title?: string;
     signedStatus?: string;
     sourceType?: string;
+    purpose?: string;
     handoverStatus?: string;
     file?: { id: string; version: number; filename: string };
   } | null;
@@ -578,6 +590,14 @@ export function SourceReviewLabel({
       </p>
     );
   }
+  if (source.sourceType === 'SITE_DELIVERY')
+    return (
+      <p>
+        Loại nguồn: Nhân viên ghi nhận giao tại công trường · phiên bản file{' '}
+        {source.file?.version ?? 'không rõ'}; không chứng minh khách đã ký hoặc
+        nghiệm thu
+      </p>
+    );
   return (
     <p>
       Loại nguồn: {source.title ?? source.type ?? source.sourceType} ·{' '}
@@ -586,7 +606,9 @@ export function SourceReviewLabel({
         : source.sourceType === 'CUSTOMER_PAYMENT_FILE'
           ? `Chứng từ khoản thu do nhân viên cung cấp · phiên bản file ${source.file?.version ?? 'không rõ'}; chưa xác nhận đối soát hoặc xác minh biên lai ngân hàng`
           : source.sourceType === 'CONTRACT_FILE'
-            ? `Bản file gửi khách xem xét · phiên bản file ${source.file?.version ?? 'không rõ'}; không xác nhận phê duyệt hoặc chữ ký`
+            ? source.purpose === 'RECORDED_SIGNED_COPY'
+              ? `Bản lưu theo hồ sơ đã ký (trạng thái do người có quyền ghi nhận) · phiên bản file ${source.file?.version ?? 'không rõ'}; chưa xác minh chữ ký của file`
+              : `Bản file gửi khách xem xét · phiên bản file ${source.file?.version ?? 'không rõ'}; không xác nhận phê duyệt hoặc chữ ký`
             : ['CONTRACT', 'PAYMENT', 'DELIVERY_INSTALL'].includes(
                   source.sourceType ?? '',
                 )
@@ -712,6 +734,8 @@ export function ReleasePanel({
     const query = new URLSearchParams({ sourceId: source.sourceId });
     if (source.sourceType === 'CONTRACT_FILE' && source.appendixId)
       query.set('appendixId', source.appendixId);
+    if (source.sourceType === 'CONTRACT_FILE' && source.purpose)
+      query.set('purpose', source.purpose);
     const selectedKey = releaseSourceKey(source);
     const path =
       source.sourceType === 'CONTRACT_FILE'
@@ -881,7 +905,9 @@ export function ReleasePanel({
           {needsFile && (
             <label>
               {source?.sourceType === 'CONTRACT_FILE'
-                ? 'File hợp đồng gửi khách xem xét'
+                ? source.purpose === 'RECORDED_SIGNED_COPY'
+                  ? 'Bản lưu hợp đồng theo hồ sơ đã ký'
+                  : 'File hợp đồng gửi khách xem xét'
                 : 'Chứng từ khoản thu do nhân viên cung cấp'}
               <select
                 value={fileKey}

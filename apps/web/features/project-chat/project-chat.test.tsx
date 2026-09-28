@@ -145,6 +145,96 @@ it('prepares an employee supplied payment file using its binary version and type
   });
 });
 
+it('pins site-delivery evidence despite a source fingerprint and isolates its retry identity', () => {
+  const source = {
+    sourceType: 'SITE_DELIVERY' as const,
+    sourceId: 'delivery',
+    sourceFingerprint: 'delivery-fingerprint',
+    fileId: 'evidence',
+    version: 2,
+    name: 'Giao tại công trường',
+  };
+  expect(releasePrepareBody(source, undefined, 'retry')).toMatchObject({
+    sourceType: 'SITE_DELIVERY',
+    sourceId: 'delivery',
+    fileId: 'evidence',
+    version: 2,
+    sourceFingerprint: 'delivery-fingerprint',
+    clientKey: 'retry',
+  });
+  expect(releaseSourceKey(source)).not.toBe(
+    releaseSourceKey({ ...source, fileId: 'another-evidence' }),
+  );
+  expect(releasePrepareIdentity('room', 'actor', source, undefined)).not.toBe(
+    releasePrepareIdentity(
+      'room',
+      'actor',
+      { ...source, version: 3 },
+      undefined,
+    ),
+  );
+});
+
+it('distinguishes signed-copy purpose from review purpose in keys and requests', () => {
+  const source = {
+    sourceType: 'CONTRACT_FILE' as const,
+    sourceId: 'contract',
+    sourceFingerprint: 'same-fingerprint',
+    purpose: 'CUSTOMER_REVIEW_FILE' as const,
+    version: 1,
+    name: 'C',
+  };
+  const signed = { ...source, purpose: 'RECORDED_SIGNED_COPY' as const };
+  expect(releaseSourceKey(source)).not.toBe(releaseSourceKey(signed));
+  expect(releasePrepareIdentity('room', 'actor', source, undefined)).not.toBe(
+    releasePrepareIdentity('room', 'actor', signed, undefined),
+  );
+  expect(
+    releasePrepareBody(
+      signed,
+      {
+        id: 'signed-file',
+        version: 4,
+        filename: 'signed.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: '42',
+      },
+      'key',
+    ),
+  ).toMatchObject({
+    purpose: 'RECORDED_SIGNED_COPY',
+    fileId: 'signed-file',
+    version: 4,
+  });
+});
+
+it('labels recorded signed copies and site deliveries without asserting verified signatures or acceptance', () => {
+  const signed = renderToStaticMarkup(
+    createElement(SourceReviewLabel, {
+      source: {
+        sourceType: 'CONTRACT_FILE',
+        purpose: 'RECORDED_SIGNED_COPY',
+        file: { id: 'f', version: 4, filename: 'signed.pdf' },
+      },
+    }),
+  );
+  expect(signed).toContain('Bản lưu theo hồ sơ đã ký');
+  expect(signed).toContain('trạng thái do người có quyền ghi nhận');
+  expect(signed).toContain('phiên bản file 4');
+  expect(signed).not.toContain('chữ ký đã xác minh');
+  const delivery = renderToStaticMarkup(
+    createElement(SourceReviewLabel, {
+      source: {
+        sourceType: 'SITE_DELIVERY',
+        file: { id: 'f', version: 2, filename: 'receipt.pdf' },
+      },
+    }),
+  );
+  expect(delivery).toContain('Nhân viên ghi nhận giao tại công trường');
+  expect(delivery).toContain('phiên bản file 2');
+  expect(delivery).not.toContain('đã nghiệm thu');
+});
+
 it('changes retry identity when actor, room, source revision or file version changes', () => {
   const source = {
     sourceType: 'CONTRACT_FILE' as const,

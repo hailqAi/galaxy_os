@@ -1,7 +1,8 @@
 'use client';
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { api } from '../../../lib/api';
+import { deliveryFailureKind, deliveryRequestBody } from './delivery-request';
 
 type WorkOrder = {
   id: string;
@@ -31,18 +32,187 @@ type WorkOrder = {
   }[];
 };
 
+type DeliveryOptions = {
+  workOrderId: string;
+  projectId: string;
+  lines: {
+    stockIssueLineId: string;
+    issueNumber: string;
+    itemCode: string;
+    unit: string;
+    lotNumber: string | null;
+    serialNumber: string | null;
+    quantity: string;
+  }[];
+  files: { id: string; version: number; filename: string }[];
+};
 export default function WorkOrderPage() {
   const id = String(useParams().id);
+  return <WorkOrderDetail key={id} id={id} />;
+}
+
+function WorkOrderDetail({ id }: { id: string }) {
   const [item, setItem] = useState<WorkOrder>();
   const [error, setError] = useState('');
-  const load = useCallback(
-    () =>
-      api<WorkOrder>(`/installation/work-orders/${id}`)
-        .then(setItem)
-        .catch((cause: Error) => setError(cause.message)),
-    [id],
-  );
-  useEffect(() => void load(), [load]);
+  const [options, setOptions] = useState<DeliveryOptions>();
+  const [optionsError, setOptionsError] = useState('');
+  const [lineId, setLineId] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [deliveryDate, setDeliveryDate] = useState('');
+  const [recipient, setRecipient] = useState('');
+  const [fileKey, setFileKey] = useState('');
+  const [pending, setPending] =
+    useState<ReturnType<typeof deliveryRequestBody>>();
+  const [deliveryNotice, setDeliveryNotice] = useState('');
+  const [deliveryBusy, setDeliveryBusy] = useState(false);
+  const scope = useRef(0);
+  const optionsGeneration = useRef(0);
+  const clearDelivery = useCallback(() => {
+    optionsGeneration.current++;
+    setOptions(undefined);
+    setPending(undefined);
+    setLineId('');
+    setFileKey('');
+    setQuantity('');
+    setDeliveryDate('');
+    setRecipient('');
+    setError('');
+    setOptionsError('');
+    setDeliveryNotice('');
+    setDeliveryBusy(false);
+  }, []);
+  const load = useCallback(() => {
+    const epoch = scope.current;
+    return api<WorkOrder>(`/installation/work-orders/${id}`)
+      .then((value) => {
+        if (scope.current === epoch) setItem(value);
+      })
+      .catch((cause: Error) => {
+        if (scope.current === epoch) setError(cause.message);
+      });
+  }, [id]);
+  const loadOptions = useCallback(() => {
+    const epoch = scope.current;
+    const generation = ++optionsGeneration.current;
+    return api<DeliveryOptions>(
+      `/installation/work-orders/${id}/delivery-options`,
+    )
+      .then((value) => {
+        if (
+          scope.current === epoch &&
+          optionsGeneration.current === generation
+        ) {
+          setOptions(value);
+          setLineId((selected) =>
+            value.lines.some((line) => line.stockIssueLineId === selected)
+              ? selected
+              : '',
+          );
+          setFileKey((selected) =>
+            value.files.some(
+              (file) => JSON.stringify([file.id, file.version]) === selected,
+            )
+              ? selected
+              : '',
+          );
+          setOptionsError('');
+        }
+      })
+      .catch((cause: unknown) => {
+        if (
+          scope.current === epoch &&
+          optionsGeneration.current === generation
+        ) {
+          if (deliveryFailureKind(cause) === 'revoke') clearDelivery();
+          else {
+            setOptions(undefined);
+            setOptionsError((cause as Error).message);
+          }
+        }
+      });
+  }, [id, clearDelivery]);
+  useEffect(() => {
+    const currentScope = scope;
+    void load();
+    void loadOptions();
+    const clear = () => {
+      currentScope.current++;
+      setItem(undefined);
+      clearDelivery();
+    };
+    const channel =
+      typeof BroadcastChannel === 'undefined'
+        ? undefined
+        : new BroadcastChannel('galaxy-auth');
+    if (channel) channel.onmessage = clear;
+    window.addEventListener('galaxy-auth-changed', clear);
+    return () => {
+      currentScope.current++;
+      window.removeEventListener('galaxy-auth-changed', clear);
+      channel?.close();
+    };
+  }, [load, loadOptions, clearDelivery]);
+  async function createDelivery(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const file = options?.files.find(
+      (candidate) =>
+        JSON.stringify([candidate.id, candidate.version]) === fileKey,
+    );
+    if (
+      !pending &&
+      (!options?.lines.some((line) => line.stockIssueLineId === lineId) ||
+        !file ||
+        !recipient.trim())
+    )
+      return;
+    const body =
+      pending ??
+      deliveryRequestBody({
+        stockIssueLineId: lineId,
+        quantity,
+        deliveryDate,
+        recipient,
+        fileId: file!.id,
+        fileVersion: file!.version,
+        clientKey: crypto.randomUUID(),
+      });
+    const epoch = scope.current;
+    setPending(body);
+    setDeliveryBusy(true);
+    setError('');
+    try {
+      await api(`/installation/work-orders/${id}/deliveries`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      if (scope.current !== epoch) return;
+      setPending(undefined);
+      setDeliveryNotice(
+        'Đã ghi nhận giao tại công trường; có thể chọn nguồn trong phòng khách.',
+      );
+      setLineId('');
+      setFileKey('');
+      setQuantity('');
+      setRecipient('');
+      setDeliveryDate('');
+      void loadOptions();
+    } catch (cause) {
+      if (scope.current === epoch) {
+        const failure = deliveryFailureKind(cause);
+        if (failure !== 'retry') setPending(undefined);
+        if (failure === 'revoke') {
+          clearDelivery();
+        } else {
+          setError(
+            `${(cause as Error).message}${failure === 'retry' ? ' · Có thể thử lại cùng yêu cầu.' : ' · Sửa thông tin và thử lại.'}`,
+          );
+          if (failure === 'correct') void loadOptions();
+        }
+      }
+    } finally {
+      if (scope.current === epoch) setDeliveryBusy(false);
+    }
+  }
   async function release(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -112,6 +282,143 @@ export default function WorkOrderPage() {
         </p>
       </header>
       {error && <p role="alert">{error}</p>}
+      {optionsError && (
+        <p role="alert">
+          Không tải được lựa chọn giao hàng: {optionsError}.{' '}
+          <button
+            type="button"
+            onClick={() => {
+              setOptionsError('');
+              void loadOptions();
+            }}
+          >
+            Tải lại lựa chọn giao hàng
+          </button>
+        </p>
+      )}
+      {options && (
+        <form
+          className="panel grid gap-3 md:grid-cols-2"
+          onSubmit={createDelivery}
+        >
+          <h2 className="font-semibold md:col-span-2">
+            Ghi nhận giao tại công trường
+          </h2>
+          <p className="md:col-span-2">
+            Nhân viên ghi nhận dựa trên dòng xuất kho và file chứng cứ; không
+            chứng minh khách đã ký hoặc nghiệm thu.
+          </p>
+          <p className="md:col-span-2 flex flex-wrap gap-3">
+            <a
+              href={`/projects/${options.projectId}/files`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Mở hồ sơ file của dự án
+            </a>
+            <button
+              type="button"
+              disabled={deliveryBusy || !!pending}
+              onClick={() => void loadOptions()}
+            >
+              Tải lại lựa chọn
+            </button>
+          </p>
+          {deliveryNotice && (
+            <p role="status" className="md:col-span-2">
+              {deliveryNotice}
+            </p>
+          )}
+          <label>
+            Dòng xuất kho đã phát hành
+            <select
+              required
+              disabled={!!pending || deliveryBusy}
+              value={lineId}
+              onChange={(event) => setLineId(event.target.value)}
+            >
+              <option value="">Chọn dòng xuất kho</option>
+              {options.lines.map((line) => (
+                <option
+                  key={line.stockIssueLineId}
+                  value={line.stockIssueLineId}
+                >
+                  {line.issueNumber} · {line.itemCode} · {line.quantity}{' '}
+                  {line.unit}
+                  {line.lotNumber ? ` · lô ${line.lotNumber}` : ''}
+                  {line.serialNumber ? ` · serial ${line.serialNumber}` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Số lượng giao
+            <input
+              required
+              disabled={!!pending || deliveryBusy}
+              inputMode="decimal"
+              pattern="(?:0|[1-9][0-9]{0,16})(?:\.[0-9]{1,3})?"
+              value={quantity}
+              onChange={(event) => setQuantity(event.target.value)}
+            />
+          </label>
+          <label>
+            Ngày giao
+            <input
+              required
+              disabled={!!pending || deliveryBusy}
+              type="date"
+              value={deliveryDate}
+              onChange={(event) => setDeliveryDate(event.target.value)}
+            />
+          </label>
+          <label>
+            Người nhận được nhân viên ghi nhận
+            <input
+              required
+              disabled={!!pending || deliveryBusy}
+              maxLength={200}
+              value={recipient}
+              onChange={(event) => setRecipient(event.target.value)}
+            />
+          </label>
+          <label>
+            File chứng cứ đúng Project
+            <select
+              required
+              disabled={!!pending || deliveryBusy}
+              value={fileKey}
+              onChange={(event) => setFileKey(event.target.value)}
+            >
+              <option value="">Chọn file và phiên bản</option>
+              {options.files.map((file) => (
+                <option
+                  key={`${file.id}:${file.version}`}
+                  value={JSON.stringify([file.id, file.version])}
+                >
+                  {file.filename} · phiên bản {file.version}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="rounded border px-3 py-2 md:col-span-2"
+            disabled={
+              deliveryBusy ||
+              (!pending &&
+                (!lineId ||
+                  !fileKey ||
+                  !quantity ||
+                  !deliveryDate ||
+                  !recipient.trim()))
+            }
+          >
+            {pending
+              ? 'Thử lại ghi nhận cùng yêu cầu'
+              : 'Ghi nhận giao tại công trường'}
+          </button>
+        </form>
+      )}
       <form className="panel flex flex-wrap gap-3" onSubmit={release}>
         <label>
           Lý do override (chỉ khi thiếu readiness)

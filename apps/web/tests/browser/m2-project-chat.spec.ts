@@ -2,8 +2,11 @@ import { expect, test, type Page } from '@playwright/test';
 import { createM2BrowserFixture } from '../../../api/test/m2-browser.fixture';
 
 let fixture: Awaited<ReturnType<typeof createM2BrowserFixture>>;
+let publicationFixture: typeof fixture;
 test.beforeAll(async () => {
   fixture = await createM2BrowserFixture();
+  // Publication cases use distinct actors/contexts but one append-only source fixture.
+  publicationFixture = await createM2BrowserFixture();
 });
 async function login(
   page: Page,
@@ -268,38 +271,143 @@ test('preparer and distinct publisher release reviewed proposal to the correct c
   }
 });
 
-for (const evidence of ['contract', 'payment'] as const) {
+test('late delivery options cannot restore a draft after a synthetic access denial', async ({
+  browser,
+}) => {
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    const cookie = publicationFixture.users.sender!.cookie;
+    await context.addCookies([
+      {
+        name: cookie.split('=')[0]!,
+        value: cookie.split('=').slice(1).join('='),
+        url: process.env.APP_PUBLIC_ORIGIN!,
+      },
+    ]);
+    await page.goto(
+      `/installations/work-orders/${publicationFixture.deliveryWorkOrderId}`,
+    );
+    const form = page
+      .getByRole('heading', { name: 'Ghi nhận giao tại công trường' })
+      .locator('..');
+    await expect(form).toBeVisible();
+    await form
+      .getByLabel('Dòng xuất kho đã phát hành')
+      .selectOption(publicationFixture.deliveryStockIssueLineId);
+    await form.getByLabel('Số lượng giao').fill('1');
+    await form.getByLabel('Ngày giao').fill('2026-09-28');
+    await form
+      .getByLabel('Người nhận được nhân viên ghi nhận')
+      .fill('Nháp cần xóa');
+    const option = form
+      .getByLabel('File chứng cứ đúng Project')
+      .locator('option')
+      .filter({ hasText: publicationFixture.deliveryFilename });
+    await expect(option).toHaveCount(1);
+    await form
+      .getByLabel('File chứng cứ đúng Project')
+      .selectOption((await option.getAttribute('value'))!);
+    const fresh = await page.request.get(
+      `${process.env.APP_PUBLIC_ORIGIN}/api/v1/installation/work-orders/${publicationFixture.deliveryWorkOrderId}/delivery-options`,
+    );
+    expect(fresh.status()).toBe(200);
+    const optionsBody = await fresh.json();
+    let holdResponse!: () => void;
+    const held = new Promise<void>((resolve) => {
+      holdResponse = resolve;
+    });
+    let getStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      getStarted = resolve;
+    });
+    await page.route('**/delivery-options', async (route) => {
+      getStarted();
+      await held;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(optionsBody),
+      });
+    });
+    await page.route(
+      '**/installation/work-orders/*/deliveries',
+      async (route) => {
+        await route.fulfill({
+          status: 403,
+          contentType: 'application/json',
+          body: JSON.stringify({ message: 'Quyền đã thu hồi' }),
+        });
+      },
+    );
+    await form.getByRole('button', { name: 'Tải lại lựa chọn' }).click();
+    await started;
+    await form
+      .getByRole('button', { name: 'Ghi nhận giao tại công trường' })
+      .click();
+    await expect(form).toHaveCount(0);
+    const lateResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith('/delivery-options') &&
+        response.status() === 200,
+    );
+    holdResponse();
+    expect(await (await lateResponse).finished()).toBeNull();
+    // Let the delivered fetch promise and React's resulting render settle.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    await expect(form).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});
+
+for (const evidence of ['contract', 'signed-contract', 'payment'] as const) {
   test(`sender and distinct publisher release the pinned ${evidence} file to the guest`, async ({
     browser,
   }) => {
     // This case must not inherit the earlier proposal test's revoked source role.
-    const caseFixture = await createM2BrowserFixture();
+    const caseFixture = publicationFixture;
     const endpoint =
-      evidence === 'contract' ? 'contract-files' : 'payment-files';
+      evidence === 'payment' ? 'payment-files' : 'contract-files';
     const sourceTitle =
-      evidence === 'contract'
+      evidence !== 'payment'
         ? 'Bản thông tin hợp đồng'
         : 'Thông tin khoản thu đã ghi nhận';
     const sourceSuffix =
       evidence === 'contract'
         ? 'file gửi khách xem xét'
-        : 'chứng từ do nhân viên cung cấp';
+        : evidence === 'signed-contract'
+          ? 'Bản lưu theo hồ sơ đã ký'
+          : 'chứng từ do nhân viên cung cấp';
     const fileLabel =
       evidence === 'contract'
         ? 'File hợp đồng gửi khách xem xét'
-        : 'Chứng từ khoản thu do nhân viên cung cấp';
+        : evidence === 'signed-contract'
+          ? 'Bản lưu hợp đồng theo hồ sơ đã ký'
+          : 'Chứng từ khoản thu do nhân viên cung cấp';
     const fileIdExpected =
       evidence === 'contract'
         ? caseFixture.contractFileId
-        : caseFixture.paymentFileId;
+        : evidence === 'signed-contract'
+          ? caseFixture.recordedSignedFileId
+          : caseFixture.paymentFileId;
     const filename =
       evidence === 'contract'
         ? caseFixture.contractFilename
-        : caseFixture.paymentFilename;
+        : evidence === 'signed-contract'
+          ? caseFixture.recordedSignedFilename
+          : caseFixture.paymentFilename;
     const fileText =
       evidence === 'contract'
         ? caseFixture.contractFileText
-        : caseFixture.paymentFileText;
+        : evidence === 'signed-contract'
+          ? caseFixture.recordedSignedFileText
+          : caseFixture.paymentFileText;
     const sender = await browser.newContext();
     const publisher = await browser.newContext();
     const guest = await browser.newContext();
@@ -310,6 +418,7 @@ for (const evidence of ['contract', 'payment'] as const) {
       let fileReads = 0;
       let failSourceRead = false;
       const prepareKeys: string[] = [];
+      const prepareBodies: { purpose?: string; version?: number }[] = [];
       let sourceFailed!: () => void;
       const sourceFailure = new Promise<void>((resolve) => {
         sourceFailed = resolve;
@@ -332,7 +441,9 @@ for (const evidence of ['contract', 'payment'] as const) {
       });
       await a.route('**/rooms/*/releases', async (route) => {
         if (route.request().method() !== 'POST') return route.continue();
-        prepareKeys.push(route.request().postDataJSON().clientKey as string);
+        const body = route.request().postDataJSON();
+        prepareKeys.push(body.clientKey as string);
+        prepareBodies.push(body);
         if (prepareKeys.length === 1) {
           const committed = await route.fetch();
           expect(committed.status()).toBe(201);
@@ -346,7 +457,7 @@ for (const evidence of ['contract', 'payment'] as const) {
       const matchingOptions = sourceSelect
         .locator('option')
         .filter({ hasText: sourceTitle });
-      await expect(matchingOptions).toHaveCount(2);
+      await expect(matchingOptions).toHaveCount(evidence === 'payment' ? 2 : 3);
       expect(await matchingOptions.nth(0).getAttribute('value')).not.toBe(
         await matchingOptions.nth(1).getAttribute('value'),
       );
@@ -384,6 +495,9 @@ for (const evidence of ['contract', 'payment'] as const) {
       await expect(a.getByRole('status')).toContainText('Server đã xác nhận');
       expect(prepareKeys).toHaveLength(2);
       expect(prepareKeys[1]).toBe(prepareKeys[0]);
+      expect(prepareBodies[1]?.version).toBe(fileVersion);
+      if (evidence === 'signed-contract')
+        expect(prepareBodies[1]?.purpose).toBe('RECORDED_SIGNED_COPY');
       expect(fileReads).toBeGreaterThan(1);
       await expect(
         a.getByText(new RegExp(`Chờ kiểm tra: ${filename}`)),
@@ -429,6 +543,167 @@ for (const evidence of ['contract', 'payment'] as const) {
     }
   });
 }
+
+test('issued stock becomes a recorded site delivery, then a distinct publisher releases its pinned evidence', async ({
+  browser,
+}) => {
+  const caseFixture = publicationFixture;
+  const sender = await browser.newContext();
+  const publisher = await browser.newContext();
+  const guest = await browser.newContext();
+  try {
+    const a = await sender.newPage();
+    const b = await publisher.newPage();
+    const c = await guest.newPage();
+    await sender.addCookies([
+      {
+        name: caseFixture.users.sender!.cookie.split('=')[0]!,
+        value: caseFixture.users.sender!.cookie.split('=').slice(1).join('='),
+        url: process.env.APP_PUBLIC_ORIGIN!,
+      },
+    ]);
+    let failOptionsOnce = true;
+    await a.route('**/delivery-options', async (route) => {
+      if (failOptionsOnce) {
+        failOptionsOnce = false;
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ message: 'Tạm thời không tải được' }),
+        });
+      } else await route.continue();
+    });
+    await a.goto(
+      `/installations/work-orders/${caseFixture.deliveryWorkOrderId}`,
+    );
+    await a.getByRole('button', { name: 'Tải lại lựa chọn giao hàng' }).click();
+    const deliveryForm = a
+      .getByRole('heading', { name: 'Ghi nhận giao tại công trường' })
+      .locator('..');
+    await expect(deliveryForm).toBeVisible();
+    await deliveryForm
+      .getByLabel('Dòng xuất kho đã phát hành')
+      .selectOption(caseFixture.deliveryStockIssueLineId);
+    await deliveryForm.getByLabel('Số lượng giao').fill('0');
+    await deliveryForm.getByLabel('Ngày giao').fill('2026-09-28');
+    await deliveryForm
+      .getByLabel('Người nhận được nhân viên ghi nhận')
+      .fill('  Khách thử nghiệm  ');
+    const fileOption = deliveryForm
+      .getByLabel('File chứng cứ đúng Project')
+      .locator('option')
+      .filter({ hasText: caseFixture.deliveryFilename });
+    await expect(fileOption).toHaveCount(1);
+    const fileValue = (await fileOption.getAttribute('value'))!;
+    expect(JSON.parse(fileValue)[0]).toBe(caseFixture.deliveryFileId);
+    await deliveryForm
+      .getByLabel('File chứng cứ đúng Project')
+      .selectOption(fileValue);
+    await deliveryForm
+      .getByRole('button', { name: 'Ghi nhận giao tại công trường' })
+      .click();
+    await expect(a.getByRole('alert')).toContainText(
+      'Sửa thông tin và thử lại',
+    );
+    await expect(deliveryForm.getByLabel('Số lượng giao')).toBeEnabled();
+    await deliveryForm.getByLabel('Số lượng giao').fill('1.125');
+    const deliveryBodies: unknown[] = [];
+    await a.route('**/installation/work-orders/*/deliveries', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      deliveryBodies.push(route.request().postDataJSON());
+      if (deliveryBodies.length === 1) {
+        const committed = await route.fetch();
+        expect(committed.status()).toBe(201);
+        await route.abort('failed');
+      } else await route.continue();
+    });
+    await deliveryForm
+      .getByRole('button', { name: 'Ghi nhận giao tại công trường' })
+      .click();
+    await expect(a.getByRole('alert')).toContainText(
+      'Có thể thử lại cùng yêu cầu',
+    );
+    const freshOptions = await a.request.get(
+      `${process.env.APP_PUBLIC_ORIGIN}/api/v1/installation/work-orders/${caseFixture.deliveryWorkOrderId}/delivery-options`,
+    );
+    expect(freshOptions.status()).toBe(200);
+    expect((await freshOptions.json()).files).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: caseFixture.deliveryFileId }),
+      ]),
+    );
+    await deliveryForm
+      .getByRole('button', { name: 'Thử lại ghi nhận cùng yêu cầu' })
+      .click();
+    await expect(deliveryForm.getByRole('status')).toContainText(
+      'Đã ghi nhận giao tại công trường',
+    );
+    expect(deliveryBodies).toHaveLength(2);
+    expect(deliveryBodies[1]).toEqual(deliveryBodies[0]);
+    await login(a, 'sender', false, caseFixture);
+    await a.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+    const sourceSelect = a.getByLabel('Nguồn tài liệu đủ điều kiện');
+    const sourceOption = sourceSelect
+      .locator('option')
+      .filter({ hasText: 'Giao tại công trường' });
+    await expect(sourceOption).toHaveCount(1);
+    await sourceSelect.selectOption(
+      (await sourceOption.getAttribute('value'))!,
+    );
+    const prepareBody = a.waitForRequest(
+      (request) =>
+        request.url().endsWith(`/rooms/${caseFixture.guestRoomId}/releases`) &&
+        request.method() === 'POST',
+    );
+    await a
+      .getByRole('button', { name: 'Chuẩn bị phát hành', exact: true })
+      .click();
+    const body = (await prepareBody).postDataJSON();
+    expect(body).toMatchObject({
+      sourceType: 'SITE_DELIVERY',
+      fileId: caseFixture.deliveryFileId,
+      version: JSON.parse(fileValue)[1],
+    });
+    await expect(
+      a.getByText(new RegExp(`Chờ kiểm tra: ${caseFixture.deliveryFilename}`)),
+    ).toBeVisible();
+    await login(b, 'publisher', false, caseFixture);
+    await b.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+    await b
+      .getByRole('button', {
+        name: 'Kiểm tra nguồn và người nhận',
+        exact: true,
+      })
+      .click();
+    await expect(
+      b.getByText('Nhân viên ghi nhận giao tại công trường', { exact: false }),
+    ).toBeVisible();
+    await expect(
+      b.getByText(caseFixture.deliveryFileText, { exact: true }),
+    ).toBeVisible();
+    await b
+      .getByLabel(
+        'Tôi đã kiểm tra nội dung, phiên bản và đúng người nhận; không có thông tin nội bộ bị cấm.',
+      )
+      .check();
+    await b
+      .getByRole('button', { name: 'Xác nhận phát hành', exact: true })
+      .click();
+    await login(c, 'guest', false, caseFixture);
+    await c.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+    const link = c.getByRole('link', {
+      name: new RegExp(caseFixture.deliveryFilename),
+    });
+    await expect(link).toBeVisible();
+    const download = await c.request.get((await link.getAttribute('href'))!);
+    expect(download.status()).toBe(200);
+    expect(await download.text()).toBe(caseFixture.deliveryFileText);
+  } finally {
+    await sender.close();
+    await publisher.close();
+    await guest.close();
+  }
+});
 
 test('room-only LOCK preserves draft; changing groups warns before discarding it', async ({
   page,

@@ -18,7 +18,8 @@ export default defineConfig({
   fullyParallel: false,
   outputDir: 'test-results/m2-a',
   use: {
-    channel: 'chromium',
+    channel: 'chrome',
+    headless: false,
     // Trust only this isolated context's self-signed test endpoint; app TLS/headers stay intact.
     ignoreHTTPSErrors:
       process.env.APP_PUBLIC_ORIGIN === 'https://localhost:33003',

@@ -113,6 +113,14 @@ export async function createM2BrowserFixture() {
         updatedBy: users.authority!.id,
       },
     });
+    await db.projectMember.create({
+      data: {
+        organizationId: org.id,
+        projectId: project.id,
+        userId: users.publisher!.id,
+        createdBy: users.authority!.id,
+      },
+    });
     const api = process.env.INTERNAL_API_URL!;
     for (const user of Object.values(users)) {
       const res = await fetch(`${api}/auth/login`, {
