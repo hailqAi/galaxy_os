@@ -3471,6 +3471,89 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       ).toBe(0);
     },
   );
+  it.each(['acceptance', 'confirmation'] as const)(
+    'rejects contract review file ownership from a real after-sales %s writer',
+    async (kind) => {
+      const { room, contract, file, input, actor, otherProjectId } =
+        await contractFileFixture();
+      const prepared = (
+        await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+      ).body;
+      await getBinary('publisher', `/releases/${prepared.id}/preview`).expect(
+        200,
+      );
+      const review = (
+        await get('publisher', `/releases/${prepared.id}/review`).expect(200)
+      ).body;
+      const afterSales = app.get(AfterSalesService);
+      if (kind === 'acceptance') {
+        const inspection = await afterSales.createInspection(actor, {
+          projectId: otherProjectId,
+          inspectionNumber: randomUUID(),
+          type: 'CUSTOMER',
+          items: [{ scope: 'Nghiệm thu fixture' }],
+        });
+        await afterSales.decideInspectionItem(actor, inspection.items[0]!.id, {
+          result: 'PASSED',
+        });
+        await afterSales.createAcceptance(actor, inspection.id, {
+          signedDocumentId: file.id,
+          participants: [
+            {
+              name: 'Khách fixture',
+              role: 'CUSTOMER',
+              signingStatus: 'PENDING',
+            },
+          ],
+        });
+      } else {
+        const ticket = await db.serviceTicket.create({
+          data: {
+            organizationId: actor.organizationId,
+            projectId: otherProjectId,
+            customerId: contract.customerId,
+            ticketNumber: randomUUID(),
+            issueCategory: 'OTHER',
+            priority: 'NORMAL',
+            description: 'Hậu mãi fixture',
+            status: 'RESOLVED',
+            createdBy: actor.userId,
+          },
+        });
+        await afterSales.confirmTicket(actor, ticket.id, {
+          customerName: 'Khách fixture',
+          confirmed: true,
+          documentId: file.id,
+        });
+      }
+      expect(
+        (
+          await get(
+            'sender',
+            `/rooms/${room.id}/contract-files?sourceId=${contract.id}`,
+          ).expect(200)
+        ).body.files,
+      ).toEqual([]);
+      await post('sender', `/rooms/${room.id}/releases`, {
+        ...input,
+        clientKey: randomUUID(),
+      }).expect(409);
+      await post('publisher', `/releases/${prepared.id}/publish`, {
+        confirmed: true,
+        recipientHash: review.recipientHash,
+      }).expect(409);
+      expect(
+        (
+          await db.chatDocumentRelease.findUniqueOrThrow({
+            where: { id: prepared.id },
+          })
+        ).publishedAt,
+      ).toBeNull();
+      expect(
+        await db.contractDocument.count({ where: { contractId: contract.id } }),
+      ).toBe(1);
+    },
+  );
   it('publishes a contract review file with source read permission and no contract update authority', async () => {
     const { room, input } = await contractFileFixture();
     const prepared = (

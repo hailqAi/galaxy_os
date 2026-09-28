@@ -16,6 +16,7 @@ export async function lockContractFileOwnership(tx: Prisma.TransactionClient) {
   // ContractDocument/release are our own writes and must not take SHARE locks.
   try {
     await tx.$executeRaw`LOCK TABLE
+      "AcceptanceRecord", "CustomerConfirmation",
       "CustomsDocument", "DamageRecord", "HandoverDocument", "InspectionItem",
       "PackingRecord", "ProductionMilestone", "ProformaInvoiceDocument",
       "ProjectRequiredDocument", "ProjectRequiredDocumentVersion", "ProjectStageApproval",
@@ -132,6 +133,8 @@ export async function eligibleContractFile(
   )
     throw new NotFoundException('File không đúng loại hoặc khách của hồ sơ');
   const references = await Promise.all([
+    tx.acceptanceRecord.count({ where: { signedDocumentId: file.id } }),
+    tx.customerConfirmation.count({ where: { documentId: file.id } }),
     tx.projectRequiredDocument.count({
       where: {
         OR: [
