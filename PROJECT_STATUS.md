@@ -1,6 +1,14 @@
 # Project status
 
-## M2-A — Continuation code và nghiệm thu — 2026-09-28
+## Hiện tại — M2-A closeout, 2026-09-28
+
+- **M2_A_STATUS: PARTIAL; M2_OVERALL_STATUS: PARTIAL_LEAD_LIFECYCLE_DEFERRED; M3_ENTRY_GATE: BLOCKED.** Code local `caa6c32c5e21c5a5b0f33ef30eca4309c6bcd749`, tested tree `15f49c27074a1de8ccbd4d9bf75ed861cbde0ac6`. Giữ B1–B5, INLINE và hai reviewer độc lập chỉ đọc.
+- Đã thêm publication CONTRACT/phụ lục thông tin, PAYMENT lịch nghĩa vụ, DELIVERY_INSTALL kế hoạch từ domain thật; typed source/snapshot/binary, hai người và revoke/stale/idempotency. Không giả chữ ký/biên lai/thực giao. Sửa scope rỗng, multipart UTF8/BOM, nhãn DRAFT và prepare retry key; không hệ thống thứ hai.
+- Native clock chẩn đoán host/WSL nhảy ~182–183giây; chưa biết tác nhân chỉnh. Gate cuối CLOCK_CONTAMINATED_BASELINE,2fullAPI và repeat10NOT_RUN. Targeted105PASS nhưng contaminated; affectedfile49PASS, Web508PASS; browser16:8PASS/3FAIL/5NOT_RUN, corrections2PASS/1FAILBFCache. Không dùng các kết quả này để gọi VERIFIED.
+- Root lint/venv riêng, build/typecheck/schema/format PASS; BFCache thực NOT_VERIFIED do no-store/browser policy. Browser từng snapshot mới/race/mobile còn PARTIAL. Bản thử TLS localhost33003, main không đổi.
+- [HANDOFF](docs/galaxy-os/milestones/M2/HANDOFF.md); [VERIFICATION](docs/galaxy-os/milestones/M2/VERIFICATION.md) ghi log, SHA/build, failure và bước tiếp. Lead-only/lifecycle deferred; M3–M7 NOT_STARTED. Không push/merge/deploy. Các mục phía dưới là lịch sử.
+
+## Lịch sử — Continuation code và nghiệm thu — 2026-09-28
 
 - **M2_A_STATUS: PARTIAL; M2_OVERALL_STATUS: PARTIAL.** B1–B5 giữ nguyên; thực thi INLINE, hai reviewer độc lập chỉ đọc, local commit được giao. Không làm lại M0/M1.
 - Code `e4b3570e63367a84cef41f1823c9ad1d530ee10d`, tree `c7e416c60dd3559fc7737f0e6e09196621cb89c7` tại worktree `/home/galaxy_os/.worktrees/m2-a-20260928`, branch `m2/project-chat-20260928`. Bổ sung publication QUOTATION/TECHNICAL/SAMPLE/HANDOVER, trusted binary/recipient, source writer race/quota, draft Back/Forward và reconnect; không domain thứ hai.

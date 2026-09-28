@@ -153,3 +153,19 @@ Lệnh/test/exit và phần chưa đạt là [VERIFICATION](VERIFICATION.md). Kh
 - C: custom dialog bỏ nháp RAM, cancelable Navigation API cho Back/Forward, hash không đổi ngữ cảnh, native beforeunload; không state/history hack.
 - D: barrier source-revision/send-lock/revoke và browser lost response/delayed poll/offline revoke/mobile; các biến thể BFCache/keyboard/file lỗi còn PARTIAL.
 - E: code commit `e4b3570e63367a84cef41f1823c9ad1d530ee10d`; review độc lập quyền/provenance và navigation/isolation, INLINE thực thi. Ma trận, lệnh và từng failure cuối ở VERIFICATION; không nghiệm thu VERIFIED. Bước tiếp: ổn định clock, tái chạy ngưỡng đã giao, đóng biến thể và xác định source contract còn thiếu; không cần duyệt lại B1–B5.
+
+## CLOSEOUT — tiếp tục từ0369b32 theo lệnh chủ dự án
+
+T1: `scripts/m2-clock-monitor.mjs`, `scripts/m2-clock.test.mjs`, launcher test và observer các lớp: chỉ đo UTC+monotonic; đánh dấu contaminated, không override Date hay sửa host. Venv riêng đúng README, `pnpm lint` entrypoint gốc.
+T2: các request lỗi trong integration M2/upload và browser management; phân biệt setupfail/policy/time, giữ response công khai404. Clockhost chặn acceptance chứ không chặn code độc lập.
+T3: service publication/DTO/UI hiện hữu + schema additive, reuse ContractDocument; source CONTRACT/phụ lục, CustomerPaymentSchedule, InstallationPlan+WorkOrder. Source snapshot allowlist server, fingerprint canonical bắt buộc, text/plain tiếngViệt; bản thông tin không giả chữ ký/biênlai/thựcgiao. TypedFK, binary pin và idempotentprepare. Hai phase: chụp dướiProjectlock+reservequota → render/writepending ngoàiProjectlock → reauth/sourcehash + finalize/release nguyên tử. Domainwriters liên quan dùng cùngkhóa; không đổi quy tắc tiền/trạngthái. Reviewer publication đã review thiết kế với lưuý versioncounter/Decimal/sourcehash/cleanup/retry. Test domainwriters thật→prepare/preview/publish2actor/downloadbytes; stale/revoke giữa2phase, retrykey, saiCustomer/appendix, no sideeffect.
+T4: `playwright.m2.config.ts` bỏ riêng defaultargument tắtBFCache; browser spec thêm pageshow.persisted thật với lýdo cachemiss, reconnectmax1, uploadlostresponse/filename/mobilepublication. Khôngbỏcacheheaders/sandbox.
+T5: monitor mọi acceptance; 10repeat+2full chỉ tính nếuclockclean; Web/browser/build/typecheck/schema/rootlint/format, hai reviewerreadonly, local source/docscommits riêng. M3 chỉgate, khôngcodeAI. Các lệnh nền giữ VERIFICATION; exactresults bổsung sau test, khôngghiPASStrước.
+
+### Kết quả task closeout
+
+- T1: chẩn đoán clock đa lớp và gate theo PID hoàn thành; host repair ngoài quyền, acceptance blocked. Venv riêng và root lint đạt.
+- T2: targeted105 đạt theo lớp, log denial phân biệt observations; source scope rỗng và filename multipart là lỗi code đã sửa. Không đóng stability/timeout chỉ bằng targeted.
+- T3: cả3source snapshot có code/UI/API, migration79review/test, domainwriter thật→binary; stale/revoke rollback/concurrent prepare kiểm được. Bản ký/biên lai/thực giao không bị giả tạo; browser từng source còn thiếu.
+- T4: upload mất response/filename và polling bounded đạt ca browser; proposal mobile/BackForward có bằng chứng. BFCache persisted thật chưa đạt, giữ no-store; mọi biến thể chưa đủ.
+- T5: source commit caa6c32, docs riêng; build/typecheck/schema/rootlint/format đạt. Full2/repeat10 bị clock gate; browser fullfail giữ nguyên. M3-ENTRY chỉ BLOCKED trong HANDOFF, không triển khai AI.

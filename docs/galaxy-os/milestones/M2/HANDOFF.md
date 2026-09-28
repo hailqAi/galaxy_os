@@ -1,6 +1,87 @@
 # M2 — Bàn giao triển khai
 
-## Hiện hành — M2-A continuation, 2026-09-28
+## Hiện hành — M2-A CLOSEOUT, 2026-09-28
+
+**M2_A_STATUS: PARTIAL. M3_ENTRY_GATE: BLOCKED.** Đã code thêm ba nguồn publication còn thiếu, sửa scope rỗng/thu hồi quyền lúc chốt artifact, multipart tiếng Việt/BOM, nhãn bản nháp, key prepare retry và gate clock. Không chỉ đổi báo cáo. Chưa đủ nghiệm thu vì clock host nhảy, BFCache không có hit thật và full/browser/stability chưa đạt. INLINE + self-review + hai reviewer độc lập chỉ đọc; không hỏi lại B1–B5.
+
+### Định danh cuối
+
+- EXECUTION_SCOPE: M2-A CLOSEOUT.
+- WORKTREE: `/home/galaxy_os/.worktrees/m2-a-20260928`; BRANCH: `m2/project-chat-20260928`.
+- RESUME_START_SHA: `0369b32198b130d44dd77babeeb3653405a60d62`; tổ tiên code trước `e4b3570…` được giữ, ban đầu sạch.
+- CODE_SHA = TESTED_SHA: `caa6c32c5e21c5a5b0f33ef30eca4309c6bcd749`; TESTED_TREE: `15f49c27074a1de8ccbd4d9bf75ed861cbde0ac6`. Commit source22file; manifest SHA256 xác nhận từng source/test/config/migration trùng tree đã kiểm. TESTED nghĩa đã chạy các lớp ghi bên dưới, **không phải VERIFIED**. BOM sửa sau targeted105 được rerun file49 + browser upload thật; React import sau Webfail được rerun fullWeb508 và rebuild.
+- DOCS_COMMIT_SHA: lấy hash thật bằng `git log -1 --format=%H -- docs/galaxy-os/milestones/M2/HANDOFF.md` sau docs commit riêng; không ghi self-hash bằng amend. Docs chỉ sáu file PROJECT_STATUS, STATUS, DESIGN, PLAN, VERIFICATION, HANDOFF.
+- Main worktree vẫn `7faeb58eea534dbb6c11238906ede6df84ce0302`, sạch ở kiểm cuối. MAIN_RUNTIME_CHANGED:NO; PUSH_MERGE_DEPLOY:NOT_PERFORMED; runtime chính vẫn RUNTIME_VERSION_UNVERIFIED.
+
+### Người dùng nhận được và giới hạn
+
+- CONTRACT/phụ lục: chọn nguồn thật từ domain, xuất bản thông tin đúng trạng thái/phạm vi; không giả file ký. PAYMENT: lịch nghĩa vụ chính khách, không transaction/receipt. DELIVERY_INSTALL: kế hoạch lắp và work-order có thật, không chứng minh thực giao/lắp. Cả ba dùng publication UI/API hiện hữu và hai actor; typed nguồn → snapshot/fingerprint → FileAsset/binary, retry cùng key, nguồn đổi/revoke bị chặn. Không còn MISSING_SOURCE_CONTRACT cho ba **bản thông tin/lịch/kế hoạch** này; legacy thiếu evidence không tự được bổ sung.
+- QUOTATION/TECHNICAL/SAMPLE/HANDOVER/PROPOSAL giữ adapter riêng; targeted cuối có tải bytes thật và ca từ chối. Không generic upload fallback. Nhãn UI không gọi CONTRACT DRAFT là đã duyệt; người dùng phải kiểm đúng nội dung và người nhận trước publish.
+- Upload filename tiếng Việt không còn mojibake. HTML/quotes/control/path được xử lý qua sanitizer có sẵn; không để filename chọn storage path. Upload mất response giữ FileAsset/key và draft RAM, gửi lại không nhân file/tin trong ca browser đã kiểm.
+- Polling sau offline/online có test max in-flight1. Mobile390×844 đã thêm preview/confirm publication PROPOSAL và upload lỗi/retry; không thiết bị/bàn phím vật lý. Browser từng snapshot mới và mọi race/expiry/upload biến thể chưa đủ.
+
+### Kết quả phải đọc cùng giới hạn
+
+| Trường                                        | Kết quả                                                                                                                                        |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| TEST_ENVIRONMENT_STATUS                       | VERIFIED_ISOLATED / HOST_CLOCK_UNSTABLE                                                                                                        |
+| CLOCK_ROOT_CAUSE                              | Realtime host/WSL nhảy lùi/tiến ~182–183giây; cùng dấu ở Python native/Node/API/DB/browser; monotonic ổn định. Chưa biết tiến trình chỉnh giờ. |
+| CLOCK_FIX_SCOPE                               | Observer/gate fail-closed theo PID và coverage; log grant observations; không sửa host, không nới expiry/JWT.                                  |
+| CLOCK_VERIFICATION_STATUS                     | DIAGNOSED / STABILITY_BLOCKED                                                                                                                  |
+| CLOCK_CONTAMINATED_RUNS                       | Gate cdaee7d2…,399427af…,46c56531…; targeted105 runner100956/worker100979; fullbrowser101391 và corrections103219 có jumps. Giữ raw logs.      |
+| ORIGINAL_FAILURES_RESOLUTION                  | Các tên gốc trong VERIFICATION chạy PASS targeted105 và domain-link browser; chưa đủ repeat10/clock sạch để đóng hoàn toàn.                    |
+| PUBLICATION_CONTRACT_STATUS                   | IMPLEMENTED_API_TESTED_INFORMATION_SNAPSHOT; không binary có chữ ký                                                                            |
+| PUBLICATION_PAYMENT_STATUS                    | IMPLEMENTED_API_TESTED_CUSTOMER_SCHEDULE; không tiền đã đối chiếu                                                                              |
+| PUBLICATION_DELIVERY_INSTALL_STATUS           | IMPLEMENTED_API_TESTED_PLAN_SNAPSHOT; không biên bản thực giao/lắp                                                                             |
+| EXISTING_PUBLICATION_REGRESSION               | PASS targeted theo lớp, CLOCK_CONTAMINATED; không thay full                                                                                    |
+| APPROVAL_VERSION_BINARY_RECIPIENT_STATUS      | Typed nguồn/version/snapshot/digest/2actor/recipient đã kiểm API; PARTIAL nghiệm thu mọi tổ hợp/browser                                        |
+| BFCACHE_REAL_STATUS                           | NOT_VERIFIED: persisted=false, no-store main/XHR và browsing-instance reasons; không bypass                                                    |
+| POLLING_RECONNECT_STATUS                      | Bounded-loop và lost-response/revoke có bằng chứng theo lớp; full browser còn failure, PARTIAL                                                 |
+| UPLOAD_ERROR_RETRY_STATUS                     | PASS browser ca mất response/same key/same file/binary thật; PARTIAL toàn pipeline/race                                                        |
+| UNTRUSTED_FILENAME_STATUS                     | Unit49 gồm9ca bổ sung; hostile Vietnamese filename/browser PASS; không bypass sanitizer                                                        |
+| MOBILE_VERIFICATION_STATUS                    | PARTIAL: Chromium viewport390×844, không thiết bị/bàn phím vật lý                                                                              |
+| ROOT_LINT_STATUS / PYTHON_ENVIRONMENT_STATUS  | PASS entrypoint pnpm lint / venv riêng Python3.10.12, requirements-dev pin                                                                     |
+| BUILD_TYPECHECK_SCHEMA_FORMAT                 | PASS; rootbuild+API rebuildBOM, typecheck/lint cuối, Prisma validate, format                                                                   |
+| TARGETED_REPEAT_RESULTS                       | 105/105 targeted một lượt nhiễm clock; affected file49/49 sau BOM; repeat10 NOT_RUN/BLOCKED_CLOCK                                              |
+| FULL_API_RUN_1 / FULL_API_RUN_2               | NOT_RUN / NOT_RUN: gate cuối exit2 CLOCK_CONTAMINATED_BASELINE                                                                                 |
+| WEB_TESTS                                     | 508/508,30files; thêm1test labelDRAFT                                                                                                          |
+| BROWSER_TESTS                                 | Full16:8PASS/3FAIL/5NOT_RUN; corrections3:2PASS/1FAIL(BFCache); không retry và không cộng thay full                                            |
+| ACCEPTANCE_PASS_FAIL_PARTIAL_NOT_RUN_DEFERRED | Giữ36PASS theo lớp lịch sử/17PARTIAL/1DEFERRED trên54ID, không nâng bằng clock-contaminated runs; chi tiết overlay ở VERIFICATION              |
+| M2_A_STATUS / M2_OVERALL_STATUS               | PARTIAL / PARTIAL_LEAD_LIFECYCLE_DEFERRED                                                                                                      |
+| M3_ENTRY_GATE / M3_IMPLEMENTATION_STATUS      | BLOCKED / NOT_STARTED                                                                                                                          |
+
+Root Python health1/1 và edge4/4 PASS qua executor được phép. Lượt restricted edge trước EPERM bind, Python treo đã dừng đúng PID; giữ log, không gọi là lỗi ứng dụng, không tắt sandbox. Root `pnpm test` tổng thể chưa PASS vì fullAPI bị gate clock.
+
+### Bản thử thực tế, chạy và dừng
+
+Địa chỉ đã kiểm: **https://localhost:33003/work** (cert tự ký chỉ fixture); `/login`200 và API33001 `/api/v1/health`200. HTTP33002 là upstream của test TLS, không ứng dụng production. Không in mật khẩu/token; `apps/api/test/m2-browser.fixture.ts` tạo persona giả trong stack đã guard. Có thể xem qua browser test đã trust riêng cert fixture; không cài cert vào trust store toàn máy.
+
+Quan sát cuối: API PID103180 cwdW/apps/api; Web PID101341 cwdW/apps/web; TLS PID95672 cwdW. Đây là PID quan sát, phải kiểm lại trước signal. Web BUILD_ID `nb9Gevp_DIMdJRTSSawJL`; API main SHA256 `baff2384276602bf63cba1337b0749ab4b1b1135512847acd346d5523ace7720`; service publication `fe0f7a7f747b1c19791d85f24d480a6072487835e23b3eb74634efd9592407f0`; filename compiled `7c3426c263146ea4b677e2bf7121225004e80456b3ceee451198341ee056e216`. Source22file khớp commit, generated next-env trở lại nội dung baseline, không stage generated bundle.
+
+Sau kiểm PID/cổng/guard, từ W chạy launcher riêng trong ba terminal:
+
+```sh
+node scripts/m2-a-serve.mjs api --clock-monitor
+node scripts/m2-a-serve.mjs web --production
+node scripts/m2-a-tls.mjs
+```
+
+Cần build test trước theo VERIFICATION (Web FEATURE_PROJECT_CHAT từ recipe, APP_PUBLIC_ORIGIN=https://localhost:33003); không chạy đồng thời bản cũ. Ctrl-C đúng terminal launcher để dừng; khi mất terminal chỉ signal PID/cwd/argv đã xác minh. Không kill theo tên/cổng, không stop DB/Redis, không prune/down-v. Namespace `galaxy_os_g00_20260928m2a`; PG55433/Redis56380 loopback, storage `/tmp/galaxy-os-g00-20260928m2a`,79migration test. Không đổi adapter external, không gửi thư/SMS/AI/payment thật.
+
+### Còn chặn và bước tiếp theo
+
+1. Chủ máy cần xử lý nguồn chỉnh realtime Windows/WSL và xác nhận đồng hồ ổn định. Agent không tự date-s/NTP/reboot/WSLshutdown; không xin mật khẩu. Sau đó gate45giây + targeted10lần +2fullAPI liên tiếp trên cùng source/config, giữ log và dừng điều tra nếu fail.
+2. BFCache thật chưa đạt trên browser này vì no-store/XHR. Giữ chính sách bảo vệ; cần browser/harness hỗ trợ an toàn và bằng chứng persisted=true, kể cả revoke khi rời document. Không thay bằng simulated event.
+3. Full browser chưa sạch: management cross-tab thiếu Project link; reconnect GETmessages404 với future grant; worker fixture login401 sau lỗi làm5caNOT_RUN. Cần chạy lại sau clock ổn định, phân tích request tương ứng nếu còn fail; không nới limiter/permission/timeouts.
+4. Hoàn tất UI end-to-end ba snapshot mới và biến thể race/expiry/upload/mobile còn PARTIAL ở ma trận. Không dùng PASS fail-closed hoặc review để thế nghiệm thu.
+
+DEFERRED_SCOPE: Lead-only/lifecycle theo chỉ đạo rõ. Không triển khai M3–M7, không đổi định danh Project hoặc nghĩa vụ tài chính.
+
+### M3-ENTRY — BLOCKED, chỉ handoff điều kiện
+
+Baseline kỹ thuật dự kiến là code/tree nêu trên, **chưa được nghiệm thu làm nền M3**. Project → ChatRoom → ChatMessage có actor server/sequence/time; ChatFile nối FileAsset/version; ChatDocumentRelease giữ typed domain source/snapshot/checksum/recipient/publisher. `ProjectChatPolicy.live/authority/assertRoom/history` và `ProjectChatService.messages/releases/releaseDownload` cùng `FilesService` kiểm actor/tenant/Project/room/history/current grant; M3 tương lai phải đọc qua cùng scope, không quét DB/file trực tiếp hoặc dùng summary thay nguyên lịch sử. Revoke/expiry được xét mỗi lần lấy/phát; nguồn mới không đổi binary release cũ, source-only nội bộ không tự public. Các service nguồn: Commercial/QuotationDocuments, Production, AfterSales, Contracts, Installation. Dataset chỉ fixtureM2, không dữ liệu thật. Chưa có AI/provider/index/bộ nhớ, chưa tạo hệ thống riêng theo bốn nhóm. Chỉ báo READY_FOR_M3_ON_EXISTING_PROJECTS sau khi tất cả blockers nghiệm thu đóng.
+
+## Lịch sử — M2-A continuation, 2026-09-28
 
 **M2_A_STATUS: PARTIAL; M2_OVERALL_STATUS: PARTIAL.** Đã tiếp tục code, TDD/review và commit local đúng worktree; chưa đủ điều kiện nghiệm thu. Không làm lại M0/M1, không đổi các quyết định B1–B5. Implementation INLINE; hai reviewer thực tế chỉ đọc `/root/publication_review` và `/root/regression_navigation_review`, sửa các finding env leak, source revision race, hash navigation. Review không thay bằng chứng test.
 

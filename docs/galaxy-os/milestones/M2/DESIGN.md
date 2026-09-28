@@ -6,6 +6,10 @@ DESIGN_STATUS: OWNER_DIRECTED_M2_A. B1–B5 đã chốt ở [DECISIONS](DECISION
 
 Baseline source hiện tại, giữ Project/User/Session/OrganizationMembership/IAM/FileAsset/storage/Task/ProductLine. Thêm mô hình chat và publication vì Comment không có ranh giới recipient/history/idempotency. Không migration lên main, không sửa domain nghĩa vụ.
 
+### Làm rõ kỹ thuật closeout — không đổi B1–B5
+
+Bổ sung source contract CONTRACT/PAYMENT/DELIVERY_INSTALL theo ủy quyền A/B/C: xuất snapshot thông tin từ Contract/phụ lục, CustomerPaymentSchedule và InstallationPlan/WorkOrder. Binary do service tạo từ allowlist, không nhận file tùy ý/approval tự khai. Snapshot hợp đồng DRAFT không phải bản có chữ ký; lịch nghĩa vụ không phải biên lai; kế hoạch không phải xác nhận thực giao/lắp. Publication hai người là kiểm tra phát hành, không thay approval nghiệp vụ. Các nguồn có nghiệp vụ approval tiếp tục giữ gate riêng đã triển khai. Typed FK, snapshot/fingerprint và FileAsset bất biến; reserve/writepending/chốt lại nguồn/quyền, writer liên quan cùng Project lock. Không backfill evidence cũ. Chi tiết ma trận/giới hạn tại VERIFICATION closeout.
+
 ### Ranh giới dữ liệu và quyền
 
 - `OrganizationMembership` bổ sung loại INTERNAL/EXTERNAL (mặc định INTERNAL cho tương thích). Session vẫn là nền auth hiện có. External chỉ được route chat và các endpoint auth/self tối thiểu được đánh dấu rõ; mọi legacy route khác bị server từ chối. Không grant role nhân viên. DTO self cho external không chứa organization/role/nội dung nội bộ thừa.
