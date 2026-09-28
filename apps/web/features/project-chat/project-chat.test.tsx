@@ -78,6 +78,11 @@ it('keeps proposal selection compatible and distinguishes contract information f
       sourceFingerprint: 'changed',
     }),
   );
+  expect(
+    releaseSourceKey({ ...contract, sourceType: 'CUSTOMER_PAYMENT_RECORD' }),
+  ).not.toBe(
+    releaseSourceKey({ ...contract, sourceType: 'CUSTOMER_PAYMENT_FILE' }),
+  );
 });
 
 it('prepares the selected contract binary version with source fingerprint and retry key', () => {
@@ -106,6 +111,36 @@ it('prepares the selected contract binary version with source fingerprint and re
     version: 2,
     sourceFingerprint: 'fingerprint',
     clientKey: 'retry-key',
+    appendixId: undefined,
+  });
+});
+
+it('prepares an employee supplied payment file using its binary version and typed source', () => {
+  expect(
+    releasePrepareBody(
+      {
+        sourceType: 'CUSTOMER_PAYMENT_FILE',
+        sourceId: 'payment',
+        version: 1,
+        name: 'Khoản thu',
+        sourceFingerprint: 'payment-fingerprint',
+      },
+      {
+        id: 'evidence',
+        version: 3,
+        filename: 'chung-tu.txt',
+        mimeType: 'text/plain',
+        sizeBytes: '42',
+      },
+      'payment-key',
+    ),
+  ).toEqual({
+    sourceType: 'CUSTOMER_PAYMENT_FILE',
+    sourceId: 'payment',
+    fileId: 'evidence',
+    version: 3,
+    sourceFingerprint: 'payment-fingerprint',
+    clientKey: 'payment-key',
     appendixId: undefined,
   });
 });
@@ -170,4 +205,51 @@ it('labels the pinned contract file version as a review copy, not an approved or
   expect(html).toContain('gửi khách xem xét');
   expect(html).not.toContain('Nguồn đã duyệt');
   expect(html).not.toContain('đã ký');
+});
+
+it('labels employee supplied payment evidence without claiming a bank receipt or reconciliation', () => {
+  const html = renderToStaticMarkup(
+    createElement(SourceReviewLabel, {
+      source: {
+        sourceType: 'CUSTOMER_PAYMENT_FILE',
+        title: 'Khoản thu',
+        file: { id: 'f', version: 3, filename: 'chung-tu.txt' },
+      },
+    }),
+  );
+  expect(html).toContain('Chứng từ khoản thu do nhân viên cung cấp');
+  expect(html).toContain('phiên bản file 3');
+  expect(html).toContain('chưa xác nhận đối soát');
+  expect(html).not.toContain('Nguồn đã duyệt');
+});
+
+it('describes handover status and manual signing without verified signature claims', () => {
+  const draft = renderToStaticMarkup(
+    createElement(SourceReviewLabel, {
+      source: {
+        sourceType: 'HANDOVER',
+        type: 'HANDOVER_MINUTES',
+        handoverStatus: 'DRAFT',
+        signedStatus: 'NOT_REQUIRED',
+      },
+    }),
+  );
+  expect(draft).toContain('Biên bản bàn giao');
+  expect(draft).toContain('chưa hoàn tất');
+  expect(draft).toContain('không yêu cầu ký');
+  expect(draft).not.toContain('đã ký');
+  const manual = renderToStaticMarkup(
+    createElement(SourceReviewLabel, {
+      source: {
+        sourceType: 'HANDOVER',
+        type: 'AS_BUILT_DRAWING',
+        handoverStatus: 'COMPLETED',
+        signedStatus: 'SIGNED_MANUALLY',
+      },
+    }),
+  );
+  expect(manual).toContain('Bản vẽ hoàn công');
+  expect(manual).toContain('hoàn tất theo hồ sơ');
+  expect(manual).toContain('ghi nhận ký thủ công');
+  expect(manual).toContain('chưa xác minh chữ ký');
 });

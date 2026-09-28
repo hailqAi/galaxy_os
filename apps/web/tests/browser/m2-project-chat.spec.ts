@@ -268,145 +268,167 @@ test('preparer and distinct publisher release reviewed proposal to the correct c
   }
 });
 
-test('sender and distinct publisher release the pinned contract review file to the guest', async ({
-  browser,
-}) => {
-  // This case must not inherit the earlier proposal test's revoked source role.
-  const contractFixture = await createM2BrowserFixture();
-  const sender = await browser.newContext();
-  const publisher = await browser.newContext();
-  const guest = await browser.newContext();
-  try {
-    const a = await sender.newPage();
-    const b = await publisher.newPage();
-    const c = await guest.newPage();
-    let fileReads = 0;
-    let failSourceRead = false;
-    const prepareKeys: string[] = [];
-    let sourceFailed!: () => void;
-    const sourceFailure = new Promise<void>((resolve) => {
-      sourceFailed = resolve;
-    });
-    await a.route('**/contract-files?*', async (route) => {
-      if (++fileReads === 1)
-        await route.fulfill({
-          status: 503,
-          contentType: 'application/json',
-          body: JSON.stringify({ message: 'Lỗi mạng giả lập khi tải file' }),
-        });
-      else await route.continue();
-    });
-    await a.route('**/release-sources', async (route) => {
-      if (failSourceRead) {
-        failSourceRead = false;
-        await route.abort('failed');
-        sourceFailed();
-      } else await route.continue();
-    });
-    await a.route('**/rooms/*/releases', async (route) => {
-      if (route.request().method() !== 'POST') return route.continue();
-      prepareKeys.push(route.request().postDataJSON().clientKey as string);
-      if (prepareKeys.length === 1) {
-        const committed = await route.fetch();
-        expect(committed.status()).toBe(201);
-        failSourceRead = true;
-        await route.abort('failed');
-      } else await route.continue();
-    });
-    await login(a, 'sender', false, contractFixture);
-    await a.getByRole('button', { name: /Khách thử nghiệm/ }).click();
-    const sourceSelect = a.getByLabel('Nguồn tài liệu đủ điều kiện');
-    const contractOptions = sourceSelect
-      .locator('option')
-      .filter({ hasText: 'Bản thông tin hợp đồng' });
-    await expect(contractOptions).toHaveCount(2);
-    expect(await contractOptions.nth(0).getAttribute('value')).not.toBe(
-      await contractOptions.nth(1).getAttribute('value'),
-    );
-    const contractFileOption = sourceSelect
-      .locator('option')
-      .filter({ hasText: 'file gửi khách xem xét' });
-    await expect(contractFileOption).toHaveCount(1);
-    await sourceSelect.selectOption(
-      (await contractFileOption.getAttribute('value'))!,
-    );
-    const prepare = a.getByRole('button', {
-      name: 'Chuẩn bị phát hành',
-      exact: true,
-    });
-    await expect(prepare).toBeDisabled();
-    const fileSelect = a.getByLabel('File hợp đồng gửi khách xem xét');
-    const fileOption = fileSelect
-      .locator('option')
-      .filter({ hasText: contractFixture.contractFilename });
-    await expect(fileOption).toHaveCount(1);
-    const fileValue = (await fileOption.getAttribute('value'))!;
-    const [fileId, fileVersion] = JSON.parse(fileValue) as [string, number];
-    expect(fileId).toBe(contractFixture.contractFileId);
-    await fileSelect.selectOption(fileValue);
-    await expect(prepare).toBeEnabled();
-    await prepare.click();
-    await sourceFailure;
-    await expect(sourceSelect).toHaveValue('');
-    await sourceSelect.selectOption(
-      (await contractFileOption.getAttribute('value'))!,
-    );
-    await expect(fileOption).toHaveCount(1);
-    await fileSelect.selectOption(fileValue);
-    await prepare.click();
-    await expect(a.getByRole('status')).toContainText('Server đã xác nhận');
-    expect(prepareKeys).toHaveLength(2);
-    expect(prepareKeys[1]).toBe(prepareKeys[0]);
-    expect(fileReads).toBeGreaterThan(1);
-    await expect(
-      a.getByText(
-        new RegExp(`Chờ kiểm tra: ${contractFixture.contractFilename}`),
-      ),
-    ).toBeVisible();
-    await expect(
-      a.getByText(
-        new RegExp(`Chờ kiểm tra: ${contractFixture.contractFilename}`),
-      ),
-    ).toHaveCount(1);
-
-    await login(b, 'publisher', false, contractFixture);
-    await b.getByRole('button', { name: /Khách thử nghiệm/ }).click();
-    await b
-      .getByRole('button', {
-        name: 'Kiểm tra nguồn và người nhận',
+for (const evidence of ['contract', 'payment'] as const) {
+  test(`sender and distinct publisher release the pinned ${evidence} file to the guest`, async ({
+    browser,
+  }) => {
+    // This case must not inherit the earlier proposal test's revoked source role.
+    const caseFixture = await createM2BrowserFixture();
+    const endpoint =
+      evidence === 'contract' ? 'contract-files' : 'payment-files';
+    const sourceTitle =
+      evidence === 'contract'
+        ? 'Bản thông tin hợp đồng'
+        : 'Thông tin khoản thu đã ghi nhận';
+    const sourceSuffix =
+      evidence === 'contract'
+        ? 'file gửi khách xem xét'
+        : 'chứng từ do nhân viên cung cấp';
+    const fileLabel =
+      evidence === 'contract'
+        ? 'File hợp đồng gửi khách xem xét'
+        : 'Chứng từ khoản thu do nhân viên cung cấp';
+    const fileIdExpected =
+      evidence === 'contract'
+        ? caseFixture.contractFileId
+        : caseFixture.paymentFileId;
+    const filename =
+      evidence === 'contract'
+        ? caseFixture.contractFilename
+        : caseFixture.paymentFilename;
+    const fileText =
+      evidence === 'contract'
+        ? caseFixture.contractFileText
+        : caseFixture.paymentFileText;
+    const sender = await browser.newContext();
+    const publisher = await browser.newContext();
+    const guest = await browser.newContext();
+    try {
+      const a = await sender.newPage();
+      const b = await publisher.newPage();
+      const c = await guest.newPage();
+      let fileReads = 0;
+      let failSourceRead = false;
+      const prepareKeys: string[] = [];
+      let sourceFailed!: () => void;
+      const sourceFailure = new Promise<void>((resolve) => {
+        sourceFailed = resolve;
+      });
+      await a.route(`**/${endpoint}?*`, async (route) => {
+        if (++fileReads === 1)
+          await route.fulfill({
+            status: 503,
+            contentType: 'application/json',
+            body: JSON.stringify({ message: 'Lỗi mạng giả lập khi tải file' }),
+          });
+        else await route.continue();
+      });
+      await a.route('**/release-sources', async (route) => {
+        if (failSourceRead) {
+          failSourceRead = false;
+          await route.abort('failed');
+          sourceFailed();
+        } else await route.continue();
+      });
+      await a.route('**/rooms/*/releases', async (route) => {
+        if (route.request().method() !== 'POST') return route.continue();
+        prepareKeys.push(route.request().postDataJSON().clientKey as string);
+        if (prepareKeys.length === 1) {
+          const committed = await route.fetch();
+          expect(committed.status()).toBe(201);
+          failSourceRead = true;
+          await route.abort('failed');
+        } else await route.continue();
+      });
+      await login(a, 'sender', false, caseFixture);
+      await a.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+      const sourceSelect = a.getByLabel('Nguồn tài liệu đủ điều kiện');
+      const matchingOptions = sourceSelect
+        .locator('option')
+        .filter({ hasText: sourceTitle });
+      await expect(matchingOptions).toHaveCount(2);
+      expect(await matchingOptions.nth(0).getAttribute('value')).not.toBe(
+        await matchingOptions.nth(1).getAttribute('value'),
+      );
+      const fileSourceOption = sourceSelect
+        .locator('option')
+        .filter({ hasText: sourceSuffix });
+      await expect(fileSourceOption).toHaveCount(1);
+      await sourceSelect.selectOption(
+        (await fileSourceOption.getAttribute('value'))!,
+      );
+      const prepare = a.getByRole('button', {
+        name: 'Chuẩn bị phát hành',
         exact: true,
-      })
-      .click();
-    await expect(
-      b.getByText(`phiên bản file ${fileVersion}`, { exact: false }),
-    ).toBeVisible();
-    await expect(
-      b.getByText(contractFixture.contractFileText, { exact: true }),
-    ).toBeVisible();
-    await b
-      .getByLabel(
-        'Tôi đã kiểm tra nội dung, phiên bản và đúng người nhận; không có thông tin nội bộ bị cấm.',
-      )
-      .check();
-    await b
-      .getByRole('button', { name: 'Xác nhận phát hành', exact: true })
-      .click();
+      });
+      await expect(prepare).toBeDisabled();
+      const fileSelect = a.getByLabel(fileLabel);
+      const fileOption = fileSelect
+        .locator('option')
+        .filter({ hasText: filename });
+      await expect(fileOption).toHaveCount(1);
+      const fileValue = (await fileOption.getAttribute('value'))!;
+      const [fileId, fileVersion] = JSON.parse(fileValue) as [string, number];
+      expect(fileId).toBe(fileIdExpected);
+      await fileSelect.selectOption(fileValue);
+      await expect(prepare).toBeEnabled();
+      await prepare.click();
+      await sourceFailure;
+      await expect(sourceSelect).toHaveValue('');
+      await sourceSelect.selectOption(
+        (await fileSourceOption.getAttribute('value'))!,
+      );
+      await expect(fileOption).toHaveCount(1);
+      await fileSelect.selectOption(fileValue);
+      await prepare.click();
+      await expect(a.getByRole('status')).toContainText('Server đã xác nhận');
+      expect(prepareKeys).toHaveLength(2);
+      expect(prepareKeys[1]).toBe(prepareKeys[0]);
+      expect(fileReads).toBeGreaterThan(1);
+      await expect(
+        a.getByText(new RegExp(`Chờ kiểm tra: ${filename}`)),
+      ).toBeVisible();
+      await expect(
+        a.getByText(new RegExp(`Chờ kiểm tra: ${filename}`)),
+      ).toHaveCount(1);
 
-    await login(c, 'guest', false, contractFixture);
-    await c.getByRole('button', { name: /Khách thử nghiệm/ }).click();
-    const link = c.getByRole('link', {
-      name: new RegExp(contractFixture.contractFilename),
-    });
-    await expect(link).toBeVisible();
-    const response = await c.request.get((await link.getAttribute('href'))!);
-    expect(response.status()).toBe(200);
-    expect(await response.text()).toBe(contractFixture.contractFileText);
-  } finally {
-    await sender.close();
-    await publisher.close();
-    await guest.close();
-  }
-});
+      await login(b, 'publisher', false, caseFixture);
+      await b.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+      await b
+        .getByRole('button', {
+          name: 'Kiểm tra nguồn và người nhận',
+          exact: true,
+        })
+        .click();
+      await expect(
+        b.getByText(`phiên bản file ${fileVersion}`, { exact: false }),
+      ).toBeVisible();
+      await expect(b.getByText(fileText, { exact: true })).toBeVisible();
+      await b
+        .getByLabel(
+          'Tôi đã kiểm tra nội dung, phiên bản và đúng người nhận; không có thông tin nội bộ bị cấm.',
+        )
+        .check();
+      await b
+        .getByRole('button', { name: 'Xác nhận phát hành', exact: true })
+        .click();
+
+      await login(c, 'guest', false, caseFixture);
+      await c.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+      const link = c.getByRole('link', {
+        name: new RegExp(filename),
+      });
+      await expect(link).toBeVisible();
+      const response = await c.request.get((await link.getAttribute('href'))!);
+      expect(response.status()).toBe(200);
+      expect(await response.text()).toBe(fileText);
+    } finally {
+      await sender.close();
+      await publisher.close();
+      await guest.close();
+    }
+  });
+}
 
 test('room-only LOCK preserves draft; changing groups warns before discarding it', async ({
   page,

@@ -2227,13 +2227,27 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       checksum: raw.checksum!,
       language: 'VI',
     });
-    const room = (
-      await post('manager', `/projects/${otherProjectId}/rooms`, {
-        title: 'Hồ sơ bảo hành khách',
-        group: 'AFTER_SALES',
-        audience: 'CUSTOMER',
-      }).expect(201)
-    ).body;
+    const roomPath = `/projects/${otherProjectId}/rooms`;
+    const roomResponse = await post('manager', roomPath, {
+      title: 'Hồ sơ bảo hành khách',
+      group: 'AFTER_SALES',
+      audience: 'CUSTOMER',
+    });
+    expect(
+      roomResponse.status,
+      JSON.stringify({
+        method: 'POST',
+        path: `/api/v1/project-chat${roomPath}`,
+        projectId: otherProjectId,
+        handoverId: handover.id,
+        atUtc: new Date().toISOString(),
+        requestId: roomResponse.headers['x-request-id'] ?? null,
+        statusCode: roomResponse.body?.statusCode,
+        message: roomResponse.body?.message,
+        error: roomResponse.body?.error,
+      }),
+    ).toBe(201);
+    const room = roomResponse.body;
     for (const name of ['sender', 'publisher', 'guest'])
       await post('manager', `/rooms/${room.id}/grants`, {
         userId: users[name]!.id,
@@ -2263,6 +2277,154 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
     expect(
       (await get('guest', `/releases/${release.id}/download`).expect(200)).text,
     ).toBe(bytes.toString());
+    const sideEffects = () =>
+      Promise.all([
+        db.inventoryTransaction.count({ where: { projectId: otherProjectId } }),
+        db.installationItem.count({ where: { projectId: otherProjectId } }),
+        db.acceptanceRecord.count({ where: { projectId: otherProjectId } }),
+        db.warrantyAsset.count({ where: { projectId: otherProjectId } }),
+        db.warrantyRegistration.count({
+          where: { asset: { projectId: otherProjectId } },
+        }),
+        db.warrantyClaim.count({ where: { projectId: otherProjectId } }),
+      ]);
+    const beforePublication = await sideEffects();
+    let minutesInput: typeof input | undefined;
+    for (const candidate of [
+      {
+        type: 'HANDOVER_MINUTES' as const,
+        filename: 'bien-ban-ban-giao.txt',
+        text: 'Biên bản bàn giao gửi khách, ký thủ công',
+        signedStatus: 'SIGNED_MANUALLY' as const,
+      },
+      {
+        type: 'AS_BUILT_DRAWING' as const,
+        filename: 'ban-ve-hoan-cong.txt',
+        text: 'Bản vẽ hoàn công dành cho khách',
+        signedStatus: 'NOT_REQUIRED' as const,
+      },
+    ]) {
+      const content = Buffer.from(candidate.text);
+      const asset = await app.get(FilesService).upload(
+        actor,
+        {
+          entityType: 'Project',
+          entityId: otherProjectId,
+          category: 'PROJECT_DOCUMENT',
+        },
+        {
+          originalname: candidate.filename,
+          mimetype: 'text/plain',
+          size: content.length,
+          buffer: content,
+        } as Express.Multer.File,
+      );
+      const stored = await db.fileAsset.findUniqueOrThrow({
+        where: { id: asset.id },
+      });
+      const registered = await afterSales.addHandoverDocument(
+        actor,
+        handover.id,
+        {
+          type: candidate.type,
+          fileAssetId: asset.id,
+          checksum: stored.checksum!,
+          language: 'VI',
+        },
+      );
+      if (candidate.signedStatus === 'SIGNED_MANUALLY')
+        await afterSales.signHandoverDocument(actor, registered.id, {
+          signedStatus: candidate.signedStatus,
+        });
+      const typedInput = {
+        sourceType: 'HANDOVER',
+        sourceId: registered.id,
+        fileId: asset.id,
+        version: registered.version,
+      };
+      if (candidate.type === 'HANDOVER_MINUTES') minutesInput = typedInput;
+      expect(
+        (await get('sender', `/rooms/${room.id}/release-sources`).expect(200))
+          .body,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sourceType: 'HANDOVER',
+            sourceId: registered.id,
+            version: registered.version,
+          }),
+        ]),
+      );
+      const prepared = (
+        await post('sender', `/rooms/${room.id}/releases`, typedInput).expect(
+          201,
+        )
+      ).body;
+      const checked = (
+        await get('publisher', `/releases/${prepared.id}/review`).expect(200)
+      ).body;
+      expect(checked.sourceSnapshot).toMatchObject({
+        sourceType: 'HANDOVER',
+        type: candidate.type,
+        handoverStatus: 'DRAFT',
+        signedStatus: candidate.signedStatus,
+        version: registered.version,
+        checksum: stored.checksum,
+      });
+      expect(
+        (
+          await getBinary(
+            'publisher',
+            `/releases/${prepared.id}/preview`,
+          ).expect(200)
+        ).body,
+      ).toEqual(content);
+      await post('sender', `/releases/${prepared.id}/publish`, {
+        confirmed: true,
+        recipientHash: checked.recipientHash,
+      }).expect(403);
+      await post('publisher', `/releases/${prepared.id}/publish`, {
+        confirmed: true,
+        recipientHash: checked.recipientHash,
+      }).expect(201);
+      expect(
+        (
+          await getBinary('guest', `/releases/${prepared.id}/download`).expect(
+            200,
+          )
+        ).body,
+      ).toEqual(content);
+      await get('tenantB', `/releases/${prepared.id}/download`).expect(404);
+    }
+    expect(await sideEffects()).toEqual(beforePublication);
+    const newerMinutes = Buffer.from('Biên bản bàn giao phiên bản sau');
+    const newerFile = await app.get(FilesService).upload(
+      actor,
+      {
+        entityType: 'Project',
+        entityId: otherProjectId,
+        category: 'PROJECT_DOCUMENT',
+      },
+      {
+        originalname: 'bien-ban-ban-giao-2.txt',
+        mimetype: 'text/plain',
+        size: newerMinutes.length,
+        buffer: newerMinutes,
+      } as Express.Multer.File,
+    );
+    const newerStored = await db.fileAsset.findUniqueOrThrow({
+      where: { id: newerFile.id },
+    });
+    await afterSales.addHandoverDocument(actor, handover.id, {
+      type: 'HANDOVER_MINUTES',
+      fileAssetId: newerFile.id,
+      checksum: newerStored.checksum!,
+      language: 'VI',
+    });
+    await post('sender', `/rooms/${room.id}/releases`, minutesInput!).expect(
+      409,
+    );
+    expect(await sideEffects()).toEqual(beforePublication);
     const stale = (
       await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
     ).body;
@@ -2322,7 +2484,11 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
     ).toBe(versions[0]!.id);
     expect(
       await db.handoverDocument.count({
-        where: { handoverId: handover.id, supersededBy: null },
+        where: {
+          handoverId: handover.id,
+          type: 'WARRANTY_DOCUMENT',
+          supersededBy: null,
+        },
       }),
     ).toBe(1);
     await post('sender', `/rooms/${room.id}/releases`, input).expect(409);
