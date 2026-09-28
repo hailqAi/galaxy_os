@@ -8,6 +8,8 @@ import { CurrentActor } from './current-actor';
 export const IS_PUBLIC = 'isPublic';
 export const REQUIRED_PERMISSIONS = 'requiredPermissions';
 export const ALLOW_PASSWORD_CHANGE = 'allowPasswordChange';
+export const ALLOW_EXTERNAL = 'allowExternal';
+export const AllowExternal = () => SetMetadata(ALLOW_EXTERNAL, true);
 export const Public = () => SetMetadata(IS_PUBLIC, true);
 export const RequirePermission = (...permissions: string[]) =>
   SetMetadata(REQUIRED_PERMISSIONS, permissions);

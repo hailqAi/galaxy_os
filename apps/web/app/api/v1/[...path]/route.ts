@@ -31,6 +31,7 @@ const approvedRoots = new Set([
   'supplier-payment-schedules',
   'supplier-payments',
   'projects',
+  'project-chat',
   'products',
   'suppliers',
   'tasks',
@@ -80,6 +81,7 @@ const requestHeaders = [
   'cookie',
   'etag',
   'x-csrf-token',
+  'x-chat-actor',
 ] as const;
 const responseHeaders = [
   'content-length',

@@ -3,6 +3,7 @@ export type CurrentActor = {
   organizationId: string;
   organizationMembershipId: string;
   sessionId?: string;
+  membershipKind?: string;
   email: string;
   displayName: string;
   mustChangePassword: boolean;

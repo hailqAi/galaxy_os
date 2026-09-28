@@ -467,6 +467,10 @@ model OrganizationMembership {
   managedDepartments  ManagedDepartment[]
   managedUnits        Department[]           @relation("DepartmentManager")
   customData          Json                   @default("{}")
+  chatAuthorities     ChatProjectGrant[]
+  chatGrants          ChatRoomGrant[]
+  kind String @default("INTERNAL")
+  chatProjects ChatProjectParticipant[]
 
   @@unique([organizationId, userId])
   @@unique([organizationId, id])
@@ -922,12 +926,185 @@ model Project {
   stageOneDocuments      ProjectStageOneDocument[]
   importJobs             ImportJob[]
   risks                  ProjectRisk[]
+  chatRooms              ChatRoom[]
+  chatAuthorities        ChatProjectGrant[]
+  chatParticipants ChatProjectParticipant[]
 
+  @@unique([organizationId, id])
   @@unique([organizationId, code])
   @@unique([organizationId, creationIdempotencyKey])
   @@index([organizationId, status, phase, deletedAt])
   @@index([organizationId, customerId])
   @@index([organizationId, projectManagerId])
+}
+
+model ChatProjectParticipant {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  projectId String @db.Uuid
+  userId String @db.Uuid
+  linkedBy String @db.Uuid
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+  project Project @relation(fields:[organizationId, projectId], references:[organizationId,id])
+  membership OrganizationMembership @relation(fields:[organizationId,userId],references:[organizationId,userId])
+  @@unique([organizationId,projectId,userId])
+}
+
+model ChatProjectGrant {
+  id             String          @id @default(uuid()) @db.Uuid
+  organizationId String          @db.Uuid
+  projectId      String          @db.Uuid
+  userId         String          @db.Uuid
+  actions        String[]
+  roomCeiling    String[]
+  grantedBy      String          @db.Uuid
+  effectiveAt    DateTime        @default(now())
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  project        Project         @relation(fields: [organizationId, projectId], references: [organizationId, id])
+  roomGrants     ChatRoomGrant[]
+  membership OrganizationMembership @relation(fields: [organizationId, userId], references: [organizationId, userId])
+
+  @@unique([id, organizationId, projectId])
+  @@index([organizationId, userId, projectId])
+}
+
+model ChatRoom {
+  id             String          @id @default(uuid()) @db.Uuid
+  organizationId String          @db.Uuid
+  projectId      String          @db.Uuid
+  title          String
+  group          String
+  audience       String
+  createdBy      String          @db.Uuid
+  createdAt      DateTime        @default(now())
+  locked         Boolean         @default(false)
+  sequence       Int             @default(0)
+  taskId String? @db.Uuid
+  productLineId String? @db.Uuid
+  task Task? @relation(fields:[taskId],references:[id])
+  productLine ProjectProductLine? @relation(fields:[productLineId],references:[id])
+  project        Project         @relation(fields: [organizationId, projectId], references: [organizationId, id])
+  grants         ChatRoomGrant[]
+  messages       ChatMessage[]
+  files ChatFile[]
+  releases ChatDocumentRelease[]
+
+  @@unique([id, organizationId, projectId])
+  @@index([organizationId, projectId, group])
+}
+
+model ChatRoomGrant {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @db.Uuid
+  projectId      String           @db.Uuid
+  roomId         String           @db.Uuid
+  userId         String           @db.Uuid
+  issuedUnderId  String           @db.Uuid
+  actions        String[]
+  grantedBy      String           @db.Uuid
+  effectiveAt    DateTime         @default(now())
+  expiresAt      DateTime?
+  revokedAt      DateTime?
+  room           ChatRoom         @relation(fields: [roomId, organizationId, projectId], references: [id, organizationId, projectId])
+  issuedUnder    ChatProjectGrant @relation(fields: [issuedUnderId, organizationId, projectId], references: [id, organizationId, projectId])
+  membership OrganizationMembership @relation(fields: [organizationId, userId], references: [organizationId, userId])
+  history ChatHistoryGrant[] @relation("HistoryRecipient")
+  sharedHistory ChatHistoryGrant[] @relation("HistorySource")
+
+  @@index([roomId, userId, effectiveAt])
+}
+
+model ChatHistoryGrant {
+  id String @id @default(uuid()) @db.Uuid
+  grantId String @db.Uuid
+  sourceGrantId String @db.Uuid
+  sourceHistoryId String? @db.Uuid
+  from DateTime
+  to DateTime
+  actions String[]
+  grantedBy String @db.Uuid
+  createdAt DateTime @default(now())
+  grant ChatRoomGrant @relation("HistoryRecipient", fields:[grantId], references:[id])
+  sourceGrant ChatRoomGrant @relation("HistorySource", fields:[sourceGrantId], references:[id])
+  sourceHistory ChatHistoryGrant? @relation("HistoryProvenance",fields:[sourceHistoryId],references:[id],onDelete:Restrict)
+  descendants ChatHistoryGrant[] @relation("HistoryProvenance")
+  @@index([grantId])
+}
+
+model ChatMessage {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  projectId      String   @db.Uuid
+  roomId         String   @db.Uuid
+  authorId       String   @db.Uuid
+  clientKey      String   @db.Uuid
+  payloadHash    String
+  sequence       Int
+  body           String
+  createdAt      DateTime @default(now())
+  room           ChatRoom @relation(fields: [roomId, organizationId, projectId], references: [id, organizationId, projectId])
+  attachments ChatMessageAttachment[]
+
+  @@unique([roomId, authorId, clientKey])
+  @@unique([roomId, sequence])
+}
+
+model ChatFile {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  projectId String @db.Uuid
+  roomId String @db.Uuid
+  actorId String @db.Uuid
+  clientKey String @db.Uuid
+  payloadHash String
+  fileAssetId String @db.Uuid
+  version Int
+  origin String
+  createdAt DateTime @default(now())
+  room ChatRoom @relation(fields:[roomId,organizationId,projectId], references:[id,organizationId,projectId])
+  file FileAsset @relation(fields:[fileAssetId],references:[id])
+  messages ChatMessageAttachment[]
+  @@unique([roomId,actorId,clientKey])
+}
+
+model ChatMessageAttachment {
+  messageId String @db.Uuid
+  chatFileId String @db.Uuid
+  message ChatMessage @relation(fields:[messageId],references:[id])
+  chatFile ChatFile @relation(fields:[chatFileId],references:[id])
+  @@id([messageId,chatFileId])
+}
+
+model ChatDocumentRelease {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  projectId String @db.Uuid
+  roomId String @db.Uuid
+  sourceId String @db.Uuid
+  sourceVersionId String @db.Uuid
+  fileAssetId String @db.Uuid
+  version Int
+  checksum String
+  filename String
+  mimeType String
+  sourceUpdatedAt DateTime
+  preparedBy String @db.Uuid
+  preparedAt DateTime @default(now())
+  reviewedBy String? @db.Uuid
+  reviewedAt DateTime?
+  reviewedRecipientHash String?
+  publishedRecipients Json?
+  publishedBy String? @db.Uuid
+  publishedAt DateTime?
+  revokedBy String? @db.Uuid
+  revokedAt DateTime?
+  room ChatRoom @relation(fields:[roomId,organizationId,projectId],references:[id,organizationId,projectId])
+  source ProjectRequiredDocument @relation(fields:[sourceId],references:[id])
+  sourceVersion ProjectRequiredDocumentVersion @relation(fields:[sourceVersionId],references:[id])
+  file FileAsset @relation(fields:[fileAssetId],references:[id])
+  @@index([roomId,publishedAt])
 }
 
 model ProjectStageState {
@@ -1214,6 +1391,7 @@ model ProjectProductLine {
   location        ProjectLocation?         @relation(fields: [locationId], references: [id])
   revisions       ProjectProductRevision[]
   approvals       ProjectProductApproval[]
+  chatRooms ChatRoom[]
 
   @@unique([projectId, code])
   @@index([organizationId, projectId, lifecycleStatus, deletedAt])
@@ -1324,6 +1502,7 @@ model ProjectRequiredDocument {
   versions             ProjectRequiredDocumentVersion[]
   uploadSessions       UploadSession[]
   stageOneDocuments    ProjectStageOneDocument[]
+  chatReleases ChatDocumentRelease[]
 
   @@unique([projectId, stageKey, workstreamKey, documentType, initialMatrix], map: "ProjectRequiredDocument_context_key")
   @@index([organizationId, projectId, stageKey, status])
@@ -1363,6 +1542,7 @@ model ProjectRequiredDocumentVersion {
   createdBy     String                  @db.Uuid
   createdAt     DateTime                @default(now())
   requirement   ProjectRequiredDocument @relation(fields: [requirementId], references: [id])
+  chatReleases ChatDocumentRelease[]
 
   @@unique([requirementId, version])
   @@index([requirementId, createdAt])
@@ -3253,6 +3433,7 @@ model Task {
   checklist         ChecklistItem[]
   dependencies      TaskDependency[] @relation("TaskDependencies")
   requiredBy        TaskDependency[] @relation("RequiredTaskDependencies")
+  chatRooms ChatRoom[]
 
   @@index([organizationId, status, dueDate, deletedAt])
   @@index([organizationId, projectId])
@@ -3379,6 +3560,8 @@ model RequirementVersion {
 }
 
 model FileAsset {
+  chatReleases ChatDocumentRelease[]
+  chatFiles ChatFile[]
   id                       String                           @id @default(uuid()) @db.Uuid
   organizationId           String                           @db.Uuid
   originalFilename         String

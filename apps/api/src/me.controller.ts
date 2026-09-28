@@ -15,7 +15,11 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { IsString, Length } from 'class-validator';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Actor, AllowPasswordChange } from './access-control/access.decorators';
+import {
+  Actor,
+  AllowPasswordChange,
+  AllowExternal,
+} from './access-control/access.decorators';
 import { CurrentActor } from './access-control/current-actor';
 import { MeService } from './me.service';
 import { readEnvironment } from './config/env';
@@ -29,6 +33,7 @@ class ProfileDto {
 export class MeController {
   constructor(@Inject(MeService) private readonly service: MeService) {}
   @Get()
+  @AllowExternal()
   @AllowPasswordChange()
   @ApiOperation({ summary: 'Get the current actor' })
   me(@Actor() actor: CurrentActor) {

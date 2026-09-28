@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { safeReturnTo } from './app/login/model';
-import { routePermissions } from './app/portal-navigation';
+import { isProjectChatPath, routePermissions } from './app/portal-navigation';
 import {
   developmentHosts,
   internalApiUrl,
@@ -78,6 +78,7 @@ export async function proxy(request: NextRequest) {
     const actor = actorResponse?.ok
       ? ((await actorResponse.json()) as {
           mustChangePassword: boolean;
+          membershipKind?: string;
           permissions: string[];
           administrationScope:
             | 'SYSTEM'
@@ -90,7 +91,11 @@ export async function proxy(request: NextRequest) {
       if (actor)
         response = NextResponse.redirect(
           new URL(
-            actor.mustChangePassword ? '/account/change-password' : '/',
+            actor.mustChangePassword
+              ? '/account/change-password'
+              : actor.membershipKind === 'EXTERNAL'
+                ? '/work'
+                : '/',
             request.url,
           ),
         );
@@ -111,9 +116,12 @@ export async function proxy(request: NextRequest) {
     ) {
       response = NextResponse.redirect(new URL('/forbidden', request.url));
     } else {
-      const required = routePermissions.find(([prefix]) =>
-        path.startsWith(prefix),
-      )?.[1];
+      const roomRoute =
+        process.env.FEATURE_PROJECT_CHAT === 'true' && isProjectChatPath(path);
+      const required =
+        !roomRoute &&
+        path !== '/forbidden' &&
+        routePermissions.find(([prefix]) => path.startsWith(prefix))?.[1];
       if (
         (path.startsWith('/settings/users') &&
           actor.administrationScope === 'SELF') ||

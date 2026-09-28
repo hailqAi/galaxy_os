@@ -122,6 +122,7 @@ export class SearchController {
           organizationId: actor.organizationId,
           deletedAt: null,
           originalFilename: contains,
+          NOT: { attachments: { some: { entityType: 'ChatRoom' } } },
           attachments: {
             some: {
               OR: [

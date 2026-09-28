@@ -16,7 +16,9 @@ export default async function RootLayout({
   return (
     <html lang="vi">
       <body>
-        <PortalShell>{children}</PortalShell>
+        <PortalShell chatEnabled={process.env.FEATURE_PROJECT_CHAT === 'true'}>
+          {children}
+        </PortalShell>
       </body>
     </html>
   );

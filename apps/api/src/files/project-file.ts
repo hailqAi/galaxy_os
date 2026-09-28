@@ -255,6 +255,7 @@ export async function findProjectFiles(
       organizationId: actor.organizationId,
       deletedAt: null,
       attachments: { some: { projectId } },
+      NOT: { attachments: { some: { entityType: 'ChatRoom' } } },
     },
     select: projectFileMetadata,
   });
@@ -284,6 +285,7 @@ export async function findProjectFile(
       organizationId: actor.organizationId,
       deletedAt: null,
       attachments: { some: { projectId } },
+      NOT: { attachments: { some: { entityType: 'ChatRoom' } } },
     },
     select: projectFileMetadata,
   });

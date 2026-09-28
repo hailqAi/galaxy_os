@@ -9,7 +9,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { readEnvironment } from '../config/env';
 import { PrismaService } from '../prisma.service';
-import { IS_PUBLIC } from './access.decorators';
+import { IS_PUBLIC, ALLOW_EXTERNAL } from './access.decorators';
 import { ALLOW_PASSWORD_CHANGE } from './access.decorators';
 import { CurrentActor } from './current-actor';
 import { createHash } from 'node:crypto';
@@ -214,6 +214,7 @@ export class DevelopmentAuthGuard implements CanActivate {
       organizationId: membership.organizationId,
       organizationMembershipId: membership.id,
       sessionId: sessionValid ? session.id : undefined,
+      membershipKind: membership.kind,
       email: user.email,
       displayName: user.displayName,
       mustChangePassword: sessionValid
@@ -256,6 +257,20 @@ export class DevelopmentAuthGuard implements CanActivate {
           .map(({ role }) => role.administrationTier),
       ),
     };
+    if (membership.kind === 'EXTERNAL') {
+      if (
+        !this.reflector.getAllAndOverride<boolean>(ALLOW_EXTERNAL, [
+          context.getHandler(),
+          context.getClass(),
+        ])
+      )
+        throw new ForbiddenException('Chỉ được truy cập phạm vi khách đã cấp');
+      actor.permissions = [];
+      actor.permissionSources = [];
+      actor.administrationScope = 'SELF';
+      actor.administrationTier = 0;
+      actor.managedDepartmentIds = [];
+    }
     if (
       actor.mustChangePassword &&
       !this.reflector.getAllAndOverride<boolean>(ALLOW_PASSWORD_CHANGE, [

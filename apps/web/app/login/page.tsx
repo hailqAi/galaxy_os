@@ -28,11 +28,16 @@ function LoginForm() {
     setLoading(true);
     try {
       const actor = await authenticate(email, password);
+      if (typeof BroadcastChannel !== 'undefined') {
+        const channel = new BroadcastChannel('galaxy-auth');
+        channel.postMessage('changed');
+        channel.close();
+      }
       window.location.replace(
         actor.mustChangePassword
           ? '/account/change-password'
           : (permittedReturnTo(query.get('returnTo'), actor.permissions) ??
-              '/'),
+              (actor.membershipKind === 'EXTERNAL' ? '/work' : '/')),
       );
     } catch (error) {
       setPassword('');

@@ -44,6 +44,45 @@ export class MeService {
   ) {}
 
   async get(actor: CurrentActor) {
+    if (actor.membershipKind === 'EXTERNAL') {
+      const member = await this.prisma.organizationMembership.findFirstOrThrow({
+        where: {
+          id: actor.organizationMembershipId,
+          userId: actor.userId,
+          status: 'active',
+          kind: 'EXTERNAL',
+          user: { status: 'active' },
+          organization: { status: 'active' },
+        },
+        select: {
+          organization: { select: { id: true, name: true } },
+          user: {
+            select: {
+              id: true,
+              email: true,
+              displayName: true,
+              credential: { select: { mustChangePassword: true } },
+            },
+          },
+        },
+      });
+      return {
+        userId: member.user.id,
+        email: member.user.email,
+        displayName: member.user.displayName,
+        organizationId: member.organization.id,
+        organization: member.organization,
+        membershipKind: 'EXTERNAL',
+        mustChangePassword: member.user.credential?.mustChangePassword ?? false,
+        permissions: [],
+        roles: [],
+        departments: [],
+        permissionSources: [],
+        administrationScope: 'SELF',
+        managedDepartmentIds: [],
+        administrationTier: 0,
+      };
+    }
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: actor.userId },
       select: {

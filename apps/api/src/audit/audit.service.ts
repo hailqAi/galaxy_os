@@ -51,6 +51,8 @@ export class AuditService {
   ) {
     const where: Prisma.AuditLogWhereInput = {
       organizationId: actor.organizationId,
+      // Chat metadata obeys room/history scope, not the legacy organization-wide feed.
+      NOT: { entityType: 'ChatRoom' },
       actorUserId: query.actor,
       action: query.action,
       entityType: query.entityType,
@@ -87,6 +89,7 @@ export class AuditService {
   }) {
     const where: Prisma.AuditLogWhereInput = {
       actorUserId: query.actor,
+      NOT: { entityType: 'ChatRoom' },
       action: query.action,
       entityType: query.entityType,
     };

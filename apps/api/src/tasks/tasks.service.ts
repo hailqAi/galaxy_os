@@ -13,7 +13,7 @@ import { STAGE_TWO_PLAN_ENTITY } from '../projects/project-stage-two.dto';
 @Injectable()
 export class TasksService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
-  private visibleWhere(actor: CurrentActor): Prisma.TaskWhereInput {
+  visibleWhere(actor: CurrentActor): Prisma.TaskWhereInput {
     const access = ['SYSTEM', 'ORGANIZATION'].includes(
       actor.administrationScope,
     )

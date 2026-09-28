@@ -49,6 +49,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export type Actor = {
+  membershipKind?: string;
   userId: string;
   email: string;
   displayName: string;

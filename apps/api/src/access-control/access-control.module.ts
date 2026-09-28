@@ -5,6 +5,7 @@ import { DevelopmentAuthGuard } from './development-auth.guard';
 import { PermissionGuard } from './permission.guard';
 import { UserManagementPolicy } from './user-management.policy';
 import { BusinessEntityPolicy } from './business-entity.policy';
+import { ProjectChatPolicy } from './project-chat.policy';
 
 @Module({
   providers: [
@@ -13,7 +14,8 @@ import { BusinessEntityPolicy } from './business-entity.policy';
     { provide: APP_GUARD, useClass: PermissionGuard },
     UserManagementPolicy,
     BusinessEntityPolicy,
+    ProjectChatPolicy,
   ],
-  exports: [UserManagementPolicy, BusinessEntityPolicy],
+  exports: [UserManagementPolicy, BusinessEntityPolicy, ProjectChatPolicy],
 })
 export class AccessControlModule {}

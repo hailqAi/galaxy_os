@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import {
   Actor,
+  AllowExternal,
   AllowPasswordChange,
   Public,
   RequirePermission,
@@ -52,7 +53,7 @@ export class AuthController {
     return { authenticated: true };
   }
 
-  @AllowPasswordChange() @Post('logout') async logout(
+  @AllowExternal() @AllowPasswordChange() @Post('logout') async logout(
     @Actor() actor: CurrentActor,
     @Res({ passthrough: true }) response: CookieResponse,
   ) {
@@ -67,7 +68,10 @@ export class AuthController {
     return { authenticated: false };
   }
 
-  @AllowPasswordChange() @Post('change-password') async changePassword(
+  @AllowExternal()
+  @AllowPasswordChange()
+  @Post('change-password')
+  async changePassword(
     @Actor() actor: CurrentActor,
     @Body() input: ChangePasswordDto,
     @Res({ passthrough: true }) response: CookieResponse,

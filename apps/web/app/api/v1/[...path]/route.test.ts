@@ -30,6 +30,7 @@ describe('same-origin API forwarder', () => {
   });
 
   it.each([
+    'project-chat',
     'brands',
     'purchase-requests',
     'rfqs',

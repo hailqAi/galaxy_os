@@ -288,5 +288,9 @@ export const routePermissions = navigation
   )
   .sort(([left], [right]) => right.length - left.length);
 
+// Chat uses explicit room grants at the API, not legacy dashboard/project roles.
+export const isProjectChatPath = (path: string) =>
+  path === '/work' || /^\/projects\/[0-9a-f-]{36}\/work$/.test(path);
+
 export const isNavigationActive = (item: NavigationItem, pathname: string) =>
   new RegExp(item.activeRouteMatcher).test(pathname);
