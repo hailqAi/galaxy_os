@@ -286,6 +286,8 @@ export const routePermissions = navigation
     ({ href, requiredPermission }) =>
       [href, requiredPermission] as [string, string],
   )
+  // Project workstreams can have routes without global sidebar entries.
+  .concat([['/installations', 'installation.read']])
   .sort(([left], [right]) => right.length - left.length);
 
 // Chat uses explicit room grants at the API, not legacy dashboard/project roles.

@@ -2,10 +2,32 @@ import { describe, expect, it } from 'vitest';
 import {
   isNavigationActive,
   navigation,
+  routePermissions,
   visibleNavigation,
 } from './portal-navigation';
 
 describe('permission-aware portal navigation', () => {
+  it.each([
+    '/installations',
+    '/installations/work-orders/ee41927b-82bf-4ba4-af50-c66e6dbe8e94',
+  ])(
+    'gates %s by installation read without borrowing dashboard permission',
+    (path) => {
+      // Exercise the same first-prefix match used by proxy.ts.
+      const required = routePermissions.find(([prefix]) =>
+        path.startsWith(prefix),
+      )?.[1];
+      expect(required).toBe('installation.read');
+      expect(['installation.read'].includes(required!)).toBe(true);
+      expect(['dashboard.read'].includes(required!)).toBe(false);
+      expect(
+        routePermissions.find(([prefix]) => '/'.startsWith(prefix))?.[1],
+      ).toBe('dashboard.read');
+      expect(navigation.some(({ href }) => href === '/installations')).toBe(
+        false,
+      );
+    },
+  );
   it('groups only permitted operational links and never exposes Marketing', () => {
     const groups = visibleNavigation(
       ['project.read', 'warehouse.read', 'inventory.read'],

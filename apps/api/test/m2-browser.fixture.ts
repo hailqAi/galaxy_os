@@ -220,7 +220,25 @@ export async function createM2BrowserFixture() {
         },
       },
     });
+    const projectReaderRole = await db.role.create({
+      data: {
+        organizationId: org.id,
+        code: `project-reader-${run}`,
+        name: 'Đọc Project thuộc phạm vi fixture',
+        permissions: {
+          create: { permission: { connect: { code: 'project.read' } } },
+        },
+      },
+    });
     for (const actor of ['sender', 'publisher']) {
+      await db.userRole.create({
+        data: {
+          organizationId: org.id,
+          userId: users[actor]!.id,
+          roleId: projectReaderRole.id,
+          scopeType: 'SELF',
+        },
+      });
       await db.userRole.create({
         data: {
           organizationId: org.id,
