@@ -1,5 +1,11 @@
 # M2 — Đối chiếu B1–B5 trước triển khai
 
+## OWNER_DIRECTION — Chrome và navigation, 2026-09-28
+
+Nguồn: chỉ đạo “ĐÓNG M2-A, KẾT NỐI CHROME HIỂN THỊ”. Giữ B1–B5. Navigation phải kiểm lại quyền, bỏ nháp đã rời và không nhân polling. BFCache có hai kết quả hợp lệ: RESTORED_VERIFIED với persisted=true từ navigation thật; hoặc NOT_ELIGIBLE_CONFIRMED có lý do browser và kiểm chứng đường reload thật an toàn. NOT_VERIFIED vẫn là khoảng trống. Không bỏ no-store để ép cache, không sửa kết quả/log lịch sử.
+
+Đính chính nguồn: log Stop-Process/NullReferenceException, PID26520/22016, checkpoint four-fixes và quota cùng đoạn do chủ dự án xác nhận thuộc dự án khác; loại khỏi mọi căn cứ Galaxy. Rà canonical docs không tìm kết luận dựa vào đoạn đó. Bằng chứng clock Galaxy độc lập được giữ.
+
 ## Chỉ đạo mới M2-A — 2026-09-28
 
 OWNER_REQUIREMENT: prompt “CHỐT B1–B5 VÀ TRIỂN KHAI CODE M2-A”. **B1_B5_STATUS: RESOLVED_FOR_M2_A**. Chủ dự án chốt phạm vi/chính sách bằng chỉ đạo hiện tại, ủy quyền lập và rà soát kỹ thuật kế hoạch để thực thi inline. Không ghi PLAN_APPROVED_BY_OWNER; chỉ đạo không phê duyệt phần ngoài M2-A. Các bảng phía dưới giữ nguyên làm lịch sử trước chỉ đạo này.

@@ -1,6 +1,52 @@
 # M2 — Bàn giao triển khai
 
-## Hiện hành — M2-A CLOSEOUT, 2026-09-28
+## Hiện hành — Chrome hiển thị, M2-A PARTIAL, 2026-09-28
+
+Người dùng đã đăng nhập được **bản cũ http://localhost:3000/projects** trong Chrome Windows hiển thị riêng; Codex kết nối đúng phiên qua MCP, điều hướng đọc-only và /api/v1/me200. Code M2-A vẫn ở worktree riêng, chưa tích hợp vào bản3000. Đã sửa binary publication bị generic file.delete/update/restore vô hiệu hóa, session fixture logout lẫn phiên điều khiển, và tiêu chí kiểm navigation/no-store reload. Chưa đủ điều kiện sang M3.
+
+- Worktree `/home/galaxy_os/.worktrees/m2-a-20260928`, branch `m2/project-chat-20260928`, RESUME_START_SHA `5d6690b6c1ce5f08b2c52ddb810a6b36f57bca6d`.
+- CODE_SHA `338b7b18581387bf2b1d6412c3b921670de70395`; TESTED_SHA ứng dụng `0a216ebab2109e6c6a2c444071fd4e6a671c22d5`; TESTED_TREE `7f5b3d462b2f3bd031cbcd772b597630e6467185`. Docs commit riêng sáu canonical files, hash bằng `git log -1 --format=%H -- docs/galaxy-os/milestones/M2/HANDOFF.md`; không self-amend. TESTED không có nghĩa mọi test PASS. Commit338b7b1 sau đó chỉ thêm cwd Windows vào MCP config đã kiểm bằng native CLI; source/test ứng dụng giữ nguyên so với0a216eb. Tooling config tree d93b60c2d94fa25a74f3aa94f357fccac51a320e, không gọi đó là app tree đã chạy full suite.
+- Unit file52/52; targeted technical1PASS có bytes thật và deny delete; Web508/508; root lint/typecheck/build/schema/format PASS. FullAPI1/2 và repeat10 NOT_RUN vì gate clock nhiễu. Browser cuối targeted4:3PASS/1FAIL, CLOCK_CONTAMINATED; full browser NOT_RUN. Không gộp targeted thành full.
+- Lỗi browser cuối là `reconnect retries a committed send with the same key and clears a recovered polling error`, setup composer mất sau GETmessages404: API08:04:39 trước grant08:07:38, hasFutureGrant=true. Cross-tab, hostile upload/retry và document Back/revoke đạt theo lớp trong cùng lượt, chưa nghiệm thu clock sạch.
+- BFCache ở Chromium134: NOT_ELIGIBLE_CONFIRMED (no-store main/XHR và browsing instance); đường reload/back thật kiểm lại quyền và ẩn room sau revoke. Không gọi BFCache restore PASS. Chrome154 tương tác chưa kiểm BFCache; không bỏ no-store.
+- Clock: Windows ổn trong mẫu45giây, WSL nhảy ~183giây; chưa chứng minh tác nhân. Timesyncd active, Hyper-V implicit sync bật; W32Time stopped. Chủ máy cho phép thử dừng tạm nhưng OS đòi xác thực. Người dùng chưa thể chạy lệnh, yêu cầu tiếp tục code độc lập. Không tự sửa clock hay vô hiệu dịch vụ.
+
+### Developer tooling — không phải M3
+
+**Chrome:** Google Chrome Windows154.0.8037.57, PID12108 lúc kiểm, VisibleWindow=true. Profile persistent thường `%LOCALAPPDATA%\GalaxyOS\ChromeDev`, không Incognito, không profile cá nhân. Debugger thực tế chỉ127.0.0.1:33004 Windows. WSL không nối được bằng loopback trực tiếp nên MCP chạy cùng phía Windows qua stdio cmd.exe. Cơ chế browser-url, không autoConnect vào default profile. Không remote-allow-origins, disable-web-security, tắt sandbox hay global ignore-certificate-errors.
+
+**MCP:** chrome-devtools-mcp1.10.1 chính thức, portable Node22.23.3 dưới `%LOCALAPPDATA%\GalaxyOS\Tools`; SHA256 Node zip kiểm từ SHASUMS chính thức `2b0ff57b049cda1bbcea2240eec20467018713c1efe1f7360c2681859b90ed71`. Npm cài pinned package, ignore-scripts/no-audit/no-fund, không global PATH. Wrapper source `scripts/galaxy-chrome-mcp.cmd`, bản chạy đặt bên cạnh Node và thư mục chrome-mcp tại Tools. Flags đã đối chiếu package/help: no-usage-statistics/no-performance-crux/redact-network-headers, allowlist chỉ https://localhost:33003/_ và http://localhost:3000/_. Env tắt update checks/usage.
+
+Công cụ chính thức đã initialize→tools/list→list_pages/evaluate_script/navigate_page qua stdio; proof ở `visible-mcp-tools.jsonl`, `visible-interactive-navigation.log` (chỉ URL/title/trạng thái/me HTTPcode). Không lấy cookie/token, không thu password/MFA hoặc trace phiên người dùng. Probe one-off ignored, không xây router/model API ngoài. Phiên regression Chromium134 và cookie fixture riêng, không logout/seed vào Chrome của chủ máy.
+
+**Codex:** CLI0.157.1; `codex debug models --bundled` và metadata model cache xác nhận IDs/reasoning, không đọc auth.json. Native project `.codex/config.toml` và ba `.codex/agents/*.toml`. `codex app-server --strict-config` + config/read cwd worktree PASS, max_concurrent_threads_per_session=1; mcp get xác nhận Galaxy bridge enabled, inherited chrome-devtools Linux disabled **chỉ ở project này**. --strict-config không hỗ trợ mcp/features subcommand; đã dùng app-server đúng hỗ trợ. Không đổi default model/provider/quyền user config.
+
+| Task                             | Mức | Model/effort cấu hình                               | Thực tế lượt này                                                                                |
+| -------------------------------- | --- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| lệnh test/lint/diff              | T0  | công cụ, không worker                               | scripts/tools                                                                                   |
+| docs/nhãn xác định               | T1  | galaxy_light: gpt-6-luna/low                        | cấu hình phiên sau, chưa gọi                                                                    |
+| code thông thường đã rõ contract | T2  | galaxy_coding: gpt-6-sol/medium                     | cấu hình phiên sau, chưa gọi                                                                    |
+| quyền/publication/clock/review   | T3  | galaxy_security_review: gpt-6-astra/high, read-only | đã request reviewer gpt-6-astra/high bằng native spawn; actual runtime ID không trả, UNVERIFIED |
+
+Điều phối INLINE vẫn viết code; actual model ID turn hiện tại UNVERIFIED. Đây là CONFIGURED_NATIVE_NEXT_SESSION, không khẳng định runtime tự đổi model/auto-discovery custom agents đã kiểm. Một writer và tối đa một reviewer; không worker chạy chung DB/browser. Reload phiên/extension Codex trong worktree khi muốn client nhận server `galaxy_chrome` mới; không kill phiên hiện tại. MCP direct stdio đã nối được Chrome thật trước reload.
+
+Tắt riêng kết nối bằng `enabled=false` dưới `[mcp_servers.galaxy_chrome]` trong project config; muốn khôi phục server kế thừa thì gỡ override disabled của chrome-devtools ở cùng file. Không ghi đè config user. Profile/Node/package/cert/authstate nằm ngoài Git; không xóa profile khi tắt MCP. Khi cần mở lại Chrome, dùng executable Windows đã xác minh với user-data-dir Galaxy riêng và loopback33004 như [cấu hình chính thức](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/main/docs/configuration.md); kiểm listener/profile trước nối, không reuse process cá nhân. Thử launcher PowerShell bị execution policy chặn, không bypass và không ship launcher chưa chạy; Chrome đã mở bằng thao tác được phép trước đó, vẫn còn dùng được.
+
+Tham chiếu: [Codex subagents](https://developers.openai.com/codex/subagents), [config reference](https://developers.openai.com/codex/config-reference), [MCP](https://developers.openai.com/codex/mcp), [Chrome MCP chính thức](https://github.com/ChromeDevTools/chrome-devtools-mcp), [BFCache no-store](https://developer.chrome.com/docs/web-platform/bfcache-ccns), [notRestoredReasons](https://developer.chrome.com/docs/web-platform/bfcache-notrestoredreasons/). Công cụ này không triển khai AI runtime Galaxy.
+
+### Bản thử, runtime cũ và bước tiếp
+
+Test https://localhost:33003/work vẫn riêng DB55433/Redis56380/storagefixture; health200. Build/PID/checksum ở VERIFICATION. Chạy/dừng bằng launcher hiện hữu `node scripts/m2-a-serve.mjs api --clock-monitor`, `node scripts/m2-a-serve.mjs web --production`, `node scripts/m2-a-tls.mjs` sau khi kiểm PID/cwd/cổng; không khởi chạy trùng. Ctrl-C đúng terminal do lượt này sở hữu. Không dùng mật khẩu bản3000 cho testDB33003.
+
+**MAIN_RUNTIME_CHANGED: YES — STARTED_EXISTING_VERSION_BY_OWNER.** Chủ dự án đã chọn “Cho phép khởi động bản cũ3000”. Recipe `pnpm --filter @galaxy/api dev` và `pnpm --filter @galaxy/web dev` tại /home/galaxy_os, main source/Git vẫn sạch, không copy/merge M2-A. MAIN_SOURCE_CHANGED:NO; PUSH_MERGE_DEPLOY:NOT_PERFORMED. Chỉ dừng bản cũ khi chủ máy yêu cầu, không đóng khi kết thúc test M2-A.
+
+1. OS clock: chủ máy đã được hướng dẫn một bước `sudo systemctl stop systemd-timesyncd` trong terminal WSL để thử nghiệm tạm, chưa làm được. Sau khi thực hiện, đo Windows/WSL90giây; không giả là đã chữa. Tiếp đó gate45giây + repeat10 +2fullAPI cùng code/config; nếu jump thì dừng nghiệm thu.
+2. B5: CONTRACT thông tin/PAYMENT lịch/DELIVERY_INSTALL kế hoạch vẫn không thay tài liệu ký, biên lai hay biên bản giao. CONTRACT_FILE controlled registration proposal reviewed nhưng NOT_IMPLEMENTED. PAYMENT/DELIVERY linkage/version/writer thiếu A/B/C. PLAN ghi exact đường và ràng buộc; không giả thiếu kỹ thuật là quyết định D hoặc miễn scope. Cần code/test thêm trước gọi B5 đầy đủ.
+3. Browser full scope sau clock ổn định; giữ sửa session fixture, kiểm reconnect lỗi403/404/revoke, race/expiry/upload từng nhánh và publication E2E từng nguồn trên mobile emulation. Không lấy3PASS contaminated làm đóng ca.
+
+M2_A_STATUS:PARTIAL; M2_OVERALL_STATUS:PARTIAL_LEAD_LIFECYCLE_DEFERRED; M3_ENTRY_GATE:BLOCKED; M3_IMPLEMENTATION_STATUS:NOT_STARTED. M3-ENTRY vẫn mục điều kiện bên dưới và source/test baseline nêu trên, chưa là nền nghiệm thu. Lead-only/lifecycle deferred; không thêm AI/RAG hoặc đọc hồ sơ thật cho AI.
+
+## Lịch sử — M2-A CLOSEOUT, 2026-09-28
 
 **M2_A_STATUS: PARTIAL. M3_ENTRY_GATE: BLOCKED.** Đã code thêm ba nguồn publication còn thiếu, sửa scope rỗng/thu hồi quyền lúc chốt artifact, multipart tiếng Việt/BOM, nhãn bản nháp, key prepare retry và gate clock. Không chỉ đổi báo cáo. Chưa đủ nghiệm thu vì clock host nhảy, BFCache không có hit thật và full/browser/stability chưa đạt. INLINE + self-review + hai reviewer độc lập chỉ đọc; không hỏi lại B1–B5.
 

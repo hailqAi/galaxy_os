@@ -20,6 +20,21 @@ Review độc lập (chỉ đọc) đã thực hiện: năm điểm important. N
 
 ## Tiếp tục M2-A — phạm vi đã được giao
 
+### Lượt Chrome hiển thị / baseline 5d6690b6 — INLINE
+
+Trạng thái chốt: sửa binary immutability/session fixture/navigation + tooling đã code ở `0a216eb`. Không triển khai thêm adapter tài liệu thật trong lượt này; phần bên dưới là công việc còn lại, không phải đã hoàn thành.
+
+**CONTRACT_FILE — TECHNICAL_PROPOSAL_REVIEWED / NOT_IMPLEMENTED (A/C và linkage B nhỏ):** tái dùng `ContractDocument`, format hữu hạn `CUSTOMER_REVIEW_FILE`, file gửi khách xem xét, không suy chữ ký hoặc approval. File dự kiến: `project-chat.dto.ts/controller.ts/service.ts`, `customer-publication-source.ts`, `chat-controls.tsx`, integration/browser hiện hữu. API đăng ký contract/appendix + FileAsset/version phải kiểm contract.update đúng Project, contract.read/file.read+download, room UPLOAD, source fingerprint đã chọn, fresh IAM trước/sau I/O; server hash/version/audit, Project lock, không ghi tác động ký/tiền. `checkedRelease` phân nhánh format trước đường tái sinh TXT. UI chọn nguồn và file có quyền; snapshot thông tin giữ riêng. Test: exact bytes qua preview/publish/download; sai customer/version/approval, nguồn đổi, quyền bị thu hồi, generic delete, hai publisher/retry. Reviewer T3 đã rà thiết kế; chưa có code hay test positive cho nhánh này.
+
+PAYMENT artifact còn A/B/C: CustomerPaymentSchedule.requiredDocuments chỉ JSON, CustomerPayment chưa FK/version artifact; không dùng receiptNumber làm chứng cứ binary. DELIVERY artifact còn A/B/C: SiteDelivery.evidenceFileId scalar, chưa FK/version/checksum/writer/API. Cần liên kết và đường chuẩn bị trên domain hiện hữu; không tự gọi là D hoặc exempt. Chỉ việc xác nhận chữ ký/tiền đối soát/thực giao-nghiệm thu ngoài quy trình mới là D. Toàn B5 tiếp tục PARTIAL.
+
+- T0 công cụ hiện hữu; T1 Luna/low, T2 Sol/medium, T3 Astra/high qua native custom agents (chỉ cấu hình phiên sau, không khẳng định đổi model turn này). Một writer, một reviewer read-only; reviewer không chạy DB/browser.
+- Chrome Windows profile Galaxy riêng, MCP1.10.1 qua stdio Windows/loopback33004, chỉ origin được giao; không cookie/account cá nhân. Regression dùng context fixture khác.
+- `apps/web/tests/browser/m2-project-chat.spec.ts`: sửa fixture login lặp gây vượt limiter bằng session fixture đã đăng nhập thật; giữ ca login UI riêng và cross-tab logout/login thật. Kiểm binary/retry/quyền như cũ. `apps/api/test/m2-browser.fixture.ts`: chỉ nếu cần metadata session, không nới limiter.
+- Cùng browser spec: ghi navigation thật, browser version/reasons; kiểm restore hoặc full reload phù hợp OWNER_DIRECTION, revalidate/revoke/draft/polling. Không gọi synthetic pageshow là BFCache.
+- Publication: reviewer T3 chỉ đọc domain/linkage; bổ sung đúng khoảng trống có source contract thật, không đổi ý nghĩa snapshot sang tài liệu ký/biên lai/biên bản.
+- `scripts/m2-clock-monitor.mjs` giữ observer hiện hữu; đối chiếu Windows UTC/Stopwatch và WSL wall/monotonic ở log riêng. Full/repeat gate giữ nguyên; contaminated chỉ chẩn đoán, không nghiệm thu. Build/root lint/Web/format theo recipe; local source/docs commits riêng sau review.
+
 RESUME_START_SHA: `b2c8fe440c0e4b5ca53940d9c8ded34ed00ab5b8`. INLINE; giữ B1–B5, không xin lại approval. Hai reviewer chỉ đọc: publication/provenance và regression/navigation. Không chạy DB/browser/build đồng thời.
 
 1. **Hồi quy:** khôi phục log gốc 13 lỗi; tái hiện `test/m2-project-chat.integration.test.ts`, `test/project-required-document-upload.integration.test.ts`, `test/admin-reset-password.integration.test.ts`; điều tra cả lỗi mới từ full suite. Giữ timeout/assertion, ghi thao tác đang chờ và phép đo clock/DB. Sửa source hoặc fixture đúng nguyên nhân, targeted → nhóm → full; lặp có giới hạn 10 lần nhóm từng lỗi sau sửa. Log trong `.superpowers/sdd/PLAN/` (ignored).

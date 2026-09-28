@@ -1,6 +1,15 @@
 # Trạng thái triển khai và điểm tiếp tục
 
-## Hiện tại — M2-A closeout, 2026-09-28
+## Hiện tại — Chrome hiển thị và M2-A, 2026-09-28
+
+- M2_A_STATUS: **PARTIAL**; M2_OVERALL_STATUS: PARTIAL_LEAD_LIFECYCLE_DEFERRED; M3_ENTRY_GATE: BLOCKED; M3 NOT_STARTED.
+- Code `338b7b18581387bf2b1d6412c3b921670de70395`; app tested `0a216ebab2109e6c6a2c444071fd4e6a671c22d5` (commit sau chỉ cwd MCP), tree `7f5b3d462b2f3bd031cbcd772b597630e6467185`. Sửa binary đã phát hành bị mutation file thông thường; session fixture riêng khi logout; test navigation theo OWNER_DIRECTION mới. INLINE + một reviewer T3 chỉ đọc, không reviewer giả.
+- File unit52PASS, targeted technical1PASS với binary thật, Web508PASS; root lint/typecheck/build/schema/format đạt. Browser targeted cuối3PASS/1FAIL (reconnect setup grant nằm tương lai), CLOCK_CONTAMINATED. FullAPI1/2, repeat10, fullbrowser chưa nghiệm thu; giữ clock blocker OS authentication. B5 actual contract/payment/delivery documents còn A/B/C, không đánh đồng snapshot với chứng cứ ký/thu/giao.
+- Chrome Windows154 hiển thị profile Galaxy riêng, MCP1.10.1 nối thực qua Windows stdio/loopback33004; người dùng tự đăng nhập bản3000, /projects và /me200 đã kiểm đọc-only. Native Codex routing T1Luna/low,T2Sol/medium,T3Astra/high cấu hình project cho phiên sau; actual runtime model UNVERIFIED, không AI M3.
+- **MAIN_RUNTIME_CHANGED:YES — chỉ khởi động lại bản cũ3000/3001 theo xác nhận mới của chủ dự án. MAIN_SOURCE_CHANGED:NO.** Main Git sạch; test33003 vẫn riêng. Không push/merge/deploy.
+- [VERIFICATION](milestones/M2/VERIFICATION.md), [HANDOFF](milestones/M2/HANDOFF.md), [DECISIONS](milestones/M2/DECISIONS.md). Các mục dưới là lịch sử, không thay trạng thái hiện tại.
+
+## Lịch sử — M2-A closeout, 2026-09-28
 
 - **M2_A_STATUS: PARTIAL; M2_OVERALL_STATUS: PARTIAL_LEAD_LIFECYCLE_DEFERRED; M3_ENTRY_GATE: BLOCKED.** Code local `caa6c32c5e21c5a5b0f33ef30eca4309c6bcd749`, tested tree `15f49c27074a1de8ccbd4d9bf75ed861cbde0ac6`. Giữ B1–B5, INLINE và hai reviewer độc lập chỉ đọc.
 - Đã thêm publication CONTRACT/phụ lục thông tin, PAYMENT lịch nghĩa vụ, DELIVERY_INSTALL kế hoạch từ domain thật; typed source/snapshot/binary, hai người và revoke/stale/idempotency. Không giả chữ ký/biên lai/thực giao. Sửa scope rỗng, multipart UTF8/BOM, nhãn DRAFT và prepare retry key; không hệ thống thứ hai.
