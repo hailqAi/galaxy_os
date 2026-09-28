@@ -1,5 +1,11 @@
 # Trạng thái triển khai và điểm tiếp tục
 
+## Lượt tiếp tục — 2026-09-28
+
+- M2-A giữ PARTIAL, M3 gate BLOCKED. Thêm publication thông tin khoản thu khách hàng từ `CustomerPayment` thật, liên kết typed/version fingerprint, migraton additive chỉ áp test DB; không phải biên lai hoặc đối soát. Code commit `06712258eb9f8b1f3a3349111634990769cda6cb`.
+- Test: integration publication 1/1, Web 508/508, lint/typecheck/format/schema/migration status đạt. Clock baseline contaminated khoảng ±183 giây; full regression/repeat10/browser acceptance chưa đạt. Chrome 154 hiển thị đúng build test ở localhost:33003 nhưng trang đang là login; không dùng fixture hoặc main account.
+- Xem [M2 Verification](milestones/M2/VERIFICATION.md) và [Handoff](milestones/M2/HANDOFF.md). M3 chưa code; không push/merge/deploy; main runtime không đổi lượt này.
+
 ## Hiện tại — Chrome hiển thị và M2-A, 2026-09-28
 
 - M2_A_STATUS: **PARTIAL**; M2_OVERALL_STATUS: PARTIAL_LEAD_LIFECYCLE_DEFERRED; M3_ENTRY_GATE: BLOCKED; M3 NOT_STARTED.

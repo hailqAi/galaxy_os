@@ -1,5 +1,15 @@
 # M2 — Bàn giao triển khai
 
+## Tiếp tục sau HEAD 945d1ca — 2026-09-28
+
+- Bản thử đang phục vụ đúng worktree/build mới tại `https://localhost:33003/work`; Chrome Stable154.0.8037.57, headed, Galaxy Dev riêng. Sau điều hướng an toàn/reload hiện là trang đăng nhập (`/login?returnTo=%2Fwork`); chưa có fixture đăng nhập và chưa có demo chat authenticated. Người dùng đã thấy app cũ ở localhost:3000 trước đó; source M2 nằm worktree riêng và chưa tích hợp nên URL cũ không có giao diện M2.
+- API/Web process thuộc đúng worktree: API `127.0.0.1:33001` health200, Web `127.0.0.1:33002`, TLS `127.0.0.1:33003`; Web Next BUILD_ID `hjuXlNAZezryAP37nkERM`; API `dist/main.js` SHA256 `baff2384276602bf63cba1337b0749ab4b1b1135512847acd346d5523ace7720`. `/work` trả307 login, `/login`200.
+- Code commit `06712258eb9f8b1f3a3349111634990769cda6cb`; tested source tree `bddaa700e51c157fb1d70bdfb446f59066b4f05d`. Docs commit sẽ ghi ở commit kế tiếp.
+- Đã bổ sung publication `CUSTOMER_PAYMENT_RECORD` từ model/writer CustomerPayment; khách nhận snapshot số tiền/ngày/phương thức/phân bổ ghi nhận, không nhận bank reference, receipt number, notes hoặc exchange rate. Đây không phải biên lai hoặc đối soát. Test thật 1/1 và Web508/508; lint/typecheck/format/schema/migration/build đạt.
+- Clock run `a9d9a9cd-6d01-4b14-bd27-e93af8c6804d` contaminated ±~183s so với monotonic ~100ms/sample. Không rõ tác nhân. Full API/repeat10/full browser chưa nghiệm thu. Một lệnh sai gây test suite thiếu env/EPERM được ghi riêng ở VERIFICATION, không tính lỗi app.
+- B5 vẫn chưa kín: CONTRACT thiếu artifact/version/approval hợp đồng/phụ lục thực, PAYMENT chưa có receipt/reconciliation approval/source, DELIVERY_INSTALL chưa có record/binary xác nhận giao/lắp. Không giả chứng từ hoặc thay đổi nghiệp vụ. Vì vậy M2_A PARTIAL, M2 overall PARTIAL_LEAD_LIFECYCLE_DEFERRED, M3 gate BLOCKED, M3 NOT_STARTED.
+- Không đổi main runtime/source, không push/merge/deploy. Ảnh app login không nhạy cảm: `/tmp/galaxy-m2a-current.png`. Test DB riêng, 81 migration up to date.
+
 ## Hiện hành — Chrome hiển thị, M2-A PARTIAL, 2026-09-28
 
 Người dùng đã đăng nhập được **bản cũ http://localhost:3000/projects** trong Chrome Windows hiển thị riêng; Codex kết nối đúng phiên qua MCP, điều hướng đọc-only và /api/v1/me200. Code M2-A vẫn ở worktree riêng, chưa tích hợp vào bản3000. Đã sửa binary publication bị generic file.delete/update/restore vô hiệu hóa, session fixture logout lẫn phiên điều khiển, và tiêu chí kiểm navigation/no-store reload. Chưa đủ điều kiện sang M3.

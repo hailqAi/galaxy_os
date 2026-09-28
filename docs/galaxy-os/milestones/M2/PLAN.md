@@ -1,5 +1,11 @@
 # Galaxy OS M2-A Implementation Plan
 
+## Bổ sung kết quả tiếp tục 945d1ca
+
+Đã hoàn tất một phần source publication payment bằng model `CustomerPayment` và `PaymentAllocation` hiện hữu. `CUSTOMER_PAYMENT_RECORD` tạo customer-facing snapshot typed/version-pinned qua luồng prepare/review/publish/download; không xuất private bank/receipt/note/exchange data và không thực hiện tác động sổ nghiệp vụ. Exact files: schema + hai additive migration, `customer-publication-source.ts`, DTO/service, `chat-controls.tsx`, integration test `m2-project-chat.integration.test.ts`. Ca test dùng writer nghiệp vụ thật, người phát hành khác người chuẩn bị, tải binary thật và kiểm tra không lộ sentinel/không nhân giao dịch. Không có source approval/reconciliation ở domain nên snapshot chỉ thông tin khoản thu đã ghi, không khẳng định đã đối soát.
+
+Đóng code này chưa đóng M2-A. Contract artifact/signature, delivery/install evidence, full API repeat gate, full browser acceptance và clock host diagnosis vẫn là blockers. Xem kết quả mới nhất trong [VERIFICATION](VERIFICATION.md); không bắt đầu M3 trước khi gate đạt.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: `superpowers:executing-plans`; chủ dự án chọn INLINE. Theo chỉ đạo M2-A, tác giả lập và rà soát kỹ thuật kế hoạch để thực thi, không PLAN_APPROVED_BY_OWNER.
 
 **Goal:** Project đã có → chat nội bộ/khách, lịch sử/file bền vững, quyền hiện tại và publication hai actor trên test stack riêng.

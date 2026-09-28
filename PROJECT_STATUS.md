@@ -1,5 +1,14 @@
 # Project status
 
+## Lượt kiểm tra Chrome và tiếp tục M2-A — 2026-09-28
+
+- Hiện trạng Git tại đầu lượt: worktree `/home/galaxy_os/.worktrees/m2-a-20260928`, branch `m2/project-chat-20260928`, HEAD `945d1caaf972881b298c10141a0d2eef64783496`; code mới commit `06712258eb9f8b1f3a3349111634990769cda6cb`, tree `bddaa700e51c157fb1d70bdfb446f59066b4f05d`. Docs còn được cập nhật riêng.
+- Thêm typed publication `CUSTOMER_PAYMENT_RECORD` từ `CustomerPayment` hiện hữu. Chỉ xuất ngày/số tiền/tiền tệ/phương thức/phân bổ; loại trừ bank reference/receipt/internal notes và ghi rõ đây không phải biên lai/đối soát. Không tạo giao dịch hoặc side effect. Integration test qua domain writer thật và tải đúng binary: 1 PASS; Web 508/508; lint, typecheck, format, Prisma validate và 81 migrations trên DB test riêng PASS. Build API/Web thành công.
+- Chrome Stable 154.0.8037.57, profile Galaxy Dev riêng, MCP chính thức 1.10.1. Tab hiện ở `https://localhost:33003/login?returnTo=%2Fwork`, đúng test build mới (Next BUILD_ID `hjuXlNAZezryAP37nkERM`; API health 200). `/work` redirect login; không dùng phiên người dùng làm fixture. 33003 chưa có phiên đăng nhập M2 test, nên chưa demo chat/UI authenticated.
+- Clock run `a9d9a9cd-6d01-4b14-bd27-e93af8c6804d` bị `CLOCK_CONTAMINATED_BASELINE`: wall clock lùi/tăng khoảng 182.7–183.5s so với monotonic delta ~100ms. Full API/repeat10/browser nghiệm thu chưa chạy sạch. Một lệnh nhắm test truyền sai làm Vitest chạy suite rộng khi thiếu env và bị EPERM bind; không tính là regression ứng dụng.
+- **M2_A_STATUS: PARTIAL; M2_OVERALL_STATUS: PARTIAL_LEAD_LIFECYCLE_DEFERRED; M3_ENTRY_GATE: BLOCKED; M3: NOT_STARTED.** CONTRACT vẫn chỉ snapshot thông tin; PAYMENT lịch nghĩa vụ và khoản thu ghi nhận, không phải receipt/đối soát; DELIVERY_INSTALL kế hoạch, không phải bằng chứng giao/lắp. Chưa đủ ngữ nghĩa/B5 và regression để mở M3.
+- Bản thử riêng: `https://localhost:33003/work`; main source/runtime không thay đổi trong lượt này. Không push/merge/deploy. Chi tiết ở [VERIFICATION](docs/galaxy-os/milestones/M2/VERIFICATION.md) và [HANDOFF](docs/galaxy-os/milestones/M2/HANDOFF.md).
+
 ## Hiện tại — Chrome hiển thị và M2-A, 2026-09-28
 
 - M2_A_STATUS: **PARTIAL**; M2_OVERALL_STATUS: PARTIAL_LEAD_LIFECYCLE_DEFERRED; M3_ENTRY_GATE: BLOCKED; M3 NOT_STARTED.
