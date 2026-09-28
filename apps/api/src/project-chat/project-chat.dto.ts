@@ -107,8 +107,11 @@ export class ChatUploadDto {
   @IsUUID() clientKey!: string;
 }
 export class ChatReleaseDto {
+  @IsOptional()
+  @IsIn(['PROPOSAL', 'QUOTATION', 'TECHNICAL', 'SAMPLE', 'HANDOVER'])
+  sourceType?: 'PROPOSAL' | 'QUOTATION' | 'TECHNICAL' | 'SAMPLE' | 'HANDOVER';
   @IsUUID() sourceId!: string;
-  @IsUUID() fileId!: string;
+  @IsOptional() @IsUUID() fileId?: string;
   @IsInt() @Min(1) version!: number;
 }
 export class ChatPublishDto {

@@ -5,7 +5,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PrismaService } from '../prisma.service';
 import { BusinessEntityPolicy } from './business-entity.policy';
 import { actorsForPermission, CurrentActor } from './current-actor';
@@ -21,7 +21,16 @@ const context = (actor?: object, request: Record<string, unknown> = {}) => {
   } as unknown as ExecutionContext;
 };
 
+const environmentKeys = [
+  'ALLOW_DEV_AUTH',
+  'NODE_ENV',
+  'DATABASE_URL',
+  'SESSION_COOKIE_NAME',
+] as const;
+const initialEnvironment = environmentKeys.map((key) => process.env[key]);
+
 describe('access control', () => {
+  afterEach(() => vi.unstubAllEnvs());
   const selfProjectUploader = {
     userId: 'user-1',
     organizationId: 'organization-1',
@@ -317,10 +326,10 @@ describe('access control', () => {
   });
 
   it('rejects an authenticated session when its user is disabled', async () => {
-    process.env.ALLOW_DEV_AUTH = 'false';
-    process.env.NODE_ENV = 'test';
-    process.env.DATABASE_URL = 'postgresql://localhost/test';
-    process.env.SESSION_COOKIE_NAME = 'galaxy_session';
+    vi.stubEnv('ALLOW_DEV_AUTH', 'false');
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('SESSION_COOKIE_NAME', 'galaxy_session');
     const now = new Date();
     const reflector = {
       getAllAndOverride: vi.fn().mockReturnValue(false),
@@ -364,9 +373,9 @@ describe('access control', () => {
   });
 
   it('rejects ambiguous development organization membership', async () => {
-    process.env.ALLOW_DEV_AUTH = 'true';
-    process.env.NODE_ENV = 'test';
-    process.env.DATABASE_URL = 'postgresql://localhost/test';
+    vi.stubEnv('ALLOW_DEV_AUTH', 'true');
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('DATABASE_URL', 'postgresql://localhost/test');
     const reflector = {
       getAllAndOverride: vi.fn().mockReturnValue(false),
     } as unknown as Reflector;
@@ -389,9 +398,9 @@ describe('access control', () => {
   });
 
   it('projects permissions from valid role assignments and excludes expired assignments', async () => {
-    process.env.DATABASE_URL = 'postgresql://localhost/test';
-    process.env.NODE_ENV = 'test';
-    process.env.SESSION_COOKIE_NAME = 'galaxy_session';
+    vi.stubEnv('DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('SESSION_COOKIE_NAME', 'galaxy_session');
     const now = new Date();
     const request: Record<string, unknown> = {
       method: 'GET',
@@ -488,9 +497,9 @@ describe('access control', () => {
   });
 
   it('rejects a session with an inactive organization membership', async () => {
-    process.env.DATABASE_URL = 'postgresql://localhost/test';
-    process.env.NODE_ENV = 'test';
-    process.env.SESSION_COOKIE_NAME = 'galaxy_session';
+    vi.stubEnv('DATABASE_URL', 'postgresql://localhost/test');
+    vi.stubEnv('NODE_ENV', 'test');
+    vi.stubEnv('SESSION_COOKIE_NAME', 'galaxy_session');
     const now = new Date();
     const reflector = {
       getAllAndOverride: vi.fn().mockReturnValue(false),
@@ -522,5 +531,10 @@ describe('access control', () => {
         }),
       ),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+  it('leaves authentication and database configuration unchanged for the next suite', () => {
+    expect(environmentKeys.map((key) => process.env[key])).toEqual(
+      initialEnvironment,
+    );
   });
 });

@@ -394,13 +394,16 @@ describe.sequential('real authentication and personal account', () => {
   });
 
   it('does not recreate a logged-out actor from the development flag alone', async () => {
-    process.env.ALLOW_DEV_AUTH = 'true';
-    process.env.DEV_AUTH_USER_EMAIL = email;
-    await request(app.getHttpServer()).get('/api/v1/me').expect(401);
-    await request(app.getHttpServer())
-      .get('/api/v1/me')
-      .set('x-galaxy-dev-auth', email)
-      .expect(200);
-    process.env.ALLOW_DEV_AUTH = 'false';
+    vi.stubEnv('ALLOW_DEV_AUTH', 'true');
+    vi.stubEnv('DEV_AUTH_USER_EMAIL', email);
+    try {
+      await request(app.getHttpServer()).get('/api/v1/me').expect(401);
+      await request(app.getHttpServer())
+        .get('/api/v1/me')
+        .set('x-galaxy-dev-auth', email)
+        .expect(200);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

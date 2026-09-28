@@ -21,6 +21,11 @@ import {
 import { PrismaService } from '../prisma.service';
 import { FileStorage } from '../files/file-storage';
 import { TasksService } from '../tasks/tasks.service';
+import { readEnvironment } from '../config/env';
+import {
+  assertFileCapacity,
+  lockOrganizationFileCapacity,
+} from '../files/file-quota';
 import {
   ChatAuthorityDto,
   ChatGrantDto,
@@ -305,6 +310,105 @@ export class ProjectChatService {
         try {
           await this.releaseSource(tx, actor, projectId, input);
           result.push({ ...input, name: row.documentName });
+        } catch (e) {
+          if (
+            !(
+              e instanceof ForbiddenException ||
+              e instanceof NotFoundException ||
+              e instanceof ConflictException
+            )
+          )
+            throw e;
+        }
+      }
+      const quotations = await tx.quotationDocument.findMany({
+        where: {
+          quotationVersion: {
+            quotation: { projectId, organizationId: actor.organizationId },
+          },
+        },
+        include: { quotationVersion: { select: { version: true } } },
+      });
+      for (const document of quotations) {
+        const input = {
+          sourceType: 'QUOTATION' as const,
+          sourceId: document.id,
+          version: document.quotationVersion.version,
+        };
+        try {
+          await this.releaseSource(tx, actor, projectId, input);
+          result.push({
+            ...input,
+            name: `Báo giá v${input.version} (${document.format})`,
+          });
+        } catch (e) {
+          if (
+            !(
+              e instanceof ForbiddenException ||
+              e instanceof NotFoundException ||
+              e instanceof ConflictException
+            )
+          )
+            throw e;
+        }
+      }
+      const [drawings, samples, handovers] = await Promise.all([
+        tx.technicalApprovalRevision.findMany({
+          where: {
+            technicalApproval: {
+              productionOrder: {
+                projectId,
+                organizationId: actor.organizationId,
+              },
+            },
+          },
+          include: { technicalApproval: true },
+        }),
+        tx.sampleApproval.findMany({
+          where: {
+            productionOrder: {
+              projectId,
+              organizationId: actor.organizationId,
+            },
+          },
+        }),
+        tx.handoverDocument.findMany({
+          where: { projectId, organizationId: actor.organizationId },
+        }),
+      ]);
+      const candidates: (ChatReleaseDto & { name: string })[] = drawings.map(
+        (r) => ({
+          sourceType: 'TECHNICAL',
+          sourceId: r.id,
+          version: r.revision,
+          name: `${r.technicalApproval.title} · bản duyệt`,
+        }),
+      );
+      for (const sample of samples) {
+        if (!sample.fileId) continue;
+        const file = await tx.fileAsset.findUnique({
+          where: { id: sample.fileId },
+          select: { version: true },
+        });
+        if (file)
+          candidates.push({
+            sourceType: 'SAMPLE',
+            sourceId: sample.id,
+            version: file.version,
+            name: `${sample.name} · phiên bản file`,
+          });
+      }
+      for (const h of handovers)
+        candidates.push({
+          sourceType: 'HANDOVER',
+          sourceId: h.id,
+          version: h.version,
+          name: `Hồ sơ bàn giao · ${h.type}`,
+        });
+      for (const input of candidates) {
+        try {
+          await this.releaseSource(tx, actor, projectId, input);
+          result.push(input);
         } catch (e) {
           if (
             !(
@@ -1138,6 +1242,7 @@ export class ProjectChatService {
     actor: CurrentActor,
     projectId: string,
     input: ChatReleaseDto,
+    register = false,
   ) {
     const fresh = await this.freshActor(tx, actor);
     let visible = false;
@@ -1159,6 +1264,15 @@ export class ProjectChatService {
       }
     }
     if (!visible) throw new NotFoundException();
+    if (input.sourceType === 'QUOTATION')
+      return this.quotationSource(tx, fresh, projectId, input, register);
+    if (
+      input.sourceType &&
+      ['TECHNICAL', 'SAMPLE', 'HANDOVER'].includes(input.sourceType)
+    )
+      return this.artifactSource(tx, fresh, projectId, input);
+    if (!input.fileId)
+      throw new BadRequestException('Thiếu file nguồn phương án');
     const source = await tx.projectRequiredDocument.findFirst({
       where: {
         id: input.sourceId,
@@ -1232,7 +1346,374 @@ export class ProjectChatService {
       throw new ForbiddenException(
         'Nguồn dùng chung cần tách và kiểm tra nội dung riêng',
       );
-    return { source, file };
+    return {
+      sourceUpdatedAt: source.updatedAt,
+      sourceId: source.id,
+      sourceVersionId: source.versions[0]!.id,
+      quotationDocumentId: null,
+      quotationApprovalId: null,
+      file,
+    };
+  }
+
+  private async quotationSource(
+    tx: Prisma.TransactionClient,
+    actor: CurrentActor,
+    projectId: string,
+    input: ChatReleaseDto,
+    register: boolean,
+  ) {
+    const scopes = actorsForPermission(actor, 'quotation.read').filter((a) =>
+      a.permissions.includes('quotation.export'),
+    );
+    const project = await tx.project.findFirst({
+      where: {
+        id: projectId,
+        OR: scopes.map((a) =>
+          projectWhereForPermissions(a, ['quotation.read', 'quotation.export']),
+        ),
+      },
+    });
+    if (!project || !scopes.length) throw new NotFoundException();
+    const document = await tx.quotationDocument.findFirst({
+      where: {
+        id: input.sourceId,
+        quotationVersion: {
+          version: input.version,
+          status: { in: ['APPROVED', 'SENT', 'ACCEPTED'] },
+          quotation: {
+            projectId,
+            organizationId: actor.organizationId,
+            customerId: project.customerId,
+            currentVersion: input.version,
+          },
+        },
+      },
+      include: {
+        quotationVersion: {
+          include: {
+            quotation: true,
+            approvals: {
+              where: { decision: 'APPROVED' },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+    const approval = document?.quotationVersion.approvals[0];
+    if (
+      !document ||
+      !approval ||
+      approval.actorId === document.quotationVersion.createdBy ||
+      !['PDF', 'XLSX'].includes(document.format)
+    )
+      throw new ConflictException(
+        'Báo giá chưa đủ nguồn/phiên bản/phê duyệt để phát hành',
+      );
+    const mimeType =
+      document.format === 'PDF'
+        ? 'application/pdf'
+        : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    const filename = `bao-gia-v${input.version}.${document.format.toLowerCase()}`;
+    let file = await tx.fileAsset.findUnique({
+      where: { storageKey: document.storageKey },
+      include: { attachments: true },
+    });
+    if (!file && register) {
+      const data = await this.releaseBytes(
+        document.storageKey,
+        document.checksum,
+      );
+      if (
+        document.sizeBytes !== null &&
+        document.sizeBytes !== BigInt(data.length)
+      )
+        throw new ConflictException('Kích thước bản xuất đã đổi');
+      await lockOrganizationFileCapacity(tx, actor.organizationId);
+      const env = readEnvironment();
+      await assertFileCapacity(tx, {
+        organizationId: actor.organizationId,
+        actorId: actor.userId,
+        incomingBytes: 0n,
+        staging: false,
+        organizationLimitBytes: BigInt(env.UPLOAD_ORGANIZATION_QUOTA_BYTES),
+        globalLimitBytes: BigInt(env.UPLOAD_GLOBAL_QUOTA_BYTES),
+        unmeasuredFileBytes: BigInt(env.UPLOAD_MAX_FILE_BYTES),
+        actorStagingLimit: env.UPLOAD_ACTOR_STAGING_LIMIT,
+      });
+      file = await tx.fileAsset.create({
+        data: {
+          organizationId: actor.organizationId,
+          originalFilename: filename,
+          storedFilename: document.storageKey.split('/').at(-1)!,
+          storageKey: document.storageKey,
+          checksum: document.checksum,
+          sizeBytes: BigInt(data.length),
+          mimeType,
+          category: 'CUSTOMER_QUOTATION',
+          uploadedById: document.generatedBy,
+        },
+        include: { attachments: true },
+      });
+      await this.event(
+        tx,
+        actor,
+        projectId,
+        file.id,
+        'chat.release.register-export',
+        { quotationDocumentId: document.id },
+      );
+    }
+    if (
+      file &&
+      (file.organizationId !== actor.organizationId ||
+        file.deletedAt ||
+        file.checksum !== document.checksum ||
+        (document.sizeBytes !== null &&
+          file.sizeBytes !== document.sizeBytes) ||
+        file.mimeType !== mimeType ||
+        file.uploadedById !== document.generatedBy ||
+        file.confidentiality !== 'INTERNAL' ||
+        file.attachments.length ||
+        (input.fileId && input.fileId !== file.id))
+    )
+      throw new ConflictException('Bản xuất không khớp nguồn báo giá');
+    return {
+      sourceUpdatedAt: document.quotationVersion.quotation.updatedAt,
+      sourceId: null,
+      sourceVersionId: null,
+      quotationDocumentId: document.id,
+      quotationApprovalId: approval.id,
+      file,
+    };
+  }
+
+  private async artifactSource(
+    tx: Prisma.TransactionClient,
+    actor: CurrentActor,
+    projectId: string,
+    input: ChatReleaseDto,
+  ) {
+    const permission =
+      input.sourceType === 'HANDOVER' ? 'handover.read' : 'production.read';
+    const scopes = actorsForPermission(actor, permission);
+    const project = await tx.project.findFirst({
+      where: {
+        id: projectId,
+        OR: scopes.map((a) => projectWhereForPermissions(a, permission)),
+      },
+    });
+    if (!project || !scopes.length) throw new NotFoundException();
+    let fileId: string | null = null,
+      updatedAt: Date,
+      snapshot: Prisma.InputJsonObject;
+    let technicalRevisionId: string | null = null,
+      sampleApprovalId: string | null = null,
+      handoverDocumentId: string | null = null;
+    if (input.sourceType === 'TECHNICAL') {
+      const revision = await tx.technicalApprovalRevision.findUnique({
+        where: { id: input.sourceId },
+        include: {
+          technicalApproval: {
+            include: {
+              productionOrder: {
+                include: {
+                  purchaseOrder: { include: { purchaseRequest: true } },
+                },
+              },
+            },
+          },
+        },
+      });
+      const parent = revision?.technicalApproval,
+        order = parent?.productionOrder;
+      if (
+        !revision ||
+        !parent ||
+        !order ||
+        order.organizationId !== actor.organizationId ||
+        order.projectId !== projectId ||
+        order.purchaseOrder.purchaseRequest.projectId !== projectId ||
+        order.purchaseOrder.projectId !== projectId ||
+        order.purchaseOrder.organizationId !== actor.organizationId ||
+        !['SHOP_DRAWING', 'SAMPLE'].includes(parent.type) ||
+        parent.status !== 'APPROVED' ||
+        parent.currentRevision !== revision.revision ||
+        revision.revision !== input.version ||
+        revision.decision !== 'APPROVED' ||
+        !revision.decidedBy ||
+        !revision.decidedAt ||
+        revision.decidedBy === revision.submittedBy
+      )
+        throw new ConflictException(
+          'Bản vẽ/mẫu chưa đủ nguồn/phê duyệt/phiên bản',
+        );
+      technicalRevisionId = revision.id;
+      fileId = revision.fileId;
+      updatedAt = parent.updatedAt;
+      snapshot = {
+        sourceType: 'TECHNICAL',
+        sourceId: revision.id,
+        parentId: parent.id,
+        type: parent.type,
+        revision: revision.revision,
+        status: parent.status,
+        submittedBy: revision.submittedBy,
+        decidedBy: revision.decidedBy,
+        decidedAt: revision.decidedAt.toISOString(),
+      };
+    } else if (input.sourceType === 'SAMPLE') {
+      const sample = await tx.sampleApproval.findUnique({
+        where: { id: input.sourceId },
+        include: {
+          productionOrder: {
+            include: { purchaseOrder: { include: { purchaseRequest: true } } },
+          },
+        },
+      });
+      const order = sample?.productionOrder;
+      if (
+        !sample ||
+        !order ||
+        order.organizationId !== actor.organizationId ||
+        order.projectId !== projectId ||
+        order.purchaseOrder.purchaseRequest.projectId !== projectId ||
+        order.purchaseOrder.projectId !== projectId ||
+        order.purchaseOrder.organizationId !== actor.organizationId ||
+        sample.status !== 'APPROVED' ||
+        !sample.decidedBy ||
+        !sample.decidedAt ||
+        sample.decidedBy === sample.submittedBy
+      )
+        throw new ConflictException('Mẫu chưa đủ nguồn/phê duyệt');
+      sampleApprovalId = sample.id;
+      fileId = sample.fileId;
+      updatedAt = sample.decidedAt;
+      snapshot = {
+        sourceType: 'SAMPLE',
+        sourceId: sample.id,
+        type: 'SAMPLE',
+        status: sample.status,
+        submittedBy: sample.submittedBy,
+        decidedBy: sample.decidedBy,
+        decidedAt: sample.decidedAt.toISOString(),
+      };
+    } else {
+      const document = await tx.handoverDocument.findUnique({
+        where: { id: input.sourceId },
+        include: { handover: true },
+      });
+      if (
+        !document ||
+        document.organizationId !== actor.organizationId ||
+        document.projectId !== projectId ||
+        document.handover.organizationId !== actor.organizationId ||
+        document.handover.projectId !== projectId ||
+        document.version !== input.version ||
+        document.supersededBy ||
+        ![
+          'HANDOVER_MINUTES',
+          'PRODUCT_LIST',
+          'WARRANTY_DOCUMENT',
+          'AS_BUILT_DRAWING',
+        ].includes(document.type) ||
+        !(
+          document.signedStatus === 'NOT_REQUIRED' ||
+          (['SIGNED_MANUALLY', 'SIGNED_EXTERNALLY'].includes(
+            document.signedStatus,
+          ) &&
+            document.signedAt)
+        )
+      )
+        throw new ConflictException(
+          'Hồ sơ bàn giao chưa đủ nguồn/trạng thái/phiên bản',
+        );
+      handoverDocumentId = document.id;
+      fileId = document.fileAssetId;
+      updatedAt = document.uploadedAt;
+      snapshot = {
+        sourceType: 'HANDOVER',
+        sourceId: document.id,
+        parentId: document.handoverId,
+        type: document.type,
+        version: document.version,
+        checksum: document.checksum,
+        signedStatus: document.signedStatus,
+        signedAt: document.signedAt?.toISOString() ?? null,
+        handoverStatus: document.handover.status,
+      };
+    }
+    if (!fileId || (input.fileId && input.fileId !== fileId))
+      throw new ConflictException('File không khớp nguồn');
+    const file = await tx.fileAsset.findFirst({
+      where: {
+        id: fileId,
+        organizationId: actor.organizationId,
+        deletedAt: null,
+      },
+      include: { attachments: true },
+    });
+    if (
+      !file ||
+      !file.checksum ||
+      !/^[0-9a-f]{64}$/.test(file.checksum) ||
+      file.confidentiality !== 'INTERNAL' ||
+      !file.attachments.some((a) => a.projectId === projectId) ||
+      file.attachments.some(
+        (a) => a.projectId !== projectId || a.entityType !== 'Project',
+      ) ||
+      (input.sourceType === 'SAMPLE' && file.version !== input.version) ||
+      (input.sourceType === 'HANDOVER' && snapshot.checksum !== file.checksum)
+    )
+      throw new ConflictException('File chưa đủ căn cứ phát hành');
+    // Existing restricted document references must not be repackaged as customer artifacts.
+    const [required, logical] = await Promise.all([
+      tx.projectRequiredDocument.count({
+        where: {
+          OR: [
+            { currentFileAssetId: file.id },
+            { versions: { some: { fileAssetId: file.id } } },
+          ],
+        },
+      }),
+      tx.projectStageOneDocument.count({
+        where: {
+          OR: [
+            { currentFileAssetId: file.id },
+            { versions: { some: { fileAssetId: file.id } } },
+          ],
+        },
+      }),
+    ]);
+    if (required || logical)
+      throw new ForbiddenException(
+        'Nguồn dùng chung cần kiểm tra nội dung riêng',
+      );
+    const sourceSnapshot = {
+      ...snapshot,
+      projectId,
+      customerId: project.customerId,
+      fileId: file.id,
+      fileVersion: file.version,
+      checksum: file.checksum,
+    };
+    return {
+      sourceId: null,
+      sourceVersionId: null,
+      quotationDocumentId: null,
+      quotationApprovalId: null,
+      technicalRevisionId,
+      sampleApprovalId,
+      handoverDocumentId,
+      sourceUpdatedAt: updatedAt,
+      sourceSnapshot,
+      sourceFingerprint: createHash('sha256')
+        .update(JSON.stringify(sourceSnapshot))
+        .digest('hex'),
+      file,
+    };
   }
 
   async prepareRelease(
@@ -1254,25 +1735,31 @@ export class ProjectChatService {
         actor.membershipKind === 'EXTERNAL'
       )
         throw new ForbiddenException();
-      const { source, file } = await this.releaseSource(
+      const { file, ...source } = await this.releaseSource(
         tx,
         actor,
         projectId,
         input,
+        true,
       );
+      if (!file) throw new ConflictException('Chưa có bản xuất hợp lệ');
+      // Storage/quota waits can outlive a session or source-role grant.
+      await this.releaseSource(tx, actor, projectId, {
+        ...input,
+        fileId: file.id,
+      });
+      await this.access.assertRoom(actor, roomId, 'UPLOAD', tx);
       const release = await tx.chatDocumentRelease.create({
         data: {
           organizationId: actor.organizationId,
           projectId,
           roomId,
-          sourceId: source.id,
-          sourceVersionId: source.versions[0]!.id,
+          ...source,
           fileAssetId: file.id,
           version: input.version,
           checksum: file.checksum!,
           filename: file.originalFilename,
           mimeType: file.mimeType,
-          sourceUpdatedAt: source.updatedAt,
           preparedBy: actor.userId,
           preparedAt: new Date(),
         },
@@ -1283,7 +1770,7 @@ export class ProjectChatService {
         projectId,
         release.id,
         'chat.release.prepare',
-        { sourceId: source.id, version: input.version, roomId },
+        { sourceId: input.sourceId, version: input.version, roomId },
       );
       return {
         id: release.id,
@@ -1321,13 +1808,32 @@ export class ProjectChatService {
       throw new NotFoundException();
     if (r.preparedBy !== actor.userId)
       await this.access.authority(tx, actor, r.projectId, 'PUBLISH');
-    const { source, file } = await this.releaseSource(tx, actor, r.projectId, {
-      sourceId: r.sourceId,
+    const source = await this.releaseSource(tx, actor, r.projectId, {
+      sourceType: r.technicalRevisionId
+        ? 'TECHNICAL'
+        : r.sampleApprovalId
+          ? 'SAMPLE'
+          : r.handoverDocumentId
+            ? 'HANDOVER'
+            : r.quotationDocumentId
+              ? 'QUOTATION'
+              : 'PROPOSAL',
+      sourceId:
+        r.technicalRevisionId ??
+        r.sampleApprovalId ??
+        r.handoverDocumentId ??
+        r.quotationDocumentId ??
+        r.sourceId!,
       fileId: r.fileAssetId,
       version: r.version,
     });
+    const { sourceUpdatedAt, quotationApprovalId, file } = source;
     if (
-      source.updatedAt.getTime() !== r.sourceUpdatedAt.getTime() ||
+      ('sourceFingerprint' in source ? source.sourceFingerprint : null) !==
+        r.sourceFingerprint ||
+      !file ||
+      quotationApprovalId !== r.quotationApprovalId ||
+      sourceUpdatedAt.getTime() !== r.sourceUpdatedAt.getTime() ||
       file.checksum !== r.checksum ||
       file.originalFilename !== r.filename ||
       file.mimeType !== r.mimeType
@@ -1401,6 +1907,7 @@ export class ProjectChatService {
         filename: r.filename,
         version: r.version,
         preparedBy: r.preparedBy,
+        sourceSnapshot: r.sourceSnapshot,
         ...(await this.recipients(tx, r.roomId, projectId)),
       };
     });
@@ -1410,13 +1917,7 @@ export class ProjectChatService {
     const projectId = await this.releaseProject(actor, id);
     return this.access.project(actor, projectId, async (tx) => {
       const { r, file } = await this.checkedRelease(tx, actor, id);
-      const chunks: Buffer[] = [];
-      // FileAsset's existing upload ceiling is 10MB; no second file store or public URL.
-      for await (const chunk of await this.storage.stream(file.storageKey))
-        chunks.push(Buffer.from(chunk));
-      const data = Buffer.concat(chunks);
-      if (createHash('sha256').update(data).digest('hex') !== r.checksum)
-        throw new ConflictException('Nội dung nguồn không khớp checksum');
+      const data = await this.releaseBytes(file.storageKey, r.checksum);
       await this.checkedRelease(tx, actor, id);
       const { recipientHash } = await this.recipients(tx, r.roomId, projectId);
       if (actor.userId !== r.preparedBy)
@@ -1436,6 +1937,23 @@ export class ProjectChatService {
     });
   }
 
+  private async releaseBytes(storageKey: string, checksum: string) {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const ceiling = 10 * 1024 * 1024;
+    for await (const chunk of await this.storage.stream(storageKey)) {
+      const bytes = Buffer.from(chunk);
+      size += bytes.length;
+      if (size > ceiling)
+        throw new ConflictException('Bản phát hành vượt giới hạn 10 MiB');
+      chunks.push(bytes);
+    }
+    const data = Buffer.concat(chunks);
+    if (createHash('sha256').update(data).digest('hex') !== checksum)
+      throw new ConflictException('Nội dung nguồn không khớp checksum');
+    return data;
+  }
+
   async publishRelease(
     actor: CurrentActor,
     id: string,
@@ -1443,9 +1961,11 @@ export class ProjectChatService {
   ) {
     const projectId = await this.releaseProject(actor, id);
     return this.access.project(actor, projectId, async (tx) => {
-      const { r } = await this.checkedRelease(tx, actor, id);
+      const { r, file } = await this.checkedRelease(tx, actor, id);
       if (r.preparedBy === actor.userId)
         throw new ForbiddenException('Người chuẩn bị không tự phát hành');
+      await this.releaseBytes(file.storageKey, r.checksum);
+      await this.checkedRelease(tx, actor, id);
       await this.access.authority(tx, actor, projectId, 'PUBLISH');
       const { room } = await this.access.assertRoom(
         actor,
@@ -1508,6 +2028,9 @@ export class ProjectChatService {
         where: {
           roomId,
           revokedAt: null,
+          publishedRecipients: {
+            array_contains: [{ userId: actor.userId, actions: ['READ'] }],
+          },
           OR: ranges.map((r) => ({ publishedAt: { gte: r.gte, lt: r.lt } })),
         },
         select: {
@@ -1555,6 +2078,11 @@ export class ProjectChatService {
           organizationId: actor.organizationId,
           revokedAt: null,
           publishedAt: { not: null },
+          publishedRecipients: {
+            array_contains: [
+              { userId: actor.userId, actions: ['READ', 'DOWNLOAD'] },
+            ],
+          },
         },
         include: { file: true },
       });
@@ -1576,23 +2104,18 @@ export class ProjectChatService {
         )
           throw new NotFoundException();
       }
-      const data = await this.storage.stream(r.file.storageKey);
-      try {
-        await this.access.assertRoom(actor, r.roomId, 'DOWNLOAD', tx);
-        for (const action of ['READ', 'DOWNLOAD']) {
-          const current = await this.access.history(tx, grant, action);
-          if (
-            !current.some(
-              (range) =>
-                r.publishedAt! >= range.gte &&
-                (!range.lt || r.publishedAt! < range.lt),
-            )
+      const data = await this.releaseBytes(r.file.storageKey, r.checksum);
+      await this.access.assertRoom(actor, r.roomId, 'DOWNLOAD', tx);
+      for (const action of ['READ', 'DOWNLOAD']) {
+        const current = await this.access.history(tx, grant, action);
+        if (
+          !current.some(
+            (range) =>
+              r.publishedAt! >= range.gte &&
+              (!range.lt || r.publishedAt! < range.lt),
           )
-            throw new NotFoundException();
-        }
-      } catch (e) {
-        data.destroy();
-        throw e;
+        )
+          throw new NotFoundException();
       }
       return {
         file: { originalFilename: r.filename, mimeType: r.mimeType },

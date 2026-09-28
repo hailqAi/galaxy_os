@@ -442,8 +442,9 @@ export type ReleaseList = {
   }[];
 };
 type Source = {
+  sourceType?: 'PROPOSAL' | 'QUOTATION' | 'TECHNICAL' | 'SAMPLE' | 'HANDOVER';
   sourceId: string;
-  fileId: string;
+  fileId?: string;
   version: number;
   name: string;
 };
@@ -454,6 +455,11 @@ type Review = {
   roomId: string;
   preparedBy: string;
   recipientHash: string;
+  sourceSnapshot?: {
+    type?: string;
+    signedStatus?: string;
+    sourceType?: string;
+  } | null;
   recipients: {
     userId: string;
     name: string;
@@ -615,7 +621,7 @@ export function ReleasePanel({
       {canPrepare && (
         <div>
           <label>
-            Nguồn phương án đã duyệt
+            Nguồn tài liệu đủ điều kiện
             <select
               value={sourceId}
               onChange={(e) => setSourceId(e.target.value)}
@@ -635,6 +641,7 @@ export function ReleasePanel({
               if (source)
                 void action(`/project-chat/rooms/${roomId}/releases`, {
                   sourceId: source.sourceId,
+                  sourceType: source.sourceType,
                   fileId: source.fileId,
                   version: source.version,
                 });
@@ -643,8 +650,9 @@ export function ReleasePanel({
             Chuẩn bị phát hành
           </button>
           <p>
-            Hiện chỉ nhận nguồn phương án đủ trạng thái; các loại hồ sơ khác
-            chưa hỗ trợ.
+            Nhận phương án, báo giá, mẫu, bản vẽ và hồ sơ bàn giao đủ căn cứ.
+            Hợp đồng, phụ lục, hồ sơ thanh toán và kế hoạch giao/lắp: chưa đủ
+            nguồn/căn cứ phát hành.
           </p>
         </div>
       )}
@@ -664,6 +672,20 @@ export function ReleasePanel({
             {review.filename} · phiên bản {review.version} · phòng{' '}
             {review.roomId}
           </p>
+          {review.sourceSnapshot && (
+            <p>
+              Loại nguồn: {review.sourceSnapshot.type} ·{' '}
+              {review.sourceSnapshot.sourceType === 'SAMPLE'
+                ? 'Phiên bản file của mẫu đã duyệt'
+                : review.sourceSnapshot.signedStatus === 'NOT_REQUIRED'
+                  ? 'Nguồn không yêu cầu ký'
+                  : review.sourceSnapshot.signedStatus === 'SIGNED_MANUALLY'
+                    ? 'Nguồn ghi nhận ký thủ công'
+                    : review.sourceSnapshot.signedStatus === 'SIGNED_EXTERNALLY'
+                      ? 'Nguồn ghi nhận ký bên ngoài'
+                      : 'Nguồn đã duyệt'}
+            </p>
+          )}
           {preview.text !== undefined && (
             <pre className="max-h-60 overflow-auto whitespace-pre-wrap">
               {preview.text}

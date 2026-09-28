@@ -115,6 +115,11 @@ export async function assertFileCapacity(
         INNER JOIN "Quotation" AS quotation
           ON quotation."id" = version."quotationId"
         WHERE quotation."organizationId" = ${input.organizationId}::uuid
+          AND NOT EXISTS (
+            SELECT 1 FROM "FileAsset" AS file
+            WHERE file."storageKey" = document."storageKey"
+              AND file."organizationId" = quotation."organizationId"
+          )
       ), 0) + COALESCE((
         SELECT SUM("sizeBytes") FROM "FileStorageReservation"
         WHERE "organizationId" = ${input.organizationId}::uuid
@@ -166,6 +171,11 @@ export async function assertFileCapacity(
             ON quotation."id" = version."quotationId"
           WHERE quotation."organizationId" = ${input.organizationId}::uuid
             AND document."generatedBy" = ${input.actorId}::uuid
+            AND NOT EXISTS (
+              SELECT 1 FROM "FileAsset" AS file
+              WHERE file."storageKey" = document."storageKey"
+                AND file."organizationId" = quotation."organizationId"
+            )
             AND document."generatedAt" >= NOW() - INTERVAL '24 hours')
         + (SELECT COUNT(*) FROM "FileStorageReservation"
           WHERE "organizationId" = ${input.organizationId}::uuid
@@ -194,8 +204,15 @@ export async function assertFileCapacity(
               '^[0-9a-f-]+/[0-9a-f-]+\\.(pdf|docx|xlsx|csv|zip|jpe?g|png|mp4|dwg)$'
         ), 0)
         + COALESCE((
-          SELECT SUM(COALESCE("sizeBytes", ${input.unmeasuredFileBytes}::bigint))
-          FROM "QuotationDocument"
+          SELECT SUM(COALESCE(document."sizeBytes", ${input.unmeasuredFileBytes}::bigint))
+          FROM "QuotationDocument" AS document
+          INNER JOIN "QuotationVersion" AS version ON version."id" = document."quotationVersionId"
+          INNER JOIN "Quotation" AS quotation ON quotation."id" = version."quotationId"
+          WHERE NOT EXISTS (
+            SELECT 1 FROM "FileAsset" AS file
+            WHERE file."storageKey" = document."storageKey"
+              AND file."organizationId" = quotation."organizationId"
+          )
         ), 0)
         + COALESCE((
           SELECT SUM("sizeBytes") FROM "FileStorageReservation"

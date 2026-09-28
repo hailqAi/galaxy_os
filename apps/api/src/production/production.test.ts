@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   NotFoundException,
   UnprocessableEntityException,
@@ -70,6 +71,41 @@ describe('Production tracking', () => {
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 
+  it('does not approve a different revision that commits while the decision waits for the Project lock', async () => {
+    const initial = {
+      currentRevision: 1,
+      createdBy: 'other',
+      productionOrder: { projectId: 'project' },
+    };
+    const prisma = {
+      $queryRaw: vi.fn(),
+      technicalApproval: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValueOnce(initial)
+          .mockResolvedValueOnce({ ...initial, currentRevision: 2 }),
+        update: vi.fn(),
+      },
+      technicalApprovalRevision: { update: vi.fn() },
+    };
+    Object.assign(prisma, {
+      $transaction: vi.fn(async (callback: (tx: typeof prisma) => unknown) =>
+        callback(prisma),
+      ),
+    });
+    const service = new ProductionService(
+      prisma as unknown as PrismaService,
+      {
+        projectWhere: vi.fn().mockReturnValue({}),
+      } as unknown as BusinessEntityPolicy,
+    );
+    await expect(
+      service.decideTechnical(actor, 'approval', { decision: 'APPROVED' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.technicalApprovalRevision.update).not.toHaveBeenCalled();
+    expect(prisma.technicalApproval.update).not.toHaveBeenCalled();
+  });
+
   it('prevents technical self approval', async () => {
     const service = new ProductionService(
       {
@@ -96,9 +132,21 @@ describe('Production tracking', () => {
           findFirst: vi.fn().mockResolvedValue({
             status: 'PENDING',
             submittedBy: 'other',
+            productionOrder: { projectId: 'project' },
           }),
           update,
         },
+        $transaction: vi.fn(async (callback) =>
+          callback({
+            $queryRaw: vi.fn(),
+            sampleApproval: {
+              findUniqueOrThrow: vi
+                .fn()
+                .mockResolvedValue({ status: 'PENDING', submittedBy: 'other' }),
+              update,
+            },
+          }),
+        ),
       } as unknown as PrismaService,
       {
         projectWhere: vi.fn().mockReturnValue({}),

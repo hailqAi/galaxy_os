@@ -161,7 +161,7 @@ test('preparer and distinct publisher release reviewed proposal to the correct c
     await login(a, 'sender');
     await a.getByRole('button', { name: /Khách thử nghiệm/ }).click();
     await a
-      .getByLabel('Nguồn phương án đã duyệt')
+      .getByLabel('Nguồn tài liệu đủ điều kiện')
       .selectOption(fixture.sourceId);
     await a
       .getByRole('button', { name: 'Chuẩn bị phát hành', exact: true })
@@ -267,17 +267,19 @@ test('room-only LOCK preserves draft; changing groups warns before discarding it
     .getByRole('button', { name: 'Mở lại gửi tin', exact: true })
     .click();
   await expect(draft).toBeEnabled();
-  page.once('dialog', (dialog) => dialog.dismiss());
   await page
     .getByRole('button', { name: 'Hợp đồng & tài chính', exact: true })
     .click();
+  await page.getByRole('button', { name: 'Ở lại', exact: true }).click();
   await expect(draft).toHaveValue('Nháp chưa gửi, không được mất');
-  page.once('dialog', (dialog) => dialog.dismiss());
   await page.getByRole('link', { name: '← Các dự án được cấp' }).click();
+  await page.getByRole('button', { name: 'Ở lại', exact: true }).click();
   await expect(draft).toHaveValue('Nháp chưa gửi, không được mất');
-  page.once('dialog', (dialog) => dialog.accept());
   await page
     .getByRole('button', { name: 'Hợp đồng & tài chính', exact: true })
+    .click();
+  await page
+    .getByRole('button', { name: 'Rời và bỏ nháp', exact: true })
     .click();
   await expect(draft).toHaveCount(0);
 });
@@ -295,6 +297,268 @@ test('domain link choices disappear when only domain permission is revoked', asy
     page.getByRole('option', { name: 'Task fixture nguồn chung' }),
   ).toHaveCount(0);
   await expect(page.getByLabel('Người được cấp')).toBeVisible();
+});
+
+for (const mobile of [false, true]) {
+  test(`browser Back and Forward preserve a cancelled draft and discard it only on confirmation (${mobile ? 'mobile' : 'desktop'})`, async ({
+    page,
+  }) => {
+    if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+    await login(page, 'guest');
+    await page.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+    const draft = page.getByLabel('Tin nhắn', { exact: true });
+    await expect(draft).toBeEnabled();
+    await draft.fill('Nháp tiếng Việt chưa gửi');
+    const url = page.url();
+    await page.goto(`${url}#trong-phong`);
+    await page.evaluate(() => history.back());
+    await expect(page).toHaveURL(url);
+    await expect(
+      page.getByRole('dialog', { name: 'Bỏ nháp chưa gửi?' }),
+    ).not.toBeVisible();
+    await expect(draft).toHaveValue('Nháp tiếng Việt chưa gửi');
+    const poll = await page.waitForResponse(
+      (response) =>
+        response.url().includes('/messages') &&
+        response.request().method() === 'GET',
+    );
+    expect(poll.status()).toBe(200);
+    await page.evaluate(() => history.back());
+    await expect(
+      page.getByRole('dialog', { name: 'Bỏ nháp chưa gửi?' }),
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Ở lại', exact: true }).click();
+    await expect(page).toHaveURL(url);
+    await expect(draft).toHaveValue('Nháp tiếng Việt chưa gửi');
+    await page.evaluate(() => history.back());
+    await page
+      .getByRole('button', { name: 'Rời và bỏ nháp', exact: true })
+      .click();
+    await expect(page).toHaveURL(`${process.env.APP_PUBLIC_ORIGIN}/work`);
+    await page.goForward();
+    await expect(page).toHaveURL(url);
+    await page.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+    await expect(draft).toHaveValue('');
+    // A real forward entry, without fabricating or replacing history.state.
+    await page.getByRole('link', { name: '← Các dự án được cấp' }).click();
+    await expect(page).toHaveURL(`${process.env.APP_PUBLIC_ORIGIN}/work`);
+    await page.goBack();
+    await expect(page).toHaveURL(url);
+    await page.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+    await draft.fill('Nháp trước Forward');
+    await page.evaluate(() => history.forward());
+    await page.getByRole('button', { name: 'Ở lại', exact: true }).click();
+    await expect(draft).toHaveValue('Nháp trước Forward');
+    // Use the browser's real Forward entry (same path as its toolbar), with no history mutation.
+    const session = await page.context().newCDPSession(page);
+    const historyEntry = await session.send('Page.getNavigationHistory');
+    await session.send('Page.navigateToHistoryEntry', {
+      entryId: historyEntry.entries[historyEntry.currentIndex + 1]!.id,
+    });
+    await page
+      .getByRole('button', { name: 'Rời và bỏ nháp', exact: true })
+      .click();
+    await session.detach();
+    await expect(page).toHaveURL(`${process.env.APP_PUBLIC_ORIGIN}/work`);
+  });
+}
+
+test('reconnect retries a committed send with the same key and clears a recovered polling error', async ({
+  page,
+  context,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page, 'guest');
+  await page.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+  const draft = page.getByLabel('Tin nhắn', { exact: true });
+  await expect(draft).toBeEnabled();
+  const text = `Mất phản hồi ${Date.now()}`;
+  const keys: string[] = [];
+  let dropPost = true,
+    dropGet = true;
+  await page.route('**/project-chat/rooms/*/messages*', async (route) => {
+    if (route.request().method() === 'POST') {
+      keys.push(route.request().postDataJSON().clientKey);
+      const response = await route.fetch();
+      expect(response.status()).toBe(201);
+      if (dropPost) {
+        dropPost = false;
+        await route.abort('failed');
+      } else await route.fulfill({ response });
+    } else if (dropGet) {
+      dropGet = false;
+      await route.abort('failed');
+    } else await route.continue();
+  });
+  await expect(
+    page.getByText('Không tải được tin mới. Đang thử lại…', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText('Không tải được tin mới. Đang thử lại…', { exact: true }),
+  ).toHaveCount(0);
+  await draft.fill(text);
+  await page.getByRole('button', { name: 'Gửi tin', exact: true }).click();
+  await expect(
+    page.getByText(
+      'Chưa xác nhận gửi. Gửi lại giữ nguyên mã yêu cầu và nội dung.',
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(draft).toHaveValue(text);
+  await context.setOffline(true);
+  await expect(draft).toHaveValue(text);
+  await context.setOffline(false);
+  await page
+    .getByRole('button', { name: 'Gửi lại tin chưa xác nhận', exact: true })
+    .click();
+  await expect(draft).toHaveValue('');
+  expect(keys).toHaveLength(2);
+  expect(keys[1]).toBe(keys[0]);
+  await expect(page.getByText(text, { exact: true })).toHaveCount(1);
+  const response = await page.request.get(
+    `${process.env.INTERNAL_API_URL}/project-chat/rooms/${fixture.guestRoomId}/messages`,
+  );
+  expect(response.status()).toBe(200);
+  expect(
+    (await response.json()).items.filter(
+      (m: { body: string }) => m.body === text,
+    ),
+  ).toHaveLength(1);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
+
+test('reload warns only for a dirty draft and never restores it from storage', async ({
+  page,
+}) => {
+  await login(page, 'guest');
+  await page.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+  const draft = page.getByLabel('Tin nhắn', { exact: true });
+  await draft.fill('Nháp chỉ trong RAM');
+  const dialogPromise = page.waitForEvent('dialog');
+  void page.evaluate(() => location.reload()).catch(() => undefined);
+  const dialog = await dialogPromise;
+  expect(dialog.type()).toBe('beforeunload');
+  await dialog.dismiss();
+  await expect(draft).toHaveValue('Nháp chỉ trong RAM');
+  page.once('dialog', (d) => d.accept());
+  await page.reload();
+  await page.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+  await expect(draft).toHaveValue('');
+  let cleanDialogs = 0;
+  page.on('dialog', async (dialog) => {
+    cleanDialogs++;
+    await dialog.dismiss();
+  });
+  await page.reload();
+  expect(cleanDialogs).toBe(0);
+});
+
+test('delayed polling cannot restore a departed room and offline revoke clears the draft without sending it', async ({
+  page,
+  context,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page, 'guest');
+  await page.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+  const draft = page.getByLabel('Tin nhắn', { exact: true });
+  await expect(draft).toBeEnabled();
+  let entered!: () => void, release!: () => void;
+  const reached = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const waiting = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let held = false,
+    active = 0,
+    maximum = 0,
+    sent = 0;
+  await page.route('**/project-chat/rooms/*/messages*', async (route) => {
+    if (route.request().method() !== 'GET') {
+      sent++;
+      await route.continue();
+      return;
+    }
+    active++;
+    maximum = Math.max(maximum, active);
+    try {
+      const response = await route.fetch();
+      if (!held) {
+        held = true;
+        entered();
+        await waiting;
+      }
+      await route.fulfill({ response });
+    } finally {
+      active--;
+    }
+  });
+  try {
+    await reached;
+    await draft.fill('Nháp không được gửi sau thu hồi');
+    await page
+      .getByRole('button', { name: 'Hợp đồng & tài chính', exact: true })
+      .click();
+    await page
+      .getByRole('button', { name: 'Rời và bỏ nháp', exact: true })
+      .click();
+    release();
+    await expect(draft).toHaveCount(0);
+    await expect(
+      page.getByRole('heading', { name: 'Khách thử nghiệm', exact: true }),
+    ).toHaveCount(0);
+    await page.unrouteAll({ behavior: 'wait' });
+    expect(maximum).toBe(1);
+    await page
+      .getByRole('button', { name: 'Tư vấn & báo giá', exact: true })
+      .click();
+    await page.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+    await expect(draft).toHaveValue('');
+    await draft.fill('Nháp RAM bị thu hồi');
+    await context.setOffline(true);
+    const response = await fetch(
+      `${process.env.INTERNAL_API_URL}/project-chat/projects/${fixture.projectId}/management`,
+      {
+        method: 'GET',
+        headers: { Cookie: fixture.users.manager!.cookie },
+      },
+    );
+    expect(response.status).toBe(200);
+    const management = (await response.json()) as {
+      rooms: { id: string; grants: { id: string; userId: string }[] }[];
+    };
+    const grant = management.rooms
+      .find((r) => r.id === fixture.guestRoomId)!
+      .grants.find((g) => g.userId === fixture.users.guest!.id)!;
+    const revoked = await fetch(
+      `${process.env.INTERNAL_API_URL}/project-chat/rooms/${fixture.guestRoomId}/grants/${grant.id}/revoke`,
+      {
+        method: 'POST',
+        headers: {
+          Cookie: fixture.users.manager!.cookie,
+          'X-Chat-Actor': fixture.users.manager!.id,
+        },
+      },
+    );
+    expect(revoked.status).toBe(201);
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && request.url().includes('/messages'))
+        sent++;
+    });
+    await context.setOffline(false);
+    await expect(draft).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: /Khách thử nghiệm/ }),
+    ).toHaveCount(0);
+    expect(sent).toBe(0);
+  } finally {
+    release();
+    await context.setOffline(false);
+  }
 });
 
 test('revoking Project administration clears the open management roster', async ({

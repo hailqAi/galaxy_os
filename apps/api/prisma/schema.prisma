@@ -1082,8 +1082,15 @@ model ChatDocumentRelease {
   organizationId String @db.Uuid
   projectId String @db.Uuid
   roomId String @db.Uuid
-  sourceId String @db.Uuid
-  sourceVersionId String @db.Uuid
+  sourceId String? @db.Uuid
+  sourceVersionId String? @db.Uuid
+  quotationDocumentId String? @db.Uuid
+  quotationApprovalId String? @db.Uuid
+  technicalRevisionId String? @db.Uuid
+  sampleApprovalId String? @db.Uuid
+  handoverDocumentId String? @db.Uuid
+  sourceFingerprint String?
+  sourceSnapshot Json?
   fileAssetId String @db.Uuid
   version Int
   checksum String
@@ -1101,8 +1108,13 @@ model ChatDocumentRelease {
   revokedBy String? @db.Uuid
   revokedAt DateTime?
   room ChatRoom @relation(fields:[roomId,organizationId,projectId],references:[id,organizationId,projectId])
-  source ProjectRequiredDocument @relation(fields:[sourceId],references:[id])
-  sourceVersion ProjectRequiredDocumentVersion @relation(fields:[sourceVersionId],references:[id])
+  source ProjectRequiredDocument? @relation(fields:[sourceId],references:[id],onDelete:Restrict)
+  sourceVersion ProjectRequiredDocumentVersion? @relation(fields:[sourceVersionId],references:[id],onDelete:Restrict)
+  quotationDocument QuotationDocument? @relation(fields:[quotationDocumentId],references:[id],onDelete:Restrict)
+  quotationApproval QuotationApproval? @relation(fields:[quotationApprovalId],references:[id],onDelete:Restrict)
+  technicalRevision TechnicalApprovalRevision? @relation(fields:[technicalRevisionId],references:[id],onDelete:Restrict)
+  sampleApproval SampleApproval? @relation(fields:[sampleApprovalId],references:[id],onDelete:Restrict)
+  handoverDocument HandoverDocument? @relation(fields:[handoverDocumentId],references:[id],onDelete:Restrict)
   file FileAsset @relation(fields:[fileAssetId],references:[id])
   @@index([roomId,publishedAt])
 }
@@ -1815,6 +1827,7 @@ model QuotationTerm {
 }
 
 model QuotationApproval {
+  chatReleases       ChatDocumentRelease[]
   id                 String           @id @default(uuid()) @db.Uuid
   quotationVersionId String           @db.Uuid
   actorId            String           @db.Uuid
@@ -1827,6 +1840,7 @@ model QuotationApproval {
 }
 
 model QuotationDocument {
+  chatReleases       ChatDocumentRelease[]
   id                 String           @id @default(uuid()) @db.Uuid
   quotationVersionId String           @db.Uuid
   language           String
@@ -2877,6 +2891,7 @@ model TechnicalApproval {
 }
 
 model TechnicalApprovalRevision {
+  chatReleases ChatDocumentRelease[]
   id                  String            @id @default(uuid()) @db.Uuid
   technicalApprovalId String            @db.Uuid
   revision            Int
@@ -2894,6 +2909,7 @@ model TechnicalApprovalRevision {
 }
 
 model SampleApproval {
+  chatReleases ChatDocumentRelease[]
   id                String          @id @default(uuid()) @db.Uuid
   productionOrderId String          @db.Uuid
   name              String
@@ -4780,6 +4796,7 @@ model HandoverChecklist {
 }
 
 model HandoverDocument {
+  chatReleases ChatDocumentRelease[]
   id             String    @id @default(uuid()) @db.Uuid
   organizationId String?   @db.Uuid
   projectId      String?   @db.Uuid

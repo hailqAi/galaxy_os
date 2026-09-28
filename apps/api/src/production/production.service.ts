@@ -323,7 +323,19 @@ export class ProductionService {
       data.fileId,
     );
     return this.prisma.$transaction(async (tx) => {
-      const revision = approval.currentRevision + 1;
+      await this.lockSourceProject(tx, approval.productionOrder.projectId);
+      const current = await this.scopedTechnicalApproval(actor, approvalId, tx);
+      if (
+        data.fileId &&
+        !(await findProjectFile(
+          tx,
+          actor,
+          current.productionOrder.projectId,
+          data.fileId,
+        ))
+      )
+        throw new NotFoundException('File not found');
+      const revision = current.currentRevision + 1;
       await tx.technicalApproval.update({
         where: { id: approvalId },
         data: { currentRevision: revision, status: 'PENDING' },
@@ -349,11 +361,19 @@ export class ProductionService {
     if (approval.createdBy === actor.userId)
       throw new ForbiddenException('Submitter cannot approve own document');
     return this.prisma.$transaction(async (tx) => {
+      await this.lockSourceProject(tx, approval.productionOrder.projectId);
+      const current = await this.scopedTechnicalApproval(actor, approvalId, tx);
+      if (current.currentRevision !== approval.currentRevision)
+        throw new ConflictException(
+          'Phiên bản đã đổi; xem lại tài liệu hiện tại trước khi quyết định',
+        );
+      if (current.createdBy === actor.userId)
+        throw new ForbiddenException('Submitter cannot approve own document');
       await tx.technicalApprovalRevision.update({
         where: {
           technicalApprovalId_revision: {
             technicalApprovalId: approvalId,
-            revision: approval.currentRevision,
+            revision: current.currentRevision,
           },
         },
         data: {
@@ -397,20 +417,31 @@ export class ProductionService {
           },
         },
       },
+      include: { productionOrder: { select: { projectId: true } } },
     });
     if (!sample) throw new NotFoundException('Sample approval not found');
     if (sample.status !== 'PENDING')
       throw new ConflictException('Sample approval is already decided');
     if (sample.submittedBy === actor.userId)
       throw new ForbiddenException('Submitter cannot approve own sample');
-    return this.prisma.sampleApproval.update({
-      where: { id: sampleId },
-      data: {
-        status: data.decision,
-        comment: data.comment,
-        decidedBy: actor.userId,
-        decidedAt: new Date(),
-      },
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockSourceProject(tx, sample.productionOrder.projectId);
+      const current = await tx.sampleApproval.findUniqueOrThrow({
+        where: { id: sampleId },
+      });
+      if (current.status !== 'PENDING')
+        throw new ConflictException('Sample approval is already decided');
+      if (current.submittedBy === actor.userId)
+        throw new ForbiddenException('Submitter cannot approve own sample');
+      return tx.sampleApproval.update({
+        where: { id: sampleId },
+        data: {
+          status: data.decision,
+          comment: data.comment,
+          decidedBy: actor.userId,
+          decidedAt: new Date(),
+        },
+      });
     });
   }
 
@@ -438,8 +469,21 @@ export class ProductionService {
     });
   }
 
-  private async scopedTechnicalApproval(actor: CurrentActor, id: string) {
-    const approval = await this.prisma.technicalApproval.findFirst({
+  private async lockSourceProject(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+  ) {
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "Project" WHERE "id" = ${projectId}::uuid FOR UPDATE`,
+    );
+  }
+
+  private async scopedTechnicalApproval(
+    actor: CurrentActor,
+    id: string,
+    db: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
+    const approval = await db.technicalApproval.findFirst({
       where: {
         id,
         productionOrder: {

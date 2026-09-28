@@ -6,6 +6,7 @@ import {
 import { describe, expect, it, vi } from 'vitest';
 import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
+import { FileStorage } from '../files/file-storage';
 import { PrismaService } from '../prisma.service';
 import { AfterSalesService } from './after-sales.service';
 
@@ -38,6 +39,7 @@ describe('Inspection, handover and after-sales', () => {
         },
       } as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(
       service.createAcceptance(actor, 'inspection', {
@@ -66,9 +68,19 @@ describe('Inspection, handover and after-sales', () => {
       acceptanceRecord: { count: vi.fn().mockResolvedValue(1) },
       punchItem: { count: vi.fn().mockResolvedValue(0) },
     };
+    Object.assign(prisma, {
+      $queryRaw: vi.fn(),
+      $transaction: vi.fn(async (callback: (tx: typeof prisma) => unknown) =>
+        callback(prisma),
+      ),
+    });
+    Object.assign(prisma.handover, {
+      findUniqueOrThrow: prisma.handover.findFirst,
+    });
     const service = new AfterSalesService(
       prisma as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(
       service.completeHandover(actor, 'handover', {}),
@@ -81,6 +93,7 @@ describe('Inspection, handover and after-sales', () => {
         project: { findFirst: vi.fn().mockResolvedValue(null) },
       } as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(
       service.createTicket(actor, {
@@ -107,6 +120,7 @@ describe('Inspection, handover and after-sales', () => {
         },
       } as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(service.closeTicket(actor, 'ticket')).rejects.toBeInstanceOf(
       ConflictException,
@@ -129,6 +143,7 @@ describe('Inspection, handover and after-sales', () => {
         $transaction: vi.fn().mockResolvedValue([1, 0, 0]),
       } as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(service.closeTicket(actor, 'ticket')).rejects.toBeInstanceOf(
       ConflictException,
@@ -147,6 +162,7 @@ describe('Inspection, handover and after-sales', () => {
         },
       } as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(
       service.createServiceVisit(actor, 'ticket', {
@@ -168,6 +184,7 @@ describe('Inspection, handover and after-sales', () => {
         },
       } as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(
       service.signHandoverDocument(actor, 'document', {
@@ -190,6 +207,7 @@ describe('Inspection, handover and after-sales', () => {
         },
       } as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(
       service.completeServiceVisit(actor, 'visit', {
@@ -217,6 +235,7 @@ describe('Inspection, handover and after-sales', () => {
         fileAsset: { findFirst },
       } as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
 
     await expect(
@@ -257,6 +276,7 @@ describe('Inspection, handover and after-sales', () => {
         },
       } as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(
       service.createWarrantyClaim(actor, 'ticket', {

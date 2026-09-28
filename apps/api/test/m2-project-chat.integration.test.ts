@@ -1,8 +1,14 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import {
+  ConflictException,
+  INestApplication,
+  ValidationPipe,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
 import { hash } from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import request from 'supertest';
 import { beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
 import { assertG00Isolation } from '../scripts/g00-isolated-environment.mjs';
@@ -13,6 +19,12 @@ import { CurrentActor } from '../src/access-control/current-actor';
 import { FilesService } from '../src/files/files.service';
 import { FileStorage } from '../src/files/file-storage';
 import { ProjectProductsService } from '../src/projects/project-products.service';
+import { ProductionService } from '../src/production/production.service';
+import { AfterSalesService } from '../src/after-sales/after-sales.service';
+import { CommercialService } from '../src/commercial/commercial.service';
+import { QuotationDocumentsService } from '../src/commercial/quotation-documents.service';
+import ExcelJS from 'exceljs';
+import { assertFileCapacity } from '../src/files/file-quota';
 
 const isolated = assertG00Isolation();
 
@@ -49,6 +61,15 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
     call()
       .get(`/api/v1/project-chat${path}`)
       .set('Cookie', users[actor]!.cookie);
+  const getBinary = (actor: string, path: string) =>
+    get(actor, path)
+      .buffer(true)
+      .parse((response, callback) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer) => chunks.push(chunk));
+        response.on('end', () => callback(null, Buffer.concat(chunks)));
+        response.on('error', callback);
+      });
 
   beforeAll(async () => {
     const identity = await db.$queryRaw<
@@ -884,9 +905,21 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
           contentType: 'text/plain',
         })
         .then((r) => r);
-    const results = Promise.all([upload(), upload()]);
+    let earlyFailure!: (error: Error) => void;
+    const failed = new Promise<never>((_, reject) => {
+      earlyFailure = reject;
+    });
+    const runUpload = async () => {
+      const response = await upload();
+      if (response.status !== 201)
+        earlyFailure(
+          new Error(`Upload exited before cleanup: ${response.status}`),
+        );
+      return response;
+    };
+    const results = Promise.all([runUpload(), runUpload()]);
     try {
-      await reached;
+      await Promise.race([reached, failed]);
       await db.session.updateMany({
         where: { userId: users.sender!.id, revokedAt: null },
         data: { revokedAt: new Date() },
@@ -1214,8 +1247,8 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
     });
     await post('authority', `/projects/${otherProjectId}/authorities`, {
       userId: users.manager!.id,
-      actions: ['CREATE', 'ACCESS_ADMIN'],
-      roomCeiling: ['READ', 'SEND', 'UPLOAD', 'DOWNLOAD'],
+      actions: ['CREATE', 'ACCESS_ADMIN', 'HISTORY'],
+      roomCeiling: ['READ', 'SEND', 'UPLOAD', 'DOWNLOAD', 'HISTORY'],
     }).expect(201);
     await post('authority', `/projects/${otherProjectId}/authorities`, {
       userId: users.publisher!.id,
@@ -1231,6 +1264,10 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
     ).body;
     await post('authority', `/projects/${otherProjectId}/participants`, {
       userId: users.guest!.id,
+    }).expect(201);
+    await post('manager', `/rooms/${room.id}/grants`, {
+      userId: users.manager!.id,
+      actions: ['READ', 'DOWNLOAD', 'HISTORY'],
     }).expect(201);
     for (const name of ['sender', 'publisher', 'guest'])
       await post('manager', `/rooms/${room.id}/grants`, {
@@ -1304,7 +1341,12 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       (r) => r,
     );
     try {
-      await reached;
+      await Promise.race([
+        reached,
+        inFlight.then((r) => {
+          throw new Error(`Preview exited before storage barrier: ${r.status}`);
+        }),
+      ]);
       await db.userRole.updateMany({
         where: { userId: users.publisher!.id, roleId: role.id },
         data: { status: 'archived' },
@@ -1350,6 +1392,28 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
     const reviewed = (
       await get('publisher', `/releases/${release.id}/review`).expect(200)
     ).body;
+    const stored = await db.fileAsset.findUniqueOrThrow({
+      where: { id: file.id },
+    });
+    const binaryPath = join(process.env.FILE_STORAGE_PATH!, stored.storageKey);
+    try {
+      await writeFile(binaryPath, 'Binary khác sau khi kiểm tra');
+      await post('publisher', `/releases/${release.id}/publish`, {
+        confirmed: true,
+        recipientHash: reviewed.recipientHash,
+      }).expect(409);
+      expect(
+        (
+          await db.chatDocumentRelease.findUniqueOrThrow({
+            where: { id: release.id },
+          })
+        ).publishedAt,
+      ).toBeNull();
+      await writeFile(binaryPath, Buffer.alloc(10 * 1024 * 1024 + 1));
+      await get('publisher', `/releases/${release.id}/preview`).expect(409);
+    } finally {
+      await writeFile(binaryPath, bytes);
+    }
     await post('publisher', `/releases/${release.id}/publish`, {
       confirmed: true,
       recipientHash: reviewed.recipientHash,
@@ -1357,10 +1421,36 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
     expect(
       (await get('guest', `/releases/${release.id}/download`).expect(200)).text,
     ).toBe(bytes.toString());
+    try {
+      await writeFile(binaryPath, 'Binary khác sau phát hành');
+      await get('guest', `/releases/${release.id}/download`).expect(409);
+    } finally {
+      await writeFile(binaryPath, bytes);
+    }
     await call()
       .get(`/api/v1/files/${file.id}/download`)
       .set('Cookie', users.guest!.cookie)
       .expect(403);
+    await get('outsider', `/releases/${release.id}/download`).expect(404);
+    const publication = await db.chatDocumentRelease.findUniqueOrThrow({
+      where: { id: release.id },
+    });
+    const late = (
+      await post('manager', `/rooms/${room.id}/grants`, {
+        userId: users.outsider!.id,
+        actions: ['READ', 'DOWNLOAD'],
+      }).expect(201)
+    ).body;
+    await post('manager', `/rooms/${room.id}/grants/${late.id}/history`, {
+      from: publication.publishedAt!.toISOString(),
+      to: new Date(publication.publishedAt!.getTime() + 1).toISOString(),
+      actions: ['READ', 'DOWNLOAD'],
+    }).expect(201);
+    // Opening chat history cannot add recipients to a document already released.
+    expect(
+      (await get('outsider', `/rooms/${room.id}/releases`).expect(200)).body
+        .published,
+    ).toEqual([]);
     await get('outsider', `/releases/${release.id}/download`).expect(404);
     const stale = (
       await post('sender', `/rooms/${room.id}/releases`, {
@@ -1404,5 +1494,866 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
     ).toBe(bytes.toString());
     await post('publisher', `/releases/${release.id}/revoke`, {}).expect(201);
     await get('guest', `/releases/${release.id}/download`).expect(404);
+  });
+  it('publishes only the approved customer quotation export and pins its version and binary', async () => {
+    const permissions = [
+      'quotation.read',
+      'quotation.export',
+      'quotation.update',
+      'quotation.approve',
+      'file.read',
+      'file.download',
+    ];
+    const role = await db.role.create({
+      data: {
+        organizationId: orgId,
+        code: `quote-${run}`,
+        name: 'Quotation fixture rights',
+        permissions: {
+          create: permissions.map((code) => ({
+            permission: { connect: { code } },
+          })),
+        },
+      },
+    });
+    for (const name of ['sender', 'publisher'])
+      await db.userRole.create({
+        data: {
+          organizationId: orgId,
+          userId: users[name]!.id,
+          roleId: role.id,
+          scopeType: 'ORGANIZATION',
+        },
+      });
+    const sourceActor = async (name: string): Promise<CurrentActor> => ({
+      userId: users[name]!.id,
+      organizationId: orgId,
+      permissions,
+      administrationScope: 'ORGANIZATION',
+      managedDepartmentIds: [],
+      administrationTier: 0,
+      email: `${name}-${run}@example.test`,
+      displayName: name,
+      mustChangePassword: false,
+      organizationMembershipId: (
+        await db.organizationMembership.findUniqueOrThrow({
+          where: {
+            organizationId_userId: {
+              organizationId: orgId,
+              userId: users[name]!.id,
+            },
+          },
+        })
+      ).id,
+    });
+    const project = await db.project.findUniqueOrThrow({
+      where: { id: otherProjectId },
+    });
+    const quotation = await db.quotation.create({
+      data: {
+        organizationId: orgId,
+        projectId: otherProjectId,
+        customerId: project.customerId,
+        number: `CHAT-${run}`,
+        currency: 'VND',
+        createdBy: users.sender!.id,
+        updatedBy: users.sender!.id,
+        versions: {
+          create: {
+            version: 1,
+            createdBy: users.sender!.id,
+            notes: 'INTERNAL-MARGIN-NOTE',
+            grandTotal: '120000',
+            lines: {
+              create: {
+                section: 'Hạng mục',
+                description: 'Sản phẩm dành cho khách',
+                quantity: 2,
+                unit: 'bộ',
+                unitPrice: '60000',
+                lineTotal: '120000',
+                position: 1,
+              },
+            },
+          },
+        },
+      },
+    });
+    const room = (
+      await post('manager', `/projects/${otherProjectId}/rooms`, {
+        title: 'Báo giá khách',
+        group: 'COMMERCIAL',
+        audience: 'CUSTOMER',
+      }).expect(201)
+    ).body;
+    for (const name of ['sender', 'publisher', 'guest'])
+      await post('manager', `/rooms/${room.id}/grants`, {
+        userId: users[name]!.id,
+        actions: ['READ', 'UPLOAD', 'DOWNLOAD'],
+        ...(name === 'guest'
+          ? { expiresAt: new Date(Date.now() + 86400000).toISOString() }
+          : {}),
+      }).expect(201);
+    const documents = app.get(QuotationDocumentsService);
+    const document = await documents.generate(
+      await sourceActor('sender'),
+      otherProjectId,
+      quotation.id,
+      'XLSX',
+      'VI',
+    );
+    const input = {
+      sourceType: 'QUOTATION',
+      sourceId: document.id,
+      version: 1,
+    };
+    await post('sender', `/rooms/${room.id}/releases`, input).expect(409);
+    const commercial = app.get(CommercialService);
+    await commercial.transitionQuotation(
+      await sourceActor('sender'),
+      otherProjectId,
+      quotation.id,
+      'INTERNAL_REVIEW',
+    );
+    await commercial.transitionQuotation(
+      await sourceActor('publisher'),
+      otherProjectId,
+      quotation.id,
+      'APPROVED',
+    );
+    const raw = await db.quotationDocument.findUniqueOrThrow({
+      where: { id: document.id },
+    });
+    const usedBefore =
+      (
+        await db.fileAsset.aggregate({
+          where: { organizationId: orgId },
+          _sum: { sizeBytes: true },
+        })
+      )._sum.sizeBytes! + raw.sizeBytes!;
+    const quota = {
+      organizationId: orgId,
+      actorId: users.sender!.id,
+      incomingBytes: 1073741824n - usedBefore,
+      staging: false,
+      organizationLimitBytes: 1073741824n,
+      globalLimitBytes: 1099511627776n,
+      unmeasuredFileBytes: 10485760n,
+      actorStagingLimit: 10000,
+    };
+    await db.$transaction((tx) => assertFileCapacity(tx, quota));
+    const storage = app.get(FileStorage),
+      originalStream = storage.stream.bind(storage);
+    let enter!: () => void, resume!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    const waiting = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const barrier = vi
+      .spyOn(storage, 'stream')
+      .mockImplementationOnce(async (key) => {
+        enter();
+        await waiting;
+        return originalStream(key);
+      });
+    const inFlight = post('sender', `/rooms/${room.id}/releases`, input).then(
+      (r) => r,
+    );
+    try {
+      await Promise.race([
+        reached,
+        inFlight.then((r) => {
+          throw new Error(`Prepare exited before storage barrier: ${r.status}`);
+        }),
+      ]);
+      await db.userRole.updateMany({
+        where: { userId: users.sender!.id, roleId: role.id },
+        data: { status: 'archived' },
+      });
+      resume();
+      expect((await inFlight).status).toBe(404);
+      expect(
+        await db.fileAsset.count({ where: { storageKey: raw.storageKey } }),
+      ).toBe(0);
+      expect(
+        await db.chatDocumentRelease.count({
+          where: { quotationDocumentId: raw.id },
+        }),
+      ).toBe(0);
+    } finally {
+      resume();
+      await inFlight.catch(() => undefined);
+      barrier.mockRestore();
+      await db.userRole.updateMany({
+        where: { userId: users.sender!.id, roleId: role.id },
+        data: { status: 'active' },
+      });
+    }
+    await post('sender', `/rooms/${room.id}/releases`, {
+      ...input,
+      version: 2,
+    }).expect(409);
+    await post('sender', `/rooms/${room.id}/releases`, {
+      ...input,
+      fileId: randomUUID(),
+    }).expect(409);
+    const release = (
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+    ).body;
+    // Registering the same binary as a FileAsset must not charge its bytes twice.
+    await db.$transaction((tx) => assertFileCapacity(tx, quota));
+    await expect(
+      db.$transaction((tx) =>
+        assertFileCapacity(tx, {
+          ...quota,
+          incomingBytes: quota.incomingBytes + 1n,
+        }),
+      ),
+    ).rejects.toThrow('Organization file capacity');
+    const bytes = await app.get(FileStorage).read(raw.storageKey);
+    const preview = await getBinary(
+      'publisher',
+      `/releases/${release.id}/preview`,
+    ).expect(200);
+    expect(Buffer.from(preview.body)).toEqual(bytes);
+    const review = (
+      await get('publisher', `/releases/${release.id}/review`).expect(200)
+    ).body;
+    const published = await Promise.all(
+      [1, 2].map(() =>
+        post('publisher', `/releases/${release.id}/publish`, {
+          confirmed: true,
+          recipientHash: review.recipientHash,
+        }),
+      ),
+    );
+    expect(published.map((r) => r.status)).toEqual([201, 201]);
+    expect(
+      await db.auditLog.count({
+        where: { entityId: release.id, action: 'chat.release.publish' },
+      }),
+    ).toBe(1);
+    const downloaded = await getBinary(
+      'guest',
+      `/releases/${release.id}/download`,
+    ).expect(200);
+    expect(Buffer.from(downloaded.body)).toEqual(bytes);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Uint8Array.from(bytes).buffer);
+    expect(workbook.worksheets).toHaveLength(1);
+    expect(workbook.worksheets[0]!.state).toBe('visible');
+    expect(JSON.stringify(workbook.worksheets[0]!.getSheetValues())).toContain(
+      '60000',
+    );
+    expect(JSON.stringify(workbook.model)).not.toContain(
+      'INTERNAL-MARGIN-NOTE',
+    );
+    for (const sheet of workbook.worksheets)
+      sheet.eachRow((row) =>
+        row.eachCell((cell) => expect(cell.note).toBeUndefined()),
+      );
+    expect(
+      (await db.quotation.findUniqueOrThrow({ where: { id: quotation.id } }))
+        .status,
+    ).toBe('APPROVED');
+    const stale = (
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+    ).body;
+    await get('publisher', `/releases/${stale.id}/preview`).expect(200);
+    await commercial.reviseQuotation(
+      await sourceActor('sender'),
+      otherProjectId,
+      quotation.id,
+      {},
+    );
+    await post('publisher', `/releases/${stale.id}/publish`, {
+      confirmed: true,
+      recipientHash: review.recipientHash,
+    }).expect(409);
+    expect(
+      Buffer.from(
+        (
+          await getBinary('guest', `/releases/${release.id}/download`).expect(
+            200,
+          )
+        ).body,
+      ),
+    ).toEqual(bytes);
+  });
+  it('pins approved drawing and sample sources without borrowing another approval or Project', async () => {
+    const rights = [
+      'production.read',
+      'file.read',
+      'file.download',
+      'file.upload',
+    ];
+    const role = await db.role.create({
+      data: {
+        organizationId: orgId,
+        code: `production-${run}`,
+        name: 'Production fixture',
+        permissions: {
+          create: rights.map((code) => ({ permission: { connect: { code } } })),
+        },
+      },
+    });
+    for (const name of ['sender', 'publisher'])
+      await db.userRole.create({
+        data: {
+          organizationId: orgId,
+          userId: users[name]!.id,
+          roleId: role.id,
+          scopeType: 'ORGANIZATION',
+        },
+      });
+    const actor = async (name: string): Promise<CurrentActor> => ({
+      userId: users[name]!.id,
+      organizationId: orgId,
+      permissions: rights,
+      administrationScope: 'ORGANIZATION',
+      managedDepartmentIds: [],
+      administrationTier: 0,
+      email: `${name}-${run}@example.test`,
+      displayName: name,
+      mustChangePassword: false,
+      organizationMembershipId: (
+        await db.organizationMembership.findUniqueOrThrow({
+          where: {
+            organizationId_userId: {
+              organizationId: orgId,
+              userId: users[name]!.id,
+            },
+          },
+        })
+      ).id,
+    });
+    const creator = await actor('sender'),
+      approver = await actor('publisher');
+    const ownership = {
+      organizationId: orgId,
+      projectId: otherProjectId,
+      createdBy: creator.userId,
+      updatedBy: creator.userId,
+    };
+    const pr = await db.purchaseRequest.create({
+      data: {
+        ...ownership,
+        requestNumber: `PR-${run}`,
+        sourceType: 'PROJECT',
+        requestedById: creator.userId,
+      },
+    });
+    const rfq = await db.supplierRFQ.create({
+      data: {
+        ...ownership,
+        rfqNumber: `RFQ-${run}`,
+        purchaseRequestId: pr.id,
+        responseDeadline: new Date(),
+        requestedCurrency: 'VND',
+        deliveryDestination: 'Fixture',
+      },
+    });
+    const supplierId = randomUUID();
+    const sq = await db.supplierQuotation.create({
+      data: {
+        organizationId: orgId,
+        rfqId: rfq.id,
+        supplierId,
+        quotationNumber: `SQ-${run}`,
+        quotationDate: new Date(),
+        currency: 'VND',
+        createdBy: creator.userId,
+        updatedBy: creator.userId,
+      },
+    });
+    const comparison = await db.supplierComparison.create({
+      data: {
+        ...ownership,
+        rfqId: rfq.id,
+        purchaseRequestId: pr.id,
+        exchangeRateDate: new Date(),
+      },
+    });
+    const selection = await db.supplierSelection.create({
+      data: {
+        comparisonId: comparison.id,
+        supplierQuotationId: sq.id,
+        supplierId,
+        selectedLines: [],
+        selectionReason: 'Fixture',
+        selectedBy: creator.userId,
+        idempotencyKey: randomUUID(),
+      },
+    });
+    const po = await db.purchaseOrder.create({
+      data: {
+        ...ownership,
+        poNumber: `PO-${run}`,
+        supplierId,
+        supplierSelectionId: selection.id,
+        supplierQuotationId: sq.id,
+        purchaseRequestId: pr.id,
+        currency: 'VND',
+        deliveryAddress: 'Fixture',
+        subtotal: 0,
+        totalAmount: 0,
+      },
+    });
+    const order = await db.productionOrder.create({
+      data: {
+        organizationId: orgId,
+        projectId: otherProjectId,
+        purchaseOrderId: po.id,
+        supplierId,
+        ownerId: creator.userId,
+      },
+    });
+    const bytes = Buffer.from('Bản vẽ/mẫu đã duyệt dành cho khách');
+    const file = await app.get(FilesService).upload(
+      creator,
+      {
+        entityType: 'Project',
+        entityId: otherProjectId,
+        category: 'PROJECT_DOCUMENT',
+      },
+      {
+        originalname: 'ban-ve.txt',
+        mimetype: 'text/plain',
+        size: bytes.length,
+        buffer: bytes,
+      } as Express.Multer.File,
+    );
+    const room = (
+      await post('manager', `/projects/${otherProjectId}/rooms`, {
+        title: 'Mẫu và bản vẽ khách',
+        group: 'CONSULTING',
+        audience: 'CUSTOMER',
+      }).expect(201)
+    ).body;
+    for (const name of ['sender', 'publisher', 'guest'])
+      await post('manager', `/rooms/${room.id}/grants`, {
+        userId: users[name]!.id,
+        actions: ['READ', 'UPLOAD', 'DOWNLOAD'],
+        ...(name === 'guest'
+          ? { expiresAt: new Date(Date.now() + 86400000).toISOString() }
+          : {}),
+      }).expect(201);
+    const production = app.get(ProductionService);
+    const technical = await production.technicalApproval(creator, order.id, {
+      type: 'SHOP_DRAWING',
+      title: 'Bản vẽ khách',
+      description: 'Bản 1',
+      fileId: file.id,
+    });
+    const input = {
+      sourceType: 'TECHNICAL',
+      sourceId: technical.revisions[0]!.id,
+      version: 1,
+      fileId: file.id,
+    };
+    await post('sender', `/rooms/${room.id}/releases`, input).expect(409);
+    await production.decideTechnical(approver, technical.id, {
+      decision: 'APPROVED',
+    });
+    const release = (
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+    ).body;
+    await get('publisher', `/releases/${release.id}/preview`).expect(200);
+    const review = (
+      await get('publisher', `/releases/${release.id}/review`).expect(200)
+    ).body;
+    expect(review.sourceSnapshot.type).toBe('SHOP_DRAWING');
+    await post('publisher', `/releases/${release.id}/publish`, {
+      confirmed: true,
+      recipientHash: review.recipientHash,
+    }).expect(201);
+    expect(
+      (await get('guest', `/releases/${release.id}/download`).expect(200)).text,
+    ).toBe(bytes.toString());
+    const stale = (
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+    ).body;
+    await get('publisher', `/releases/${stale.id}/preview`).expect(200);
+    const reader = production as unknown as {
+      scopedTechnicalApproval: (
+        actor: CurrentActor,
+        id: string,
+      ) => Promise<{
+        currentRevision: number;
+        createdBy: string;
+        productionOrder: { projectId: string };
+      }>;
+    };
+    const read = reader.scopedTechnicalApproval.bind(production);
+    let entered!: () => void, resume!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const waiting = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const barrier = vi
+      .spyOn(reader, 'scopedTechnicalApproval')
+      .mockImplementationOnce(async (...args) => {
+        const source = await read(...args);
+        entered();
+        await waiting;
+        return source;
+      });
+    const decision = production
+      .decideTechnical(approver, technical.id, { decision: 'APPROVED' })
+      .then(
+        () => null,
+        (error) => error as Error,
+      );
+    try {
+      await Promise.race([
+        reached,
+        decision.then(() => {
+          throw new Error('Decision did not enter source barrier');
+        }),
+      ]);
+      await production.technicalRevision(creator, technical.id, {
+        description: 'Bản 2',
+        fileId: file.id,
+      });
+      resume();
+      expect(await decision).toBeInstanceOf(ConflictException);
+      const latest = await db.technicalApprovalRevision.findUniqueOrThrow({
+        where: {
+          technicalApprovalId_revision: {
+            technicalApprovalId: technical.id,
+            revision: 2,
+          },
+        },
+      });
+      expect(latest.decision).toBeNull();
+    } finally {
+      resume();
+      await decision;
+      barrier.mockRestore();
+    }
+
+    await post('publisher', `/releases/${stale.id}/publish`, {
+      confirmed: true,
+      recipientHash: review.recipientHash,
+    }).expect(409);
+    expect(
+      (await get('guest', `/releases/${release.id}/download`).expect(200)).text,
+    ).toBe(bytes.toString());
+    const sample = await production.sample(creator, order.id, {
+      name: 'Mẫu khách',
+      fileId: file.id,
+    });
+    const sampleInput = {
+      sourceType: 'SAMPLE',
+      sourceId: sample.id,
+      version: 1,
+      fileId: file.id,
+    };
+    await post('sender', `/rooms/${room.id}/releases`, sampleInput).expect(409);
+    await production.decideSample(approver, sample.id, {
+      decision: 'APPROVED',
+    });
+    const sampleRelease = (
+      await post('sender', `/rooms/${room.id}/releases`, sampleInput).expect(
+        201,
+      )
+    ).body;
+    await get('publisher', `/releases/${sampleRelease.id}/preview`).expect(200);
+    await post('publisher', `/releases/${sampleRelease.id}/publish`, {
+      confirmed: true,
+      recipientHash: review.recipientHash,
+    }).expect(201);
+    expect(
+      (await get('guest', `/releases/${sampleRelease.id}/download`).expect(200))
+        .text,
+    ).toBe(bytes.toString());
+    await db.productionOrder.update({
+      where: { id: order.id },
+      data: { projectId },
+    });
+    await post('sender', `/rooms/${room.id}/releases`, sampleInput).expect(409);
+    await db.productionOrder.update({
+      where: { id: order.id },
+      data: { projectId: otherProjectId },
+    });
+    await db.technicalApprovalRevision.update({
+      where: { id: technical.revisions[0]!.id },
+      data: { submittedBy: approver.userId },
+    });
+    await db.technicalApproval.update({
+      where: { id: technical.id },
+      data: { currentRevision: 1, status: 'APPROVED' },
+    });
+    await post('sender', `/rooms/${room.id}/releases`, input).expect(409);
+    await post('sender', `/rooms/${room.id}/releases`, {
+      ...sampleInput,
+      fileId: randomUUID(),
+    }).expect(409);
+  });
+
+  it('publishes handover documents with trusted bytes and explicit source signing state', async () => {
+    const rights = [
+      'handover.read',
+      'file.read',
+      'file.download',
+      'file.upload',
+    ];
+    const role = await db.role.create({
+      data: {
+        organizationId: orgId,
+        code: `handover-${run}`,
+        name: 'Handover fixture',
+        permissions: {
+          create: rights.map((code) => ({ permission: { connect: { code } } })),
+        },
+      },
+    });
+    for (const name of ['sender', 'publisher'])
+      await db.userRole.create({
+        data: {
+          organizationId: orgId,
+          userId: users[name]!.id,
+          roleId: role.id,
+          scopeType: 'ORGANIZATION',
+        },
+      });
+    const actor: CurrentActor = {
+      userId: users.sender!.id,
+      organizationId: orgId,
+      permissions: rights,
+      administrationScope: 'ORGANIZATION',
+      managedDepartmentIds: [],
+      administrationTier: 0,
+      email: 'fixture@example.test',
+      displayName: 'Fixture',
+      mustChangePassword: false,
+      organizationMembershipId: (
+        await db.organizationMembership.findUniqueOrThrow({
+          where: {
+            organizationId_userId: {
+              organizationId: orgId,
+              userId: users.sender!.id,
+            },
+          },
+        })
+      ).id,
+    };
+    const handover = await db.handover.create({
+      data: {
+        organizationId: orgId,
+        projectId: otherProjectId,
+        handoverNumber: `HO-${run}`,
+        createdBy: actor.userId,
+      },
+    });
+    const bytes = Buffer.from(
+      'Hướng dẫn bảo hành dành cho khách, không yêu cầu ký',
+    );
+    const file = await app.get(FilesService).upload(
+      actor,
+      {
+        entityType: 'Project',
+        entityId: otherProjectId,
+        category: 'PROJECT_DOCUMENT',
+      },
+      {
+        originalname: 'bao-hanh.txt',
+        mimetype: 'text/plain',
+        size: bytes.length,
+        buffer: bytes,
+      } as Express.Multer.File,
+    );
+    const afterSales = app.get(AfterSalesService);
+    // A client-supplied digest is never the trusted provenance of a new version.
+    await expect(
+      afterSales.addHandoverDocument(actor, handover.id, {
+        type: 'WARRANTY_DOCUMENT',
+        fileAssetId: file.id,
+        checksum: '0'.repeat(64),
+        language: 'VI',
+      }),
+    ).rejects.toThrow('checksum');
+    const raw = await db.fileAsset.findUniqueOrThrow({
+      where: { id: file.id },
+    });
+    const document = await afterSales.addHandoverDocument(actor, handover.id, {
+      type: 'WARRANTY_DOCUMENT',
+      fileAssetId: file.id,
+      checksum: raw.checksum!,
+      language: 'VI',
+    });
+    const room = (
+      await post('manager', `/projects/${otherProjectId}/rooms`, {
+        title: 'Hồ sơ bảo hành khách',
+        group: 'AFTER_SALES',
+        audience: 'CUSTOMER',
+      }).expect(201)
+    ).body;
+    for (const name of ['sender', 'publisher', 'guest'])
+      await post('manager', `/rooms/${room.id}/grants`, {
+        userId: users[name]!.id,
+        actions: ['READ', 'UPLOAD', 'DOWNLOAD'],
+        ...(name === 'guest'
+          ? { expiresAt: new Date(Date.now() + 86400000).toISOString() }
+          : {}),
+      }).expect(201);
+    const input = {
+      sourceType: 'HANDOVER',
+      sourceId: document.id,
+      fileId: file.id,
+      version: document.version,
+    };
+    const release = (
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+    ).body;
+    await get('publisher', `/releases/${release.id}/preview`).expect(200);
+    const review = (
+      await get('publisher', `/releases/${release.id}/review`).expect(200)
+    ).body;
+    expect(review.sourceSnapshot.signedStatus).toBe('NOT_REQUIRED');
+    await post('publisher', `/releases/${release.id}/publish`, {
+      confirmed: true,
+      recipientHash: review.recipientHash,
+    }).expect(201);
+    expect(
+      (await get('guest', `/releases/${release.id}/download`).expect(200)).text,
+    ).toBe(bytes.toString());
+    const stale = (
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+    ).body;
+    await get('publisher', `/releases/${stale.id}/preview`).expect(200);
+    await afterSales.signHandoverDocument(actor, document.id, {
+      signedStatus: 'PENDING',
+    });
+    await post('publisher', `/releases/${stale.id}/publish`, {
+      confirmed: true,
+      recipientHash: review.recipientHash,
+    }).expect(409);
+    await post('sender', `/rooms/${room.id}/releases`, input).expect(409);
+    expect(
+      (await get('guest', `/releases/${release.id}/download`).expect(200)).text,
+    ).toBe(bytes.toString());
+    expect(
+      (await db.handover.findUniqueOrThrow({ where: { id: handover.id } }))
+        .status,
+    ).toBe('DRAFT');
+    const replacementBytes = Buffer.from('Hồ sơ bảo hành phiên bản mới');
+    const replacement = await app.get(FilesService).upload(
+      actor,
+      {
+        entityType: 'Project',
+        entityId: otherProjectId,
+        category: 'PROJECT_DOCUMENT',
+      },
+      {
+        originalname: 'bao-hanh-2.txt',
+        mimetype: 'text/plain',
+        size: replacementBytes.length,
+        buffer: replacementBytes,
+      } as Express.Multer.File,
+    );
+    const replacementRaw = await db.fileAsset.findUniqueOrThrow({
+      where: { id: replacement.id },
+    });
+    const replacementInput = {
+      type: 'WARRANTY_DOCUMENT',
+      fileAssetId: replacement.id,
+      checksum: replacementRaw.checksum!,
+      language: 'VI',
+    };
+    const versions = await Promise.all(
+      [1, 2].map(() =>
+        afterSales.addHandoverDocument(actor, handover.id, replacementInput),
+      ),
+    );
+    expect(versions[0]!.id).toBe(versions[1]!.id);
+    expect(versions[0]!.version).toBe(2);
+    expect(
+      (
+        await db.handoverDocument.findUniqueOrThrow({
+          where: { id: document.id },
+        })
+      ).supersededBy,
+    ).toBe(versions[0]!.id);
+    expect(
+      await db.handoverDocument.count({
+        where: { handoverId: handover.id, supersededBy: null },
+      }),
+    ).toBe(1);
+    await post('sender', `/rooms/${room.id}/releases`, input).expect(409);
+    expect(
+      (await get('guest', `/releases/${release.id}/download`).expect(200)).text,
+    ).toBe(bytes.toString());
+    await db.handover.update({
+      where: { id: handover.id },
+      data: { status: 'COMPLETED' },
+    });
+    const completed = await afterSales.completeHandover(actor, handover.id, {});
+    expect(completed).toHaveProperty('checklist');
+    expect(completed).toHaveProperty('documents');
+    expect(completed).toHaveProperty('statusHistory');
+  });
+
+  it('blocks a waiting send when lock or revoke commits before its authorization', async () => {
+    const room = (
+      await post('manager', `/projects/${projectId}/rooms`, {
+        title: 'Race thứ tự commit',
+        group: 'CONSULTING',
+        audience: 'INTERNAL',
+      }).expect(201)
+    ).body;
+    await post('manager', `/rooms/${room.id}/grants`, {
+      userId: users.sender!.id,
+      actions: ['READ', 'SEND'],
+    }).expect(201);
+    const accepted = (
+      await post('sender', `/rooms/${room.id}/messages`, {
+        clientKey: randomUUID(),
+        body: 'Đã commit trước khóa',
+      }).expect(201)
+    ).body;
+    for (const revoke of [false, true]) {
+      let waitingSend!: Promise<request.Response>;
+      await db.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id"=${projectId}::uuid FOR UPDATE`;
+        waitingSend = post('sender', `/rooms/${room.id}/messages`, {
+          clientKey: randomUUID(),
+          body: 'Phải bị chặn sau commit',
+        }).then((r) => r);
+        await vi.waitFor(async () => {
+          const [row] = await db.$queryRaw<
+            { count: bigint }[]
+          >`SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%Project%'`;
+          expect(row!.count).toBeGreaterThan(0n);
+        });
+        if (revoke)
+          await tx.chatRoomGrant.updateMany({
+            where: {
+              roomId: room.id,
+              userId: users.sender!.id,
+              revokedAt: null,
+            },
+            data: { revokedAt: new Date() },
+          });
+        else
+          await tx.chatRoom.update({
+            where: { id: room.id },
+            data: { locked: true },
+          });
+      });
+      expect((await waitingSend).status).toBe(revoke ? 404 : 409);
+      await post('manager', `/rooms/${room.id}/lock`, { locked: false }).expect(
+        201,
+      );
+    }
+    expect(await db.chatMessage.count({ where: { roomId: room.id } })).toBe(1);
+    expect(
+      (await db.chatMessage.findUniqueOrThrow({ where: { id: accepted.id } }))
+        .body,
+    ).toBe('Đã commit trước khóa');
   });
 });

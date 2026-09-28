@@ -8,6 +8,7 @@ import React, {
   useState,
 } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Actor, api, ApiError, apiUrl } from '../../app/lib/api';
 import { ChatManagement, ReleasePanel, ReleaseList } from './chat-controls';
 import { projectDomainLabel } from '../projects/project-domain-labels';
@@ -159,7 +160,7 @@ export function ProjectChat({ projectId }: { projectId: string }) {
   const [actor, setActor] = useState<Actor>();
   const [selected, setSelected] = useState('');
   const [group, setGroup] = useState('CONSULTING');
-  const leaveGuardRef = useRef(() => true);
+  const leaveGuardRef = useRef<(leave: () => void) => void>((leave) => leave());
   const [error, setError] = useState('');
   useEffect(() => {
     const controller = new AbortController();
@@ -235,9 +236,10 @@ export function ProjectChat({ projectId }: { projectId: string }) {
                 key={id}
                 aria-pressed={group === id}
                 onClick={() => {
-                  if (!leaveGuardRef.current()) return;
-                  setGroup(id);
-                  setSelected('');
+                  leaveGuardRef.current(() => {
+                    setGroup(id);
+                    setSelected('');
+                  });
                 }}
               >
                 {label}
@@ -256,8 +258,8 @@ export function ProjectChat({ projectId }: { projectId: string }) {
                     className="mb-2 block w-full text-left"
                     key={r.id}
                     onClick={() => {
-                      if (r.id === selected || leaveGuardRef.current())
-                        setSelected(r.id);
+                      if (r.id !== selected)
+                        leaveGuardRef.current(() => setSelected(r.id));
                     }}
                   >
                     {r.title}
@@ -283,7 +285,7 @@ export function ProjectChat({ projectId }: { projectId: string }) {
                 onRevoked={revoked}
                 leaveGuardRef={leaveGuardRef}
                 onBack={() => {
-                  if (leaveGuardRef.current()) setSelected('');
+                  leaveGuardRef.current(() => setSelected(''));
                 }}
               />
             ) : (
@@ -311,8 +313,13 @@ function ChatRoomView({
   authorityActions: string[];
   onRevoked: () => void;
   onBack: () => void;
-  leaveGuardRef: React.RefObject<() => boolean>;
+  leaveGuardRef: React.RefObject<(leave: () => void) => void>;
 }) {
+  const router = useRouter();
+  const [leaveAction, setLeaveAction] = useState<(() => void) | undefined>();
+  const leaveDialog = useRef<HTMLDialogElement>(null);
+  const leaving = useRef(false);
+  const container = useRef<HTMLElement>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [releases, setReleases] = useState<ReleaseList>({
     published: [],
@@ -352,6 +359,7 @@ function ChatRoomView({
     setLinks(undefined);
     setReleases({ published: [], pending: [] });
     setDraft('');
+    setLeaveAction(undefined);
     setAttachment(undefined);
     pending.current = undefined;
     upload.current = undefined;
@@ -438,6 +446,10 @@ function ChatRoomView({
             );
             if (alive.current) setReleases(value);
           }
+          if (alive.current)
+            setError((old) =>
+              old === 'Không tải được tin mới. Đang thử lại…' ? '' : old,
+            );
         }
       } catch (e) {
         if (controller.signal.aborted) return;
@@ -469,13 +481,33 @@ function ChatRoomView({
     // Scope changes remount this component using actor/room/grant identity.
   }, [room.id, room.grantId, room.audience, actor.userId, clear, accept]);
   useEffect(() => {
+    if (leaveAction) leaveDialog.current?.showModal();
+    else leaveDialog.current?.close();
+  }, [leaveAction]);
+  useEffect(() => {
+    const hide = () => {
+      // The cached document must not paint old scoped data before reauthorization.
+      if (container.current) container.current.style.visibility = 'hidden';
+      clear();
+    };
+    const restore = (e: PageTransitionEvent) => {
+      if (e.persisted) clear();
+    };
+    window.addEventListener('pagehide', hide);
+    window.addEventListener('pageshow', restore);
+    return () => {
+      window.removeEventListener('pagehide', hide);
+      window.removeEventListener('pageshow', restore);
+    };
+  }, [clear]);
+  useEffect(() => {
     const unsent = () =>
+      !leaving.current &&
       Boolean(draft || attachment || upload.current || pending.current);
-    const confirm = () =>
-      !unsent() ||
-      window.confirm(
-        'Có nội dung chưa gửi. Rời phòng sẽ bỏ nháp trong tab này. Tiếp tục?',
-      );
+    const confirm = (leave: () => void) => {
+      if (!unsent()) leave();
+      else setLeaveAction((current) => current ?? leave);
+    };
     leaveGuardRef.current = confirm;
     const warn = (e: BeforeUnloadEvent) => {
       if (unsent()) {
@@ -496,21 +528,66 @@ function ChatRoomView({
       )
         return;
       const url = new URL(anchor.href, location.href);
-      if (url.pathname.startsWith('/api/') || url.href === location.href)
+      if (
+        url.pathname.startsWith('/api/') ||
+        (url.origin === location.origin &&
+          url.pathname === location.pathname &&
+          url.search === location.search)
+      )
         return;
-      if (!confirm()) {
+      if (unsent()) {
         e.preventDefault();
         e.stopPropagation();
+        confirm(() => {
+          if (url.origin === location.origin)
+            router.push(`${url.pathname}${url.search}${url.hash}`);
+          else location.assign(url.href);
+        });
       }
     };
-    window.addEventListener('beforeunload', warn);
+    // Next App Router has no beforePopState. Cancel native traversal before
+    // popstate; replay the browser's exact entry only after confirmation.
+    const navigation = Reflect.get(window, 'navigation') as
+      | (EventTarget & {
+          traverseTo: (key: string) => { finished: Promise<unknown> };
+        })
+      | undefined;
+    const traverse = (event: Event) => {
+      const e = event as Event & {
+        navigationType: string;
+        destination: { key: string; sameDocument: boolean; url: string };
+      };
+      if (
+        e.navigationType !== 'traverse' ||
+        !e.destination.sameDocument ||
+        !e.cancelable ||
+        !unsent()
+      )
+        return;
+      const destination = new URL(e.destination.url);
+      if (
+        destination.origin === location.origin &&
+        destination.pathname === location.pathname &&
+        destination.search === location.search
+      )
+        return;
+      e.preventDefault();
+      confirm(() => {
+        void navigation!
+          .traverseTo(e.destination.key)
+          .finished.catch(() => clear());
+      });
+    };
+    if (unsent()) window.addEventListener('beforeunload', warn);
+    navigation?.addEventListener('navigate', traverse);
     document.addEventListener('click', navigate, true);
     return () => {
-      leaveGuardRef.current = () => true;
+      leaveGuardRef.current = (leave) => leave();
       window.removeEventListener('beforeunload', warn);
+      navigation?.removeEventListener('navigate', traverse);
       document.removeEventListener('click', navigate, true);
     };
-  }, [draft, attachment, leaveGuardRef]);
+  }, [draft, attachment, hasUpload, leaveGuardRef, router, clear]);
   async function older() {
     if (busy || !before.current) return;
     setBusy(true);
@@ -628,7 +705,38 @@ function ChatRoomView({
         ? 'Đang xác minh quyền và lịch sử'
         : '';
   return (
-    <article className="panel min-w-0 grid gap-3">
+    <article ref={container} className="panel min-w-0 grid gap-3">
+      <dialog
+        ref={leaveDialog}
+        aria-labelledby="discard-draft-title"
+        onCancel={(e) => {
+          e.preventDefault();
+          setLeaveAction(undefined);
+        }}
+        className="rounded p-6 backdrop:bg-black/40"
+      >
+        <h3 id="discard-draft-title">Bỏ nháp chưa gửi?</h3>
+        <p>Nội dung và file chưa gửi chỉ được giữ trong tab này.</p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button autoFocus onClick={() => setLeaveAction(undefined)}>
+            Ở lại
+          </button>
+          <button
+            onClick={() => {
+              leaving.current = true;
+              setDraft('');
+              setAttachment(undefined);
+              upload.current = undefined;
+              pending.current = undefined;
+              for (const a of aborts.current) a.abort();
+              setLeaveAction(undefined);
+              leaveAction?.();
+            }}
+          >
+            Rời và bỏ nháp
+          </button>
+        </div>
+      </dialog>
       <button className="md:hidden" onClick={onBack}>
         ← Danh sách phòng
       </button>
