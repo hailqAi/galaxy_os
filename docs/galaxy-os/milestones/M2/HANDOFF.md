@@ -1,5 +1,32 @@
 # M2 — Bàn giao triển khai
 
+## LOCAL3000 — 2026-09-29 (điểm tiếp tục hiện tại)
+
+**Người dùng dùng `http://localhost:3000/`**, Chrome hiện tại giữ đăng nhập và đã mở được Project. Web mới source9235def phục vụ từ worktree này, API/data vẫn bản cũ7faeb58. M2 bị tắt đúng guard/feature flag; chưa có chat M2 hoặc AI M3 ở3000. Không hướng người dùng sang demo33003.
+
+- Worktree `/home/galaxy_os/.worktrees/m2-a-20260928`, branch `m2/project-chat-20260928`. START_SHA `43c1195e10fb04f963cf7c7dd7d47fa8744f15bb`; CODE_SHA/TESTED_SHA `9235deffa07d4fb5d1ec2b253d70bdeede568363`; TESTED_TREE `1f97af9dd2b3e3a46e1b3cd2691af28c299d5efc`. Docs commit riêng lấy từ Git sau commit, không amend tự tham chiếu.
+- Đã sửa Web gọi delivery-options dù M2 tắt: server flag truyền vào client hiện hữu, chặn load/submit/UI; không đổi auth/backend/domain. Sol medium viết, Astra high review đọc-only và parent Ponytail diff review; metadata model thực không được tool trả, VERIFIED_MODEL UNVERIFIED. Code Luna giữ nguyên.
+- Full Web527/527, focused7/7 có mutation RED, root lint/typecheck/format/build đạt. Chrome154: /me200, danh sách/chi tiết Project và danh sách FileAsset200, DOM thật; không đăng nhập fixture vào profile người dùng. Mỗi persona regression vẫn phải context riêng. MCP wait_for/h1-after-reload timeout còn hạn chế harness, không full browser PASS.
+- Clock45s448samples còn hai jump khoảng183s: observer chặn hai targeted setup case, fullAPI2/repeat10/fullbrowser NOT_RUN. Không đổi nhãn clock; hành vi handover/site-delivery post-I/O chưa được nghiệm thu. Tiếp tục từ đúng test IDs/logs ở VERIFICATION sau OS clock ổn; không retry săn xanh.
+- MainDB69 thiếu13migration M2; API mới cần membership.kind nên không đổi API3001. Hai checksum lịch sử khác Git cần đối soát; read-only diff với baseline chỉ sáu index rename, không sửa ledger. Main schema/data/role/password không đổi, không fixtureDB trá hình. M2 ngoài test chưa đạt gate; migration main cần xác nhận riêng khi kế hoạch thực thi đã đủ điều kiện.
+
+### Chạy/dừng/quay lại local
+
+Metadata local ignored ở `.runtime/local3000/active.json`, `before.json`, launcher `web-process.py`, log `new-web.log`. Web mới launcher181321/listener181354 tại3000; API cũ107475 tại3001 **giữ nguyên**. PID là quan sát, phải đọc lại active.json và `/proc/<pid>/{cwd,cmdline}`/listener trước mọi signal; không kill theo tên/cổng.
+
+Từ worktree, sau xác minh và graceful stop đúng launcher Web hiện hành: `python3 .runtime/local3000/web-process.py new` chạy Web mới hoặc `python3 .runtime/local3000/web-process.py rollback` chạy Web cũ trong `/home/galaxy_os/apps/web`. Script là operational local ignored, không credential. Rollback đã thực hiện thành công trong lượt, /me200 vẫn giữ; không restore database. Giữ nguyên binding0.0.0.0:3000 của Web cũ để phục vụ đường Windows localhost hiện có, không đổi firewall/WSL/debugger. HTTP local dùng Next development hiện hữu; không nới HTTPS production.
+
+Web mới: FEATURE_PROJECT_CHAT=false, API duy nhất3001, cookiegalaxy_session; không trỏ link/BFF sang33003. Next dev `.next/dev`, source9235def; production test build `psTXwnzhicAQrJgnw1sgA` chỉ phục vụ test33002, launcher181626/listener181637. Root API/storage/DB cũ và test stack riêng đều giữ. Không nhầm build test với build người dùng.
+
+### Việc cần tiếp theo
+
+1. Khôi phục clock WSL ổn định bằng quyền OS hợp lệ. Thử dừng tạm systemd-timesyncd đã được chủ máy cho phép trước nhưng chưa có xác thực OS; không thử sudo lặp hoặc xin mật khẩu. Đo lại trước targeted/repeat10/fullAPI2/browser; không dùng host nhiễu để nghiệm thu.
+2. Chạy đúng hai ca setup, rồi các gap B5/race/upload/navigation/mobile và hồi quy đã chốt. Giữ no-store/BFCache criterion hiện hữu.
+3. Sau gate/review, trình áp đúng13 migration main + đối soát checksum và rollout phù hợp. Không tự thay guard để bật M2 trên dữ liệu đang dùng. Web3000 mới không làm gate tự đạt.
+4. M3 chưa có code; chỉ thực thi M3 Project hiện có khi M2-A VERIFIED theo chỉ đạo mới. Lead-only/lifecycle vẫn deferred. Không tạo AI placeholder hoặc gọi provider trước gate.
+
+LOCAL_3000_READY: PARTIAL_WEB_AND_EXISTING_AUTH_PROJECT. M2_A_STATUS: PARTIAL; M2_OVERALL_STATUS: PARTIAL_LEAD_LIFECYCLE_DEFERRED; M3_ENTRY_GATE: BLOCKED; M3_IMPLEMENTATION_STATUS: NOT_STARTED. LOCAL_3000_RUNTIME_CHANGED: YES (Web); REMOTE_PRODUCTION_DEPLOYED: NO; GIT_PUSH_MERGE: NOT_PERFORMED. [VERIFICATION](VERIFICATION.md) có commands/logs và giới hạn. Các mục dưới là lịch sử.
+
 ## Bàn giao sau Luna — 2026-09-28 (hiện hành)
 
 - Giữ code Luna và worktree/branch hiện có; START_SHA `c7b74d190aca3340ba85027db523f10a10d656fc`. CODE_SHA/TESTED_SHA (phạm vi checks được ghi, không full nghiệm thu): `a13c2ec151688de2f59c832026a37fb568b6b9e7`; TESTED_TREE `1af600b273518ddb91c15ea324259610123f2f07`. Không có M3 source/UI.

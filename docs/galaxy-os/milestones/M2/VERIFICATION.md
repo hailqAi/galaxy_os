@@ -1,5 +1,47 @@
 # M2 — Bằng chứng triển khai và kiểm chứng
 
+## LOCAL3000 — 2026-09-29 (hiện hành)
+
+START_SHA `43c1195e10fb04f963cf7c7dd7d47fa8744f15bb`. CODE_SHA/TESTED_SHA `9235deffa07d4fb5d1ec2b253d70bdeede568363`; TESTED_TREE `1f97af9dd2b3e3a46e1b3cd2691af28c299d5efc`. TESTED là phạm vi kiểm dưới đây, không full nghiệm thu. Source/test ba file khớp Git bằng SHA256 trong `.runtime/local3000/source-manifest.json`; docs commit sau không đổi source/test/config/migration. Không self-hash/amend docs.
+
+### Runtime, auth và dữ liệu
+
+Web3000 hiện chạy source mới9235def từ worktree M2, Next16.2.10 development/webpack (`.next/dev`); không gọi đây là production build ID. Launcher181321, listener181354, binding0.0.0.0 giống Web cũ; không mở debugger ra mạng. API3001 vẫn PID107475, cwd `/home/galaxy_os/apps/api`, code7faeb58. Database đang dùng `galaxy_os` trên5432, schema69 và storage/API cũ giữ nguyên. Không seed, migrate, sửa role/password hoặc đổi dữ liệu sang test. GET qua phiên hợp lệ có thể cập nhật lastSeenAt theo auth hiện hữu; không tuyên bố không có mọi write nội bộ.
+
+ENV Web: NODE_ENV=development; APP_PUBLIC_ORIGIN=http://localhost:3000; INTERNAL_API_URL=http://127.0.0.1:3001/api/v1; NEXT_PUBLIC_API_URL=/api/v1; SESSION_COOKIE_NAME=galaxy_session; FEATURE_PROJECT_CHAT=false; ALLOW_DEV_AUTH=false; TRUST_PROXY=false. Không thay quy định HTTPS production/HttpOnly/CSRF. Tất cả BFF dùng cùng API3001; không có nhánh chat ghi sang fixtureDB.
+
+Chrome Stable154.0.8037.57 Windows hiển thị, profile/phiên hiện có, official MCP1.10.1 Windows stdio/loopback33004. Cuối lượt `/projects`: DOM `TỔNG QUAN DỰ ÁN`,22link, `/api/v1/me`200 và `/api/v1/projects`200; đã mở một Project bằng link thật, route `/projects/:projectId/stage-1`, Project GET200 và danh sách FileAsset GET200, h1 có, không alert; chưa kiểm binary thực qua3000. Không ghi tên/ID hồ sơ thật vào evidence. Không submit login/logout, cookie/token không dump; phiên hiện tại còn hợp lệ, không coi401 lịch sử là lỗi hiện tại.
+
+Lần chuyển đầu dùng127.0.0.1:3000: WSL smoke200, Chrome wait không đạt, đã rollback Web cũ với binding ban đầu0.0.0.0; Windows HTTP200 và Chrome/me200. Lần chuyển sau giữ binding ban đầu: Windows HTTP200 và new Web log nhận/me/Project200. **Chưa kết luận nguyên nhân lần đầu chỉ do binding:** MCP wait_for và một phép đợi h1 sau reload vẫn timeout, trong khi lần đọc DOM riêng sau đó có nội dung và không console error/warn. Giữ các lần harness lỗi, không gọi full browser PASS. Rollback thực tế đã bảo toàn session/database.
+
+Chứng cứ đọc-only/screenshot heading đã loại tài khoản và nội dung dự án: `.runtime/local3000/galaxy-local3000-chrome-smoke.json`, `galaxy-local3000-project-heading.png`; Project/file smoke `.runtime/local3000/galaxy-local3000-project-files-smoke.json`. Launcher/rollback và runtime metadata `.runtime/local3000/{web-process.py,before.json,active.json}` chỉ nằm local ignored, không secrets/profile trong Git.
+
+### Checks trên source9235def
+
+| Kiểm                                              | Lệnh/phạm vi                                                  | Kết quả/log                                                                       |
+| ------------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| TDD flag/mount                                    | Web compatibility + page tests; mutation bỏ loadOptions guard | RED disabled case; GREEN7/7, `/tmp/l3000-compat-{mutation-red,focused-final}.log` |
+| Full Web unit                                     | `pnpm --filter @galaxy/web test`                              | 527/527,32files, `/tmp/l3000-compat-web-test.log`; +5 so với522, không xóa test   |
+| Build Web                                         | Next build, env theo isolated recipe; không gọi main DB       | PASS, `/tmp/galaxy-local3000-build.log`; test build `psTXwnzhicAQrJgnw1sgA`       |
+| Root lint                                         | `pnpm lint`                                                   | PASS, gồm ruff trong venv worktree, `/tmp/galaxy-local3000-root-lint.log`         |
+| Root typecheck                                    | `pnpm typecheck`                                              | PASS, `/tmp/galaxy-local3000-root-typecheck.log`                                  |
+| Format                                            | `pnpm format:check`                                           | PASS cả sau docs, `/tmp/galaxy-local3000-format-final.log`                        |
+| Browser người dùng                                | MCP đọc DOM/API thật3000, không mutation nghiệp vụ            | SMOKE_PASS cho session/Project, không full browser hoặc M2                        |
+| API/schema                                        | API source/migrations không đổi lượt này                      | Không chạy lại unit86/schema82 cũ chỉ vì đổi Web; bằng chứng cũ giữ đúng SHA      |
+| Targeted M2 / repeat10 / fullAPI1+2 / fullbrowser | clock gate trước hai ca setup                                 | NOT_RUN, baseline nhiễu; không lấy Web PASS thay API                              |
+
+Test Web33002 đã được dừng đúng launcher trước build và khởi động lại bằng recipe `node scripts/m2-a-serve.mjs web --production`; launcher181626/listener181637. API test157899 và DB55433/storage fixture không đổi. Đây là hạ tầng kiểm thử nội bộ, không lối vào của người dùng. Build psTX… ở33002, không nhầm với dev runtime3000.
+
+### Clock và migration prerequisite
+
+Lệnh `node scripts/m2-observed-test.mjs api test/m2-project-chat.integration.test.ts -t 'publishes handover documents with trusted bytes and explicit source signing state|rechecks site delivery file after evidence storage I/O'`, exit2. Run `23316b89-7773-4198-8916-3a002a8a7712`:448samples/~44.926s monotonic,2jump −182836/+183518ms. CLOCK_CONTAMINATED_BASELINE, testsNOT_RUN; `/tmp/galaxy-local3000-targeted-clock-gate.log`, raw `/tmp/galaxy-os-g00-20260928m2a/clock/23316b89-7773-4198-8916-3a002a8a7712/`. Observer API riêng trước đó90s có6jump; Vitest timeout patch không sửa host. Không lặp sudo đã thiếu xác thực, không nới expiry/JWT. Hai ca giữ SETUP_FAILED lịch sử, không gọi race/publication đã đạt.
+
+Main migration preflight dùng transaction READ ONLY và Prisma read-only diff (default_transaction_read_only=on). 13 migration M2 có ở test82 nhưng main69 chưa có: từ `20260927225352_m2_project_chat` đến `20260928213000_m2_site_delivery_evidence`; danh sách đầy đủ `.runtime/local3000/migration-preflight.json`. Chúng thêm chat/grant/history/publication, membership.kind, typed contract/payment/site-delivery linkage; có insert permission catalog, không tự cấp role. SiteDelivery/ContractDocument legacy hiện0, orphan evidence0. Không dùng số0 để suy mọi DB đều an toàn.
+
+Hai checksum applied khác file Git/main/worktree: `20260720090000_real_authentication`, `20260727230000_complete_handover_warranty_operations`. Tìm bounded Git history của đúng hai file không thấy blob khớp; không biết tác nhân/lịch sử chỉnh. Diff live→schema7faeb chỉ có sáu renameIndex, không apply SQL đó và không sửa migration ledger. Chưa có quyền áp13 migration vào DB đang dùng; cũng chưa có gate nghiệm thu/rollout M2 ngoài test. Không tự chạy API mới trên schema69.
+
+M2_A_STATUS: PARTIAL; M2_OVERALL_STATUS: PARTIAL_LEAD_LIFECYCLE_DEFERRED; LOCAL_3000_READY: PARTIAL_WEB_AND_EXISTING_AUTH_PROJECT; M3_ENTRY_GATE: BLOCKED; M3_IMPLEMENTATION_STATUS: NOT_STARTED. Ma trận24+30 giữ IDs/kết quả trước, không nâng PASS. LOCAL_3000_RUNTIME_CHANGED: YES (Web); REMOTE_PRODUCTION_DEPLOYED: NO; GIT_PUSH_MERGE: NOT_PERFORMED.
+
 ## Tiếp tục sau Luna — 2026-09-28 (hiện hành)
 
 START_SHA `c7b74d190aca3340ba85027db523f10a10d656fc`; worktree/branch giữ nguyên. Bảo toàn code Luna, không chạy lại M0/M1. Log dự án khác đã được chủ dự án đính chính không dùng trong chẩn đoán này. Các mục phía dưới là lịch sử theo SHA riêng.

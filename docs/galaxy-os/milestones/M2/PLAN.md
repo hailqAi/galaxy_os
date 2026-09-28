@@ -1,5 +1,19 @@
 # Galaxy OS M2-A Implementation Plan
 
+## LOCAL3000 — chỉ đạo mới 2026-09-29
+
+Chủ dự án cho phép thay Web/runtime local tại `http://localhost:3000`, không cho phép tự di trú database đang dùng. Giữ INLINE, B1–B5 và M3 có điều kiện; không ghi rằng chủ dự án đã đọc PLAN này. Source đầu lượt `43c1195`; main cũ `7faeb58`. Không dùng log dự án khác.
+
+Thiết kế kỹ thuật đã review: **Web mới → API cũ tương thích, M2 tắt**. API mới không thể nối schema69 vì thiếu `OrganizationMembership.kind`; bật M2 còn chịu guard G00. Không nối chat sang DB thử và không sửa guard. Chỉ đưa UI cũ còn tương thích của Web mới lên3000; chưa đạt LOCAL_3000_READY đầy đủ.
+
+- L3000-1: đối chiếu process/cwd, schema/read-only, auth/cookie/origin và recipe quay lại. Không thay account/role/schema/storage.
+- L3000-2 (đã code): `apps/web/app/installations/work-orders/[id]/page.tsx` làm server wrapper; client hiện hữu chuyển sang `work-order-client.tsx`. `deliveryEnabled` chỉ true khi server flag đúng `true`; chặn shared loadOptions/createDelivery và UI khi false. Không đổi payload lệnh lắp đặt cũ. `compatibility.test.tsx` kiểm flag true/false/absent, key theo id và endpoint mount thực thi; bỏ guard phải RED. Giữ `page.test.ts` precision/retry. Lệnh `pnpm --filter @galaxy/web test`, typecheck/lint/format/build.
+- L3000-3 (đã thực hiện): build rồi stop graceful đúng Web launcher, chạy Next development từ worktree tại3000; `/api/v1` duy nhất tới3001, cookie `galaxy_session`, chat=false. Root API107475 không restart. Chrome hiện có kiểm `/me`, Project đọc-only; không reset login hoặc dùng persona fixture. Rollback đã được thực hiện và kiểm `/me200` trong lượt.
+- L3000-4 (BLOCKED): 13 migration đang thiếu trên main cần xác nhận riêng trước write; hai checksum lịch sử khác Git cần đối soát nguồn, không sửa ledger. Read-only Prisma diff với baseline69 chỉ báo sáu tên index khác; không chứng minh toàn bộ custom SQL lịch sử. Chỉ sau clock/gate và rollout review phù hợp mới đề nghị áp main, không tự đổi G00 guard.
+- L3000-5: observer hiện hữu chặn targeted hai setup case vì CLOCK_CONTAMINATED_BASELINE; repeat10/fullAPI/fullbrowser vẫn chưa nghiệm thu. Không sửa expected, backdate grant hoặc mock giờ để đạt gate. M3 vẫn NOT_STARTED.
+
+Review: Sol/medium là source writer; Astra/high đọc-only compatibility/correctness/security/UX, parent rà diff Ponytail. Requested/dispatch được chấp nhận; runtime không cung cấp actual model ID/effort → VERIFIED_MODEL: UNVERIFIED. Không tạo router hoặc đổi model ứng dụng.
+
 ## Điểm thực thi cuối sau Luna — 2026-09-28
 
 C0–C6 đã có các commit backend/UI/test được nêu trong VERIFICATION; giữ thiết kế đã review, không làm lại. C7 prerequisite phát hiện trên Chrome: `/installations/work-orders/:id` bị proxy lấy fallback dashboard.read dù API/link Project dùng installation.read. Thêm đúng một mapping trong `apps/web/app/portal-navigation.ts`, regression matcher trong `.test.ts`; fixture `apps/api/test/m2-browser.fixture.ts` cấp project.read SELF riêng cho sender owner/publisher member. Không thêm sidebar, quyền dashboard hoặc quyền Project toàn tổ chức. RED2→GREEN10, fullWeb522, independent correctness/security/Ponytail review đóng; commit a13c2ec, Chrome symptom đã hết sau rebuild.

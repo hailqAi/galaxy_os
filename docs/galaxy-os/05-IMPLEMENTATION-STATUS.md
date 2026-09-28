@@ -1,5 +1,12 @@
 # Trạng thái triển khai và điểm tiếp tục
 
+## LOCAL3000 — 2026-09-29 (hiện hành)
+
+- Theo chỉ đạo mới, **Web9235def đã chạy tại http://localhost:3000 từ worktree M2**, API3001/data `galaxy_os` schema69 giữ nguyên; FEATURE_PROJECT_CHAT=false. Phiên Chrome người dùng/me200, danh sách/chi tiết Project200. Không đổi account/password/role hoặc dùng testDB thay dữ liệu cũ. LOCAL_3000_READY: PARTIAL_WEB_AND_EXISTING_AUTH_PROJECT; chưa có chat M2/Hỏi AI tại3000.
+- Fix nhỏ: lệnh lắp đặt không gọi delivery-options hoặc mở ghi mới khi M2 tắt. Code/tested SHA `9235deffa07d4fb5d1ec2b253d70bdeede568363`, tree `1f97af9dd2b3e3a46e1b3cd2691af28c299d5efc`; fullWeb527/527, focused7/7, build/rootlint/typecheck/format đạt. Sol medium + Astra high review; actual runtime model metadata UNVERIFIED.
+- Clock baseline45s vẫn nhảy183s, chặn hai targeted setup; repeat10/fullAPI2/fullbrowser chưa nghiệm thu. Main thiếu13migration M2, hai checksum applied lịch sử cần đối soát. Không áp migration đang dùng hoặc bỏ guard. Rollback Web cũ đã thực hiện/kiểm thành công trước lần chuyển cuối. MCP wait sau reload có timeout, không gọi full browser PASS.
+- **M2_A_STATUS: PARTIAL; M2_OVERALL_STATUS: PARTIAL_LEAD_LIFECYCLE_DEFERRED; M3_ENTRY_GATE: BLOCKED; M3_IMPLEMENTATION_STATUS: NOT_STARTED.** LOCAL_3000_RUNTIME_CHANGED:YES (Web); REMOTE_PRODUCTION_DEPLOYED:NO; GIT_PUSH_MERGE:NOT_PERFORMED. PLAN/VERIFICATION/HANDOFF M2 ghi metadata, recipe và bước tiếp. Các mục dưới là lịch sử, không thay trạng thái này.
+
 ## Sau Luna — 2026-09-28 (hiện hành)
 
 - Giữ code Luna và worktree/branch hiện có; START_SHA `c7b74d190aca3340ba85027db523f10a10d656fc`. CODE_SHA/TESTED_SHA (phạm vi checks được ghi, không full nghiệm thu): `a13c2ec151688de2f59c832026a37fb568b6b9e7`; TESTED_TREE `1af600b273518ddb91c15ea324259610123f2f07`. Không có M3 source/UI.
