@@ -120,6 +120,7 @@ export class ChatReleaseDto {
     'CONTRACT_FILE',
     'PAYMENT',
     'CUSTOMER_PAYMENT_RECORD',
+    'CUSTOMER_PAYMENT_FILE',
     'DELIVERY_INSTALL',
   ])
   sourceType?:
@@ -132,6 +133,7 @@ export class ChatReleaseDto {
     | 'CONTRACT_FILE'
     | 'PAYMENT'
     | 'CUSTOMER_PAYMENT_RECORD'
+    | 'CUSTOMER_PAYMENT_FILE'
     | 'DELIVERY_INSTALL';
   @IsUUID() sourceId!: string;
   @IsOptional() @IsUUID() fileId?: string;
@@ -151,7 +153,7 @@ export class ChatReleaseDto {
   @IsOptional() @IsUUID() clientKey?: string;
   @IsOptional() @Matches(/^[0-9a-f]{64}$/) sourceFingerprint?: string;
 }
-export class ChatContractFilesQuery {
+export class ChatCustomerFilesQuery {
   @IsUUID() sourceId!: string;
   @IsOptional() @IsUUID() appendixId?: string;
 }

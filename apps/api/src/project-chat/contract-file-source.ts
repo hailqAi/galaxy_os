@@ -1,4 +1,8 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { FileAsset, Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { extname } from 'node:path';
@@ -9,7 +13,13 @@ import {
 import { projectWhereForPermissions } from '../access-control/business-entity.policy';
 import { customerPublicationSource } from './customer-publication-source';
 
-export async function lockContractFileOwnership(tx: Prisma.TransactionClient) {
+export type CustomerFileInput = {
+  sourceType: 'CONTRACT_FILE' | 'CUSTOMER_PAYMENT_FILE';
+  sourceId: string;
+  appendixId?: string;
+};
+
+export async function lockCustomerFileOwnership(tx: Prisma.TransactionClient) {
   // ponytail: Scalar legacy references have no FileAsset FK. Lock only the final
   // decision after storage I/O; global table contention returns 409. Replace
   // these locks with typed FileAsset FKs if registration volume requires it.
@@ -34,23 +44,28 @@ export async function lockContractFileOwnership(tx: Prisma.TransactionClient) {
   }
 }
 
-export async function contractFileSource(
+export async function customerFileSource(
   tx: Prisma.TransactionClient,
   actor: CurrentActor,
   projectId: string,
-  sourceId: string,
-  appendixId?: string,
+  input: CustomerFileInput,
   registration = false,
 ) {
+  const paymentFile = input.sourceType === 'CUSTOMER_PAYMENT_FILE';
+  if (paymentFile && input.appendixId)
+    throw new BadRequestException('Khoản thu không có phụ lục');
+  const permission = paymentFile
+    ? 'receivable.payment.record'
+    : 'contract.update';
   if (registration) {
-    const bindings = actorsForPermission(actor, 'contract.update');
+    const bindings = actorsForPermission(actor, permission);
     if (
       !bindings.length ||
       !(await tx.project.count({
         where: {
           id: projectId,
           OR: bindings.map((binding) =>
-            projectWhereForPermissions(binding, 'contract.update'),
+            projectWhereForPermissions(binding, permission),
           ),
         },
       }))
@@ -58,14 +73,16 @@ export async function contractFileSource(
       throw new NotFoundException();
   }
   const source = await customerPublicationSource(tx, actor, projectId, {
-    sourceType: 'CONTRACT',
-    sourceId,
-    appendixId,
+    sourceType: paymentFile ? 'CUSTOMER_PAYMENT_RECORD' : 'CONTRACT',
+    sourceId: input.sourceId,
+    appendixId: input.appendixId,
   });
   const snapshot = {
     ...source.snapshot,
-    sourceType: 'CONTRACT_FILE',
-    purpose: 'CUSTOMER_REVIEW_FILE',
+    sourceType: input.sourceType,
+    purpose: paymentFile
+      ? 'Chứng từ khoản thu do nhân viên cung cấp'
+      : 'CUSTOMER_REVIEW_FILE',
     sourceUpdatedAt: source.updatedAt.toISOString(),
   };
   return {
@@ -77,12 +94,11 @@ export async function contractFileSource(
   };
 }
 
-export async function eligibleContractFile(
+export async function eligibleCustomerFile(
   tx: Prisma.TransactionClient,
   actor: CurrentActor,
   projectId: string,
-  contractId: string,
-  appendixId: string | undefined,
+  input: CustomerFileInput,
   fileId: string,
 ) {
   const file = await tx.fileAsset.findFirst({
@@ -100,23 +116,37 @@ export async function eligibleContractFile(
       currentStageOneDocuments: { none: {} },
       stageOneDocumentVersions: { none: {} },
       importJobs: { none: {} },
-      contractDocuments: {
-        none: {
-          NOT: {
-            contractId,
-            appendixId: appendixId ?? null,
-            format: 'CUSTOMER_REVIEW_FILE',
-          },
-        },
-      },
-      chatReleases: { none: { contractDocumentId: null } },
+      contractDocuments:
+        input.sourceType === 'CUSTOMER_PAYMENT_FILE'
+          ? { none: {} }
+          : {
+              none: {
+                NOT: {
+                  contractId: input.sourceId,
+                  appendixId: input.appendixId ?? null,
+                  format: 'CUSTOMER_REVIEW_FILE',
+                },
+              },
+            },
+      chatReleases:
+        input.sourceType === 'CUSTOMER_PAYMENT_FILE'
+          ? {
+              every: {
+                customerPaymentId: input.sourceId,
+                sourceSnapshot: {
+                  path: ['sourceType'],
+                  equals: 'CUSTOMER_PAYMENT_FILE',
+                },
+              },
+            }
+          : { none: { contractDocumentId: null } },
     },
     include: {
       attachments: { include: { project: { select: { customerId: true } } } },
     },
   });
   if (!file || !/^[0-9a-f]{64}$/.test(file.checksum))
-    throw new NotFoundException('File không thuộc nguồn hợp đồng được phép');
+    throw new NotFoundException('File không thuộc nguồn được phép');
   // Match the finite ordinary-upload types; registration never trusts a legacy MIME label alone.
   const extension = {
     'application/pdf': '.pdf',
@@ -181,8 +211,8 @@ export async function eligibleContractFile(
   return file;
 }
 
-export function contractFileSnapshot(
-  source: Awaited<ReturnType<typeof contractFileSource>>,
+export function customerFileSnapshot(
+  source: Awaited<ReturnType<typeof customerFileSource>>,
   file: FileAsset,
 ) {
   const snapshot = {

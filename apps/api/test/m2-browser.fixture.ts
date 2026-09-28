@@ -184,6 +184,9 @@ export async function createM2BrowserFixture() {
       'contract.read',
       'contract.create',
       'contract.update',
+      'receivable.read',
+      'receivable.create',
+      'receivable.payment.record',
       'quotation.update',
       'quotation.approve',
     ];
@@ -219,7 +222,11 @@ export async function createM2BrowserFixture() {
       actions: ['PUBLISH'],
       roomCeiling: [],
     });
-    async function domain(actor: string, path: string, body: unknown) {
+    async function domain<T = { id: string }>(
+      actor: string,
+      path: string,
+      body: unknown,
+    ) {
       const response = await fetch(`${api}${path}`, {
         method: 'POST',
         headers: {
@@ -230,7 +237,7 @@ export async function createM2BrowserFixture() {
       });
       if (!response.ok)
         throw new Error(`Fixture source ${path}: ${response.status}`);
-      return response.json() as Promise<{ id: string }>;
+      return response.json() as Promise<T>;
     }
     const form = new FormData();
     form.append('entityType', 'Project');
@@ -314,23 +321,54 @@ export async function createM2BrowserFixture() {
     const contractFilename = 'hop-dong-browser.txt';
     const contractFileText =
       'Hợp đồng browser gửi khách xem xét; chưa xác nhận chữ ký';
-    const contractForm = new FormData();
-    contractForm.append('entityType', 'Project');
-    contractForm.append('entityId', project.id);
-    contractForm.append('category', 'PROJECT_DOCUMENT');
-    contractForm.append(
-      'file',
-      new Blob([contractFileText], { type: 'text/plain' }),
+    async function uploadProjectFile(filename: string, text: string) {
+      const form = new FormData();
+      form.append('entityType', 'Project');
+      form.append('entityId', project.id);
+      form.append('category', 'PROJECT_DOCUMENT');
+      form.append('file', new Blob([text], { type: 'text/plain' }), filename);
+      const response = await fetch(`${api}/files`, {
+        method: 'POST',
+        headers: { Cookie: users.sender!.cookie },
+        body: form,
+      });
+      if (!response.ok)
+        throw new Error(`Fixture file upload ${response.status}`);
+      return response.json() as Promise<{ id: string }>;
+    }
+    const contractFile = await uploadProjectFile(
       contractFilename,
+      contractFileText,
     );
-    const contractUploaded = await fetch(`${api}/files`, {
-      method: 'POST',
-      headers: { Cookie: users.sender!.cookie },
-      body: contractForm,
+    const schedules = await domain<{ id: string }[]>(
+      'sender',
+      `/projects/${project.id}/contracts/${contract.id}/payment-schedules`,
+      {
+        items: [
+          {
+            milestoneName: 'Khoản thu fixture',
+            dueDate: '2027-01-01T00:00:00.000Z',
+            amount: '120000',
+            condition: 'Theo hợp đồng fixture',
+          },
+        ],
+      },
+    );
+    const payment = await domain('sender', `/projects/${project.id}/payments`, {
+      paymentDate: '2027-01-03T00:00:00.000Z',
+      amount: '60000',
+      currency: 'VND',
+      paymentMethod: 'BANK_TRANSFER',
+      idempotencyKey: randomUUID(),
+      allocations: [{ scheduleId: schedules[0]!.id, amount: '60000' }],
     });
-    if (!contractUploaded.ok)
-      throw new Error(`Fixture contract upload ${contractUploaded.status}`);
-    const contractFile = (await contractUploaded.json()) as { id: string };
+    const paymentFilename = 'chung-tu-khoan-thu-browser.txt';
+    const paymentFileText =
+      'Chứng từ khoản thu do nhân viên cung cấp; chưa xác nhận đối soát ngân hàng';
+    const paymentFile = await uploadProjectFile(
+      paymentFilename,
+      paymentFileText,
+    );
     const taskRole = await db.role.create({
       data: {
         organizationId: org.id,
@@ -398,6 +436,10 @@ export async function createM2BrowserFixture() {
       contractFileId: contractFile.id,
       contractFilename,
       contractFileText,
+      paymentId: payment.id,
+      paymentFileId: paymentFile.id,
+      paymentFilename,
+      paymentFileText,
       projectId: project.id,
       roomId: internal.id!,
       guestRoomId: external.id!,

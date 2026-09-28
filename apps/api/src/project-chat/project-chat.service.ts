@@ -10,10 +10,11 @@ import { Prisma } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import {
-  contractFileSource,
-  eligibleContractFile,
-  contractFileSnapshot,
-  lockContractFileOwnership,
+  CustomerFileInput,
+  customerFileSource,
+  eligibleCustomerFile,
+  customerFileSnapshot,
+  lockCustomerFileOwnership,
 } from './contract-file-source';
 import {
   customerPublicationSource,
@@ -491,21 +492,30 @@ export class ProjectChatService {
             version: 1,
             name: source.title,
           });
-          if (input.sourceType === 'CONTRACT') {
-            const review = await contractFileSource(
+          if (
+            input.sourceType === 'CONTRACT' ||
+            input.sourceType === 'CUSTOMER_PAYMENT_RECORD'
+          ) {
+            const fileInput: CustomerFileInput = {
+              ...input,
+              sourceType:
+                input.sourceType === 'CONTRACT'
+                  ? 'CONTRACT_FILE'
+                  : 'CUSTOMER_PAYMENT_FILE',
+            };
+            const review = await customerFileSource(
               tx,
               await this.freshActor(tx, actor),
               projectId,
-              input.sourceId,
-              input.appendixId,
+              fileInput,
               true,
             );
             result.push({
               ...input,
-              sourceType: 'CONTRACT_FILE',
+              sourceType: fileInput.sourceType,
               sourceFingerprint: review.fingerprint,
               version: 1,
-              name: `${source.title} · file gửi khách xem xét`,
+              name: `${source.title} · ${fileInput.sourceType === 'CONTRACT_FILE' ? 'file gửi khách xem xét' : 'chứng từ do nhân viên cung cấp'}`,
             });
           }
         } catch (e) {
@@ -1815,10 +1825,10 @@ export class ProjectChatService {
     };
   }
 
-  async contractFiles(
+  async customerFiles(
     actor: CurrentActor,
     roomId: string,
-    input: { sourceId: string; appendixId?: string },
+    input: CustomerFileInput,
   ) {
     const projectId = await this.access.roomProject(actor, roomId);
     return this.access.project(actor, projectId, async (tx) => {
@@ -1831,12 +1841,11 @@ export class ProjectChatService {
       if (room.audience !== 'CUSTOMER' || room.locked)
         throw new ForbiddenException();
       const fresh = await this.freshActor(tx, actor);
-      const source = await contractFileSource(
+      const source = await customerFileSource(
         tx,
         fresh,
         projectId,
-        input.sourceId,
-        input.appendixId,
+        input,
         true,
       );
       const candidates = await tx.fileAsset.findMany({
@@ -1853,12 +1862,11 @@ export class ProjectChatService {
       const files = [];
       for (const candidate of candidates) {
         try {
-          const file = await eligibleContractFile(
+          const file = await eligibleCustomerFile(
             tx,
             fresh,
             projectId,
-            input.sourceId,
-            input.appendixId,
+            input,
             candidate.id,
           );
           files.push({
@@ -1882,10 +1890,10 @@ export class ProjectChatService {
     });
   }
 
-  private async prepareContractFile(
+  private async prepareCustomerFile(
     actor: CurrentActor,
     roomId: string,
-    input: ChatReleaseDto,
+    input: ChatReleaseDto & CustomerFileInput,
   ) {
     if (
       !input.fileId ||
@@ -1900,7 +1908,7 @@ export class ProjectChatService {
     const prepareHash = createHash('sha256')
       .update(
         JSON.stringify({
-          sourceType: 'CONTRACT_FILE',
+          sourceType: input.sourceType,
           sourceId: input.sourceId,
           appendixId: input.appendixId ?? null,
           fileId: input.fileId,
@@ -1925,22 +1933,20 @@ export class ProjectChatService {
       await tx.$queryRaw(
         Prisma.sql`SELECT "id" FROM "FileAsset" WHERE "id"=${input.fileId}::uuid AND "organizationId"=${actor.organizationId}::uuid FOR UPDATE`,
       );
-      if (finalizeOwnership) await lockContractFileOwnership(tx);
+      if (finalizeOwnership) await lockCustomerFileOwnership(tx);
       const fresh = await this.freshActor(tx, actor);
-      const source = await contractFileSource(
+      const source = await customerFileSource(
         tx,
         fresh,
         projectId,
-        input.sourceId,
-        input.appendixId,
+        input,
         true,
       );
-      const file = await eligibleContractFile(
+      const file = await eligibleCustomerFile(
         tx,
         fresh,
         projectId,
-        input.sourceId,
-        input.appendixId,
+        input,
         input.fileId!,
       );
       if (
@@ -1966,7 +1972,7 @@ export class ProjectChatService {
         throw new ConflictException(
           'Khóa chuẩn bị đã dùng cho nội dung khác hoặc bản bị thu hồi',
         );
-      return { source, file, existing, ...contractFileSnapshot(source, file) };
+      return { source, file, existing, ...customerFileSnapshot(source, file) };
     };
     const view = (row: { id: string; version: number; filename: string }) => ({
       id: row.id,
@@ -1992,32 +1998,41 @@ export class ProjectChatService {
       )
         throw new ConflictException('Nguồn hoặc file đã đổi trong lúc đọc');
       if (current.existing) return current.existing;
-      const latest = await tx.contractDocument.aggregate({
-        where: { contractId: input.sourceId },
-        _max: { version: true },
-      });
-      const version = (latest._max.version ?? 0) + 1;
-      const document = await tx.contractDocument.create({
-        data: {
-          contractId: input.sourceId,
-          appendixId: input.appendixId,
-          fileAssetId: current.file.id,
-          version,
-          language: 'VI',
-          format: 'CUSTOMER_REVIEW_FILE',
-          storageKey: current.file.storageKey,
-          checksum: current.file.checksum,
-          generatedBy: actor.userId,
-          sourceSnapshot: current.snapshot,
-          sourceFingerprint: current.fingerprint,
-        },
-      });
+      let documentId: string | undefined;
+      let version = current.file.version;
+      if (input.sourceType === 'CONTRACT_FILE') {
+        const latest = await tx.contractDocument.aggregate({
+          where: { contractId: input.sourceId },
+          _max: { version: true },
+        });
+        version = (latest._max.version ?? 0) + 1;
+        const document = await tx.contractDocument.create({
+          data: {
+            contractId: input.sourceId,
+            appendixId: input.appendixId,
+            fileAssetId: current.file.id,
+            version,
+            language: 'VI',
+            format: 'CUSTOMER_REVIEW_FILE',
+            storageKey: current.file.storageKey,
+            checksum: current.file.checksum,
+            generatedBy: actor.userId,
+            sourceSnapshot: current.snapshot,
+            sourceFingerprint: current.fingerprint,
+          },
+        });
+        documentId = document.id;
+      }
       const row = await tx.chatDocumentRelease.create({
         data: {
           organizationId: actor.organizationId,
           projectId,
           roomId,
-          contractDocumentId: document.id,
+          contractDocumentId: documentId,
+          customerPaymentId:
+            input.sourceType === 'CUSTOMER_PAYMENT_FILE'
+              ? input.sourceId
+              : undefined,
           fileAssetId: current.file.id,
           version,
           checksum: current.file.checksum,
@@ -2032,7 +2047,7 @@ export class ProjectChatService {
         },
       });
       await this.event(tx, actor, projectId, row.id, 'chat.release.prepare', {
-        sourceType: 'CONTRACT_FILE',
+        sourceType: input.sourceType,
         sourceId: input.sourceId,
         roomId,
         fileVersion: current.file.version,
@@ -2276,8 +2291,14 @@ export class ProjectChatService {
     roomId: string,
     input: ChatReleaseDto,
   ) {
-    if (input.sourceType === 'CONTRACT_FILE')
-      return this.prepareContractFile(actor, roomId, input);
+    if (
+      input.sourceType === 'CONTRACT_FILE' ||
+      input.sourceType === 'CUSTOMER_PAYMENT_FILE'
+    )
+      return this.prepareCustomerFile(actor, roomId, {
+        ...input,
+        sourceType: input.sourceType,
+      });
     if (
       input.sourceType &&
       customerSnapshotTypes.includes(input.sourceType as CustomerSnapshotType)
@@ -2357,7 +2378,7 @@ export class ProjectChatService {
     tx: Prisma.TransactionClient,
     actor: CurrentActor,
     id: string,
-    finalizeContractFile = false,
+    finalizeCustomerFile = false,
   ) {
     const r = await tx.chatDocumentRelease.findFirst({
       where: { id, organizationId: actor.organizationId, revokedAt: null },
@@ -2383,35 +2404,51 @@ export class ProjectChatService {
             where: { id: r.contractDocumentId },
           })
         : null;
-      if (document?.format === 'CUSTOMER_REVIEW_FILE') {
-        if (finalizeContractFile) await lockContractFileOwnership(tx);
+      const paymentFile =
+        !!r.customerPaymentId &&
+        r.sourceSnapshot !== null &&
+        typeof r.sourceSnapshot === 'object' &&
+        !Array.isArray(r.sourceSnapshot) &&
+        r.sourceSnapshot.sourceType === 'CUSTOMER_PAYMENT_FILE';
+      if (document?.format === 'CUSTOMER_REVIEW_FILE' || paymentFile) {
+        const fileInput: CustomerFileInput = paymentFile
+          ? {
+              sourceType: 'CUSTOMER_PAYMENT_FILE',
+              sourceId: r.customerPaymentId!,
+            }
+          : {
+              sourceType: 'CONTRACT_FILE',
+              sourceId: document!.contractId,
+              appendixId: document!.appendixId ?? undefined,
+            };
         await tx.$queryRaw(
           Prisma.sql`SELECT "id" FROM "FileAsset" WHERE "id"=${r.fileAssetId}::uuid AND "organizationId"=${actor.organizationId}::uuid FOR UPDATE`,
         );
+        if (finalizeCustomerFile) await lockCustomerFileOwnership(tx);
         const fresh = await this.freshActor(tx, actor);
-        const source = await contractFileSource(
+        const source = await customerFileSource(
           tx,
           fresh,
           r.projectId,
-          document.contractId,
-          document.appendixId ?? undefined,
+          fileInput,
         );
-        const file = await eligibleContractFile(
+        const file = await eligibleCustomerFile(
           tx,
           fresh,
           r.projectId,
-          document.contractId,
-          document.appendixId ?? undefined,
+          fileInput,
           r.fileAssetId,
         );
-        const current = contractFileSnapshot(source, file);
+        const current = customerFileSnapshot(source, file);
         if (
           current.fingerprint !== r.sourceFingerprint ||
-          document.sourceFingerprint !== r.sourceFingerprint ||
-          document.fileAssetId !== file.id ||
-          document.storageKey !== file.storageKey ||
-          document.version !== r.version ||
-          document.checksum !== r.checksum ||
+          (document &&
+            (document.sourceFingerprint !== r.sourceFingerprint ||
+              document.fileAssetId !== file.id ||
+              document.storageKey !== file.storageKey ||
+              document.version !== r.version ||
+              document.checksum !== r.checksum)) ||
+          (paymentFile && r.version !== file.version) ||
           file.checksum !== r.checksum ||
           file.originalFilename !== r.filename ||
           file.mimeType !== r.mimeType

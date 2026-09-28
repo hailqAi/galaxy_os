@@ -34,7 +34,7 @@ import {
   ChatUploadDto,
   ChatReleaseDto,
   ChatPublishDto,
-  ChatContractFilesQuery,
+  ChatCustomerFilesQuery,
 } from './project-chat.dto';
 import { ProjectChatService } from './project-chat.service';
 import { FilesService } from '../files/files.service';
@@ -94,9 +94,22 @@ export class ProjectChatController {
   @Get('rooms/:id/contract-files') contractFiles(
     @Actor() actor: CurrentActor,
     @Param('id', ParseUUIDPipe) id: string,
-    @Query(input(ChatContractFilesQuery)) query: ChatContractFilesQuery,
+    @Query(input(ChatCustomerFilesQuery)) query: ChatCustomerFilesQuery,
   ) {
-    return this.service.contractFiles(actor, id, query);
+    return this.service.customerFiles(actor, id, {
+      ...query,
+      sourceType: 'CONTRACT_FILE',
+    });
+  }
+  @Get('rooms/:id/payment-files') paymentFiles(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query(input(ChatCustomerFilesQuery)) query: ChatCustomerFilesQuery,
+  ) {
+    return this.service.customerFiles(actor, id, {
+      ...query,
+      sourceType: 'CUSTOMER_PAYMENT_FILE',
+    });
   }
   @Get('rooms/:id/releases') releases(
     @Actor() actor: CurrentActor,
