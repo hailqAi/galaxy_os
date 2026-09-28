@@ -22,6 +22,8 @@ import { ProjectProductsService } from '../src/projects/project-products.service
 import { ProductionService } from '../src/production/production.service';
 import { ContractsService } from '../src/contracts/contracts.service';
 import { InstallationService } from '../src/installation/installation.service';
+import { InventoryService } from '../src/inventory/inventory.service';
+import { InventoryOperationsService } from '../src/inventory/operations.service';
 import { AfterSalesService } from '../src/after-sales/after-sales.service';
 import { CommercialService } from '../src/commercial/commercial.service';
 import { QuotationDocumentsService } from '../src/commercial/quotation-documents.service';
@@ -3022,7 +3024,10 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       ).status,
     ).toBe('DRAFT');
   });
-  const customerFileFixture = async (paymentFile = false) => {
+  const customerFileFixture = async (
+    paymentFile = false,
+    extraPermissions: string[] = [],
+  ) => {
     const fixture = await customerSnapshotFixture(
       'VND',
       [
@@ -3032,6 +3037,7 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
         'file.delete',
         'file.restore',
         ...(paymentFile ? ['receivable.payment.record'] : []),
+        ...extraPermissions,
       ],
       paymentFile ? '60000' : '120000',
     );
@@ -3076,6 +3082,729 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       },
     };
   };
+  const siteDeliveryFixture = async () => {
+    const fixture = await customerFileFixture(false, [
+      'installation.execute',
+      'installation.manage',
+    ]);
+    const { actor, otherProjectId } = fixture;
+    const installation = app.get(InstallationService);
+    const plan = await installation.createPlan(actor, {
+      projectId: otherProjectId,
+      planNumber: randomUUID(),
+      name: 'Giao tại công trường fixture',
+      siteReady: false,
+      customerCoordination: false,
+    });
+    const workOrder = await installation.createWorkOrder(actor, plan.id, {
+      workOrderNumber: randomUUID(),
+      title: 'Chưa lắp đặt',
+      requiredInventory: true,
+      approvedDrawing: false,
+      checklist: [{ title: 'Kiểm tra công trường', required: true }],
+    });
+    const brand = await db.brand.create({
+      data: { organizationId: orgId, name: randomUUID() },
+    });
+    const product = await db.product.create({
+      data: {
+        organizationId: orgId,
+        brandId: brand.id,
+        productCode: randomUUID(),
+        name: 'Hàng fixture',
+        unit: 'm',
+      },
+    });
+    const inventoryItem = await db.inventoryItem.create({
+      data: {
+        organizationId: orgId,
+        projectId: otherProjectId,
+        productId: product.id,
+        itemCode: randomUUID(),
+        unit: 'm',
+      },
+    });
+    const warehouse = await db.warehouse.create({
+      data: {
+        organizationId: orgId,
+        projectId: otherProjectId,
+        code: randomUUID(),
+        name: 'Kho fixture',
+        type: 'PROJECT',
+        createdBy: actor.userId,
+      },
+    });
+    await app.get(InventoryService).post(actor, {
+      transactionNumber: randomUUID(),
+      type: 'RECEIVE',
+      idempotencyKey: randomUUID(),
+      projectId: otherProjectId,
+      sourceType: 'FixtureOpening',
+      sourceId: inventoryItem.id,
+      lines: [
+        {
+          inventoryItemId: inventoryItem.id,
+          warehouseId: warehouse.id,
+          quantity: '2.125',
+          onHandDelta: '2.125',
+          availableDelta: '2.125',
+        },
+      ],
+    });
+    const operations = app.get(InventoryOperationsService);
+    const issue = await operations.createIssue(actor, {
+      projectId: otherProjectId,
+      warehouseId: warehouse.id,
+      issueNumber: randomUUID(),
+      reason: 'PROJECT_SITE',
+      recipient: 'Nhân viên giao fixture',
+      lines: [{ inventoryItemId: inventoryItem.id, quantity: '2.125' }],
+    });
+    await operations.approveIssue(
+      { ...actor, userId: users.publisher!.id },
+      issue.id,
+    );
+    await operations.postIssue(actor, issue.id);
+    const input = {
+      clientKey: randomUUID(),
+      deliveryDate: '2027-01-04T00:00:00.000Z',
+      recipient: 'Người nhận tại công trường',
+      evidenceFileId: fixture.file.id,
+      evidenceFileVersion: fixture.file.version,
+      items: [{ stockIssueLineId: issue.lines[0]!.id, quantity: '1.125' }],
+    };
+    return {
+      ...fixture,
+      workOrder,
+      inventoryItem,
+      issue,
+      deliveryInput: input,
+    };
+  };
+  it('records and publishes staff site delivery evidence through HTTP without inventory or acceptance side effects', async () => {
+    const {
+      room,
+      workOrder,
+      deliveryInput,
+      bytes,
+      otherProjectId,
+      inventoryItem,
+    } = await siteDeliveryFixture();
+    const before = {
+      inventory: await db.inventoryTransaction.count({
+        where: { projectId: otherProjectId },
+      }),
+      items: await db.installationItem.count({
+        where: { projectId: otherProjectId },
+      }),
+      acceptance: await db.acceptanceRecord.count({
+        where: { projectId: otherProjectId },
+      }),
+    };
+    const options = (
+      await call()
+        .get(
+          `/api/v1/installation/work-orders/${workOrder.id}/delivery-options`,
+        )
+        .set('Cookie', users.sender!.cookie)
+        .expect(200)
+    ).body;
+    expect(options.lines).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stockIssueLineId: deliveryInput.items[0]!.stockIssueLineId,
+          inventoryItemId: inventoryItem.id,
+          unit: 'm',
+          quantity: '2.125',
+        }),
+      ]),
+    );
+    const response = () =>
+      call()
+        .post(`/api/v1/installation/work-orders/${workOrder.id}/deliveries`)
+        .set('Cookie', users.sender!.cookie)
+        .send(deliveryInput);
+    const delivery = (await response().expect(201)).body;
+    expect((await response().expect(201)).body.id).toBe(delivery.id);
+    expect(delivery).toMatchObject({
+      installationWorkOrderId: workOrder.id,
+      evidenceFileId: deliveryInput.evidenceFileId,
+      evidenceFileVersion: deliveryInput.evidenceFileVersion,
+      items: [
+        expect.objectContaining({
+          inventoryItemId: inventoryItem.id,
+          quantity: '1.125',
+          unit: 'm',
+        }),
+      ],
+    });
+    const source = (
+      await get('sender', `/rooms/${room.id}/release-sources`).expect(200)
+    ).body.find(
+      (s: { sourceType: string; sourceId: string }) =>
+        s.sourceType === 'SITE_DELIVERY' && s.sourceId === delivery.id,
+    );
+    expect(source).toBeDefined();
+    const prepared = (
+      await post('sender', `/rooms/${room.id}/releases`, {
+        sourceType: 'SITE_DELIVERY',
+        sourceId: delivery.id,
+        fileId: deliveryInput.evidenceFileId,
+        version: deliveryInput.evidenceFileVersion,
+        sourceFingerprint: source.sourceFingerprint,
+        clientKey: randomUUID(),
+      }).expect(201)
+    ).body;
+    expect(
+      (
+        await getBinary('publisher', `/releases/${prepared.id}/preview`).expect(
+          200,
+        )
+      ).body,
+    ).toEqual(bytes);
+    const review = (
+      await get('publisher', `/releases/${prepared.id}/review`).expect(200)
+    ).body;
+    await post('sender', `/releases/${prepared.id}/publish`, {
+      confirmed: true,
+      recipientHash: review.recipientHash,
+    }).expect(403);
+    await post('publisher', `/releases/${prepared.id}/publish`, {
+      confirmed: true,
+      recipientHash: review.recipientHash,
+    }).expect(201);
+    expect(
+      (
+        await getBinary('guest', `/releases/${prepared.id}/download`).expect(
+          200,
+        )
+      ).body,
+    ).toEqual(bytes);
+    expect({
+      inventory: await db.inventoryTransaction.count({
+        where: { projectId: otherProjectId },
+      }),
+      items: await db.installationItem.count({
+        where: { projectId: otherProjectId },
+      }),
+      acceptance: await db.acceptanceRecord.count({
+        where: { projectId: otherProjectId },
+      }),
+    }).toEqual(before);
+    expect(
+      (
+        await db.installationWorkOrder.findUniqueOrThrow({
+          where: { id: workOrder.id },
+        })
+      ).status,
+    ).toBe('DRAFT');
+  });
+  const postDelivery = (actor: string, id: string, input: object) =>
+    call()
+      .post(`/api/v1/installation/work-orders/${id}/deliveries`)
+      .set('Cookie', users[actor]!.cookie)
+      .send(input);
+  it('rejects site delivery quantity, metadata, evidence version and changed replay input', async () => {
+    const { workOrder, deliveryInput } = await siteDeliveryFixture();
+    for (const [quantity, status] of [
+      ['0', 422],
+      ['2.126', 422],
+      ['1.0000', 400],
+      ['-1', 400],
+    ] as const)
+      await postDelivery('sender', workOrder.id, {
+        ...deliveryInput,
+        items: [{ ...deliveryInput.items[0], quantity }],
+      }).expect(status);
+    await postDelivery('sender', workOrder.id, {
+      ...deliveryInput,
+      recipient: '   ',
+    }).expect(400);
+    await postDelivery('sender', workOrder.id, {
+      ...deliveryInput,
+      deliveryDate: 'not-a-date',
+    }).expect(400);
+    await postDelivery('sender', workOrder.id, {
+      ...deliveryInput,
+      items: [{ ...deliveryInput.items[0], inventoryItemId: randomUUID() }],
+    }).expect(400);
+    await postDelivery('sender', workOrder.id, {
+      ...deliveryInput,
+      evidenceFileVersion: deliveryInput.evidenceFileVersion + 1,
+    }).expect(409);
+    await postDelivery('sender', workOrder.id, deliveryInput).expect(201);
+    await postDelivery('sender', workOrder.id, {
+      ...deliveryInput,
+      recipient: 'Khác nội dung',
+    }).expect(409);
+    expect(
+      await db.siteDelivery.count({
+        where: { installationWorkOrderId: workOrder.id },
+      }),
+    ).toBe(1);
+  });
+  it('rejects site delivery source Project mismatch and evidence owned by another source', async () => {
+    const { workOrder, deliveryInput, issue, otherProjectId, room, input } =
+      await siteDeliveryFixture();
+    await db.stockIssue.update({
+      where: { id: issue.id },
+      data: { projectId },
+    });
+    await postDelivery('sender', workOrder.id, deliveryInput).expect(404);
+    await db.stockIssue.update({
+      where: { id: issue.id },
+      data: { projectId: otherProjectId },
+    });
+    await post('sender', `/rooms/${room.id}/releases`, input).expect(201);
+    await postDelivery('sender', workOrder.id, deliveryInput).expect(404);
+    expect(
+      await db.siteDelivery.count({
+        where: { installationWorkOrderId: workOrder.id },
+      }),
+    ).toBe(0);
+  });
+  it.each(['source', 'file', 'permission'] as const)(
+    'rechecks site delivery %s after evidence storage I/O',
+    async (change) => {
+      const { workOrder, deliveryInput, issue, file, actor } =
+        await siteDeliveryFixture();
+      const assignments = await db.userRole.findMany({
+        where: { userId: actor.userId, status: 'active' },
+        select: { id: true },
+      });
+      const storage = app.get(FileStorage),
+        stream = storage.stream.bind(storage);
+      const reading = vi
+        .spyOn(storage, 'stream')
+        .mockImplementationOnce(async (key) => {
+          if (change === 'source')
+            await db.stockIssueLine.update({
+              where: { id: issue.lines[0]!.id },
+              data: { quantity: '2' },
+            });
+          else if (change === 'file')
+            await app
+              .get(FilesService)
+              .update(actor, file.id, { category: 'CHANGED' });
+          else
+            await db.userRole.updateMany({
+              where: { id: { in: assignments.map((a) => a.id) } },
+              data: { status: 'archived' },
+            });
+          return stream(key);
+        });
+      try {
+        await postDelivery('sender', workOrder.id, deliveryInput).expect(
+          change === 'permission' ? 404 : 409,
+        );
+      } finally {
+        reading.mockRestore();
+        if (change === 'permission')
+          await db.userRole.updateMany({
+            where: { id: { in: assignments.map((a) => a.id) } },
+            data: { status: 'active' },
+          });
+      }
+      expect(
+        await db.siteDelivery.count({
+          where: { installationWorkOrderId: workOrder.id },
+        }),
+      ).toBe(0);
+    },
+  );
+  it('keeps site delivery idempotent under concurrent HTTP writes', async () => {
+    const { workOrder, deliveryInput } = await siteDeliveryFixture();
+    const [first, second] = await Promise.all([
+      postDelivery('sender', workOrder.id, deliveryInput),
+      postDelivery('sender', workOrder.id, deliveryInput),
+    ]);
+    expect([first.status, second.status]).toEqual([201, 201]);
+    expect(second.body.id).toBe(first.body.id);
+    expect(
+      await db.siteDelivery.count({
+        where: { installationWorkOrderId: workOrder.id },
+      }),
+    ).toBe(1);
+    expect(
+      await db.activity.count({
+        where: { entityId: first.body.id, event: 'SITE_DELIVERY_RECORDED' },
+      }),
+    ).toBe(1);
+  });
+  it('serializes site delivery evidence associations through the typed FileAsset foreign key', async () => {
+    const { workOrder, deliveryInput, actor, otherProjectId } =
+      await siteDeliveryFixture();
+    let pending!: Promise<request.Response>;
+    await db.$transaction(async (tx) => {
+      const [backend] = await tx.$queryRaw<
+        { pid: number }[]
+      >`SELECT pg_backend_pid() AS pid`;
+      await tx.siteDelivery.create({
+        data: {
+          organizationId: actor.organizationId,
+          projectId: otherProjectId,
+          installationWorkOrderId: workOrder.id,
+          deliveryDate: new Date(),
+          recipient: 'Legacy nguồn khác',
+          evidenceFileId: deliveryInput.evidenceFileId,
+          items: [],
+          createdBy: actor.userId,
+        },
+      });
+      pending = postDelivery('sender', workOrder.id, deliveryInput).then(
+        (response) => response,
+      );
+      await expect
+        .poll(
+          async () => {
+            const rows = await db.$queryRaw<
+              { blocked: boolean }[]
+            >`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE ${backend!.pid}=ANY(pg_blocking_pids(pid)) AND query LIKE '%FileAsset%') AS blocked`;
+            return rows[0]!.blocked;
+          },
+          { timeout: 1000 },
+        )
+        .toBe(true);
+    });
+    const blocked = await pending;
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.message).toBe(
+      'File đang thuộc nguồn khác; cần bản riêng để xem xét',
+    );
+    expect(
+      await db.siteDelivery.count({
+        where: { clientKey: deliveryInput.clientKey },
+      }),
+    ).toBe(0);
+  });
+  it('hides pinned site delivery metadata from WorkOrder readers without fresh scoped file rights', async () => {
+    const { workOrder, deliveryInput, room, otherProjectId, actor } =
+      await siteDeliveryFixture();
+    // Satisfy the existing WorkOrder read prerequisite independently of the
+    // new pinned-evidence permissions checked below.
+    await db.projectMember.create({
+      data: {
+        organizationId: orgId,
+        projectId: otherProjectId,
+        userId: users.publisher!.id,
+        createdBy: actor.userId,
+      },
+    });
+    const delivery = (
+      await postDelivery('sender', workOrder.id, deliveryInput).expect(201)
+    ).body;
+    const source = (
+      await get('sender', `/rooms/${room.id}/release-sources`).expect(200)
+    ).body.find(
+      (s: { sourceType: string }) => s.sourceType === 'SITE_DELIVERY',
+    );
+    const prepared = (
+      await post('sender', `/rooms/${room.id}/releases`, {
+        sourceType: 'SITE_DELIVERY',
+        sourceId: delivery.id,
+        fileId: deliveryInput.evidenceFileId,
+        version: deliveryInput.evidenceFileVersion,
+        sourceFingerprint: source.sourceFingerprint,
+        clientKey: randomUUID(),
+      }).expect(201)
+    ).body;
+    const assignments = await db.userRole.findMany({
+      where: { userId: users.publisher!.id, status: 'active' },
+      select: { id: true },
+    });
+    const reader = await db.role.create({
+      data: {
+        organizationId: orgId,
+        code: randomUUID(),
+        name: 'Chỉ đọc WO',
+        permissions: {
+          create: { permission: { connect: { code: 'installation.read' } } },
+        },
+      },
+    });
+    await db.userRole.create({
+      data: {
+        organizationId: orgId,
+        userId: users.publisher!.id,
+        roleId: reader.id,
+        scopeType: 'ORGANIZATION',
+      },
+    });
+    await db.userRole.updateMany({
+      where: { id: { in: assignments.map((a) => a.id) } },
+      data: { status: 'archived' },
+    });
+    const read = () =>
+      call()
+        .get(`/api/v1/installation/work-orders/${workOrder.id}`)
+        .set('Cookie', users.publisher!.cookie);
+    try {
+      const denied = (await read().expect(200)).body;
+      expect(denied.deliveries).toEqual([]);
+      expect(JSON.stringify(denied)).not.toContain(
+        deliveryInput.evidenceFileId,
+      );
+      const files = await db.role.create({
+        data: {
+          organizationId: orgId,
+          code: randomUUID(),
+          name: 'Chỉ đọc file',
+          permissions: {
+            create: { permission: { connect: { code: 'file.read' } } },
+          },
+        },
+      });
+      const fileAssignment = await db.userRole.create({
+        data: {
+          organizationId: orgId,
+          userId: users.publisher!.id,
+          roleId: files.id,
+          scopeType: 'ORGANIZATION',
+        },
+      });
+      const download = await db.role.create({
+        data: {
+          organizationId: orgId,
+          code: randomUUID(),
+          name: 'Tải file ở binding khác',
+          permissions: {
+            create: { permission: { connect: { code: 'file.download' } } },
+          },
+        },
+      });
+      await db.userRole.create({
+        data: {
+          organizationId: orgId,
+          userId: users.publisher!.id,
+          roleId: download.id,
+          scopeType: 'ORGANIZATION',
+        },
+      });
+      expect((await read().expect(200)).body.deliveries).toEqual([]);
+      await db.rolePermission.create({
+        data: {
+          role: { connect: { id: files.id } },
+          permission: { connect: { code: 'file.download' } },
+        },
+      });
+      expect((await read().expect(200)).body.deliveries).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: delivery.id })]),
+      );
+      await postDelivery('publisher', workOrder.id, {
+        ...deliveryInput,
+        clientKey: randomUUID(),
+      }).expect(403);
+      await getBinary('publisher', `/releases/${prepared.id}/preview`).expect(
+        200,
+      );
+      const review = (
+        await get('publisher', `/releases/${prepared.id}/review`).expect(200)
+      ).body;
+      await post('publisher', `/releases/${prepared.id}/publish`, {
+        confirmed: true,
+        recipientHash: review.recipientHash,
+      }).expect(201);
+      await db.userRole.update({
+        where: { id: fileAssignment.id },
+        data: { status: 'archived' },
+      });
+      expect((await read().expect(200)).body.deliveries).toEqual([]);
+    } finally {
+      await db.userRole.updateMany({
+        where: { id: { in: assignments.map((a) => a.id) } },
+        data: { status: 'active' },
+      });
+    }
+  });
+  it('hides pinned site delivery metadata after customer rebind or evidence version change', async () => {
+    const { workOrder, deliveryInput, room, actor, otherProjectId } =
+      await siteDeliveryFixture();
+    const delivery = (
+      await postDelivery('sender', workOrder.id, deliveryInput).expect(201)
+    ).body;
+    await db.projectMember.create({
+      data: {
+        organizationId: orgId,
+        projectId: otherProjectId,
+        userId: users.publisher!.id,
+        createdBy: actor.userId,
+      },
+    });
+    const read = () =>
+      call()
+        .get(`/api/v1/installation/work-orders/${workOrder.id}`)
+        .set('Cookie', users.publisher!.cookie);
+    expect((await read().expect(200)).body.deliveries).toHaveLength(1);
+    const project = await db.project.findUniqueOrThrow({
+      where: { id: otherProjectId },
+    });
+    const customer = await db.customer.create({
+      data: {
+        organizationId: orgId,
+        type: 'INDIVIDUAL',
+        displayName: 'Khách khác của Project',
+        createdBy: actor.userId,
+        updatedBy: actor.userId,
+      },
+    });
+    await db.project.update({
+      where: { id: otherProjectId },
+      data: { customerId: customer.id },
+    });
+    const rebound = (await read().expect(200)).body;
+    expect(rebound.deliveries).toEqual([]);
+    expect(JSON.stringify(rebound)).not.toContain(deliveryInput.evidenceFileId);
+    expect(
+      (await get('sender', `/rooms/${room.id}/release-sources`).expect(200))
+        .body,
+    ).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sourceId: delivery.id }),
+      ]),
+    );
+    await db.project.update({
+      where: { id: otherProjectId },
+      data: { customerId: project.customerId },
+    });
+    expect((await read().expect(200)).body.deliveries).toHaveLength(1);
+    await db.fileAsset.update({
+      where: { id: deliveryInput.evidenceFileId },
+      data: { version: { increment: 1 } },
+    });
+    expect((await read().expect(200)).body.deliveries).toEqual([]);
+  });
+  it('requires scoped site delivery execute rights and keeps the writer behind the feature flag', async () => {
+    const { workOrder, deliveryInput, actor, role } =
+      await siteDeliveryFixture();
+    const other = await db.userRole.findMany({
+      where: {
+        userId: actor.userId,
+        status: 'active',
+        roleId: { not: role.id },
+      },
+      select: { id: true },
+    });
+    const permission = await db.permission.findUniqueOrThrow({
+      where: { code: 'installation.execute' },
+    });
+    await db.rolePermission.delete({
+      where: {
+        roleId_permissionId: { roleId: role.id, permissionId: permission.id },
+      },
+    });
+    const executeRole = await db.role.create({
+      data: {
+        organizationId: orgId,
+        code: randomUUID(),
+        name: 'Thực hiện ngoài phạm vi',
+        permissions: { create: { permissionId: permission.id } },
+      },
+    });
+    const assignment = await db.userRole.create({
+      data: {
+        organizationId: orgId,
+        userId: actor.userId,
+        roleId: executeRole.id,
+        scopeType: 'SELF',
+      },
+    });
+    await db.userRole.updateMany({
+      where: { id: { in: other.map((a) => a.id) } },
+      data: { status: 'archived' },
+    });
+    const flag = process.env.FEATURE_PROJECT_CHAT;
+    try {
+      await postDelivery('sender', workOrder.id, deliveryInput).expect(404);
+      await db.userRole.update({
+        where: { id: assignment.id },
+        data: { scopeType: 'ORGANIZATION' },
+      });
+      process.env.FEATURE_PROJECT_CHAT = 'false';
+      await postDelivery('sender', workOrder.id, deliveryInput).expect(404);
+      process.env.FEATURE_PROJECT_CHAT = flag;
+      await postDelivery('sender', workOrder.id, deliveryInput).expect(201);
+    } finally {
+      process.env.FEATURE_PROJECT_CHAT = flag;
+      await db.userRole.updateMany({
+        where: { id: { in: other.map((a) => a.id) } },
+        data: { status: 'active' },
+      });
+    }
+  });
+  it('rejects unpinned and stale site delivery sources and tampered evidence before publication', async () => {
+    const { room, workOrder, deliveryInput, file, bytes } =
+      await siteDeliveryFixture();
+    const delivery = (
+      await postDelivery('sender', workOrder.id, deliveryInput).expect(201)
+    ).body;
+    const source = (
+      await get('sender', `/rooms/${room.id}/release-sources`).expect(200)
+    ).body.find(
+      (s: { sourceType: string }) => s.sourceType === 'SITE_DELIVERY',
+    );
+    const input = {
+      sourceType: 'SITE_DELIVERY',
+      sourceId: delivery.id,
+      fileId: file.id,
+      version: file.version,
+      sourceFingerprint: source.sourceFingerprint,
+      clientKey: randomUUID(),
+    };
+    const prepared = (
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+    ).body;
+    await getBinary('publisher', `/releases/${prepared.id}/preview`).expect(
+      200,
+    );
+    const review = (
+      await get('publisher', `/releases/${prepared.id}/review`).expect(200)
+    ).body;
+    await db.siteDelivery.update({
+      where: { id: delivery.id },
+      data: { recipient: 'Nguồn thay đổi' },
+    });
+    await post('publisher', `/releases/${prepared.id}/publish`, {
+      confirmed: true,
+      recipientHash: review.recipientHash,
+    }).expect(409);
+    await db.siteDelivery.update({
+      where: { id: delivery.id },
+      data: { recipient: delivery.recipient },
+    });
+    const stored = await db.fileAsset.findUniqueOrThrow({
+      where: { id: file.id },
+    });
+    const path = join(process.env.FILE_STORAGE_PATH!, stored.storageKey);
+    try {
+      await writeFile(path, 'Khác bytes đã ghim');
+      await post('publisher', `/releases/${prepared.id}/publish`, {
+        confirmed: true,
+        recipientHash: review.recipientHash,
+      }).expect(409);
+    } finally {
+      await writeFile(path, bytes);
+    }
+    await db.siteDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        clientKey: null,
+        requestHash: null,
+        evidenceFileVersion: null,
+        evidenceChecksum: null,
+      },
+    });
+    await post('sender', `/rooms/${room.id}/releases`, {
+      ...input,
+      clientKey: randomUUID(),
+    }).expect(409);
+    expect(
+      (
+        await db.chatDocumentRelease.findUniqueOrThrow({
+          where: { id: prepared.id },
+        })
+      ).publishedAt,
+    ).toBeNull();
+  });
   it('publishes an employee supplied payment file with exact bytes and no payment side effects', async () => {
     const { room, payment, file, bytes, input, actor, otherProjectId } =
       await customerFileFixture(true);

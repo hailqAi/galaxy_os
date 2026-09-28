@@ -112,6 +112,73 @@ export class ProjectChatPolicy {
     return member;
   }
 
+  async freshActor(tx: Prisma.TransactionClient, actor: CurrentActor) {
+    if ((await this.live(actor, tx)).kind !== 'INTERNAL')
+      throw new ForbiddenException();
+    const assignments = await tx.userRole.findMany({
+      where: {
+        userId: actor.userId,
+        organizationId: actor.organizationId,
+        status: 'active',
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        role: { status: 'active' },
+      },
+      include: {
+        role: { include: { permissions: { include: { permission: true } } } },
+      },
+    });
+    const managed = await tx.managedDepartment.findMany({
+      where: {
+        organizationId: actor.organizationId,
+        managerId: actor.organizationMembershipId,
+        status: 'active',
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        department: { status: 'active' },
+      },
+    });
+    const units = managed.some((m) => m.includeChildren)
+      ? await tx.department.findMany({
+          where: { organizationId: actor.organizationId, status: 'active' },
+          select: { id: true, parentId: true },
+        })
+      : [];
+    const scopes = new Map<string, string[]>();
+    for (const m of managed) {
+      const ids = new Set([m.departmentId]);
+      if (m.includeChildren)
+        for (let changed = true; changed; ) {
+          changed = false;
+          for (const d of units)
+            if (d.parentId && ids.has(d.parentId) && !ids.has(d.id)) {
+              ids.add(d.id);
+              changed = true;
+            }
+        }
+      scopes.set(m.departmentId, [...ids]);
+    }
+    const fresh: CurrentActor = {
+      ...actor,
+      permissions: assignments.flatMap((a) =>
+        a.role.permissions.map((p) => p.permission.code),
+      ),
+      permissionSources: assignments.flatMap((a) =>
+        a.role.permissions.map((p) => ({
+          permission: p.permission.code,
+          assignmentId: a.id,
+          roleId: a.role.id,
+          roleName: a.role.name,
+          administrationTier: a.role.administrationTier,
+          scopeType: a.scopeType,
+          departmentId: a.departmentId,
+          managedDepartmentIds: a.departmentId
+            ? (scopes.get(a.departmentId) ?? [])
+            : [],
+        })),
+      ),
+    };
+    return fresh;
+  }
+
   async project<T>(
     actor: CurrentActor,
     projectId: string,

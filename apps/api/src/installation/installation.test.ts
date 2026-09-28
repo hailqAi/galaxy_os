@@ -6,6 +6,8 @@ import {
 import { describe, expect, it, vi } from 'vitest';
 import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
+import { ProjectChatPolicy } from '../access-control/project-chat.policy';
+import { FileStorage } from '../files/file-storage';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma.service';
 import { InstallationService } from './installation.service';
@@ -38,6 +40,8 @@ function buildService() {
       prisma as unknown as PrismaService,
       { assertView: vi.fn() } as unknown as BusinessEntityPolicy,
       {} as InventoryService,
+      {} as ProjectChatPolicy,
+      {} as FileStorage,
     ),
   };
 }

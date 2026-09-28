@@ -187,6 +187,15 @@ export async function createM2BrowserFixture() {
       'receivable.read',
       'receivable.create',
       'receivable.payment.record',
+      'installation.read',
+      'installation.manage',
+      'installation.execute',
+      'inventory.adjustment.create',
+      'inventory.adjustment.approve',
+      'inventory.adjustment.post',
+      'inventory.issue.create',
+      'inventory.issue.approve',
+      'inventory.issue.post',
       'quotation.update',
       'quotation.approve',
     ];
@@ -369,6 +378,96 @@ export async function createM2BrowserFixture() {
       paymentFilename,
       paymentFileText,
     );
+    const brand = await db.brand.create({
+      data: { organizationId: org.id, name: `Site delivery ${run}` },
+    });
+    const product = await db.product.create({
+      data: {
+        organizationId: org.id,
+        brandId: brand.id,
+        productCode: `SITE-${run}`,
+        name: 'Hàng giao fixture',
+        unit: 'm',
+      },
+    });
+    const item = await db.inventoryItem.create({
+      data: {
+        organizationId: org.id,
+        projectId: project.id,
+        productId: product.id,
+        itemCode: `SITE-${run}`,
+        unit: 'm',
+      },
+    });
+    const warehouse = await db.warehouse.create({
+      data: {
+        organizationId: org.id,
+        projectId: project.id,
+        code: `SITE-${run}`,
+        name: 'Kho fixture giao hàng',
+        type: 'PROJECT',
+        createdBy: users.sender!.id,
+      },
+    });
+    const adjustment = await domain('sender', '/inventory/adjustments', {
+      adjustmentNumber: `OPEN-${run}`,
+      projectId: project.id,
+      warehouseId: warehouse.id,
+      reason: 'FOUND',
+      explanation: 'Tồn đầu fixture tách biệt',
+      lines: [
+        {
+          inventoryItemId: item.id,
+          expectedQuantity: '0',
+          actualQuantity: '2.125',
+        },
+      ],
+    });
+    await domain(
+      'publisher',
+      `/inventory/adjustments/${adjustment.id}/approve`,
+      {},
+    );
+    await domain('sender', `/inventory/adjustments/${adjustment.id}/post`, {});
+    const issue = await domain<{ id: string; lines: { id: string }[] }>(
+      'sender',
+      '/inventory/issues',
+      {
+        issueNumber: `SITE-${run}`,
+        projectId: project.id,
+        warehouseId: warehouse.id,
+        reason: 'PROJECT_SITE',
+        recipient: 'Nhân viên giao fixture',
+        lines: [{ inventoryItemId: item.id, quantity: '2.125' }],
+      },
+    );
+    await domain('publisher', `/inventory/issues/${issue.id}/approve`, {});
+    await domain('sender', `/inventory/issues/${issue.id}/post`, {});
+    const plan = await domain('sender', '/installation/plans', {
+      projectId: project.id,
+      planNumber: `SITE-${run}`,
+      name: 'Ghi nhận giao tại công trường',
+      siteReady: false,
+      customerCoordination: false,
+    });
+    const workOrder = await domain(
+      'sender',
+      `/installation/plans/${plan.id}/work-orders`,
+      {
+        workOrderNumber: `SITE-${run}`,
+        title: 'Giao hàng fixture, chưa lắp đặt',
+        requiredInventory: true,
+        approvedDrawing: false,
+        checklist: [{ title: 'Kiểm tra công trường', required: true }],
+      },
+    );
+    const deliveryFilename = 'giao-tai-cong-truong-browser.txt';
+    const deliveryFileText =
+      'Nhân viên ghi nhận giao tại công trường; không phải khách ký nghiệm thu';
+    const deliveryFile = await uploadProjectFile(
+      deliveryFilename,
+      deliveryFileText,
+    );
     const taskRole = await db.role.create({
       data: {
         organizationId: org.id,
@@ -440,6 +539,11 @@ export async function createM2BrowserFixture() {
       paymentFileId: paymentFile.id,
       paymentFilename,
       paymentFileText,
+      deliveryWorkOrderId: workOrder.id,
+      deliveryStockIssueLineId: issue.lines[0]!.id,
+      deliveryFileId: deliveryFile.id,
+      deliveryFilename,
+      deliveryFileText,
       projectId: project.id,
       roomId: internal.id!,
       guestRoomId: external.id!,

@@ -12,9 +12,10 @@ import {
 } from '../access-control/current-actor';
 import { projectWhereForPermissions } from '../access-control/business-entity.policy';
 import { customerPublicationSource } from './customer-publication-source';
+import { FileStorage } from '../files/file-storage';
 
 export type CustomerFileInput = {
-  sourceType: 'CONTRACT_FILE' | 'CUSTOMER_PAYMENT_FILE';
+  sourceType: 'CONTRACT_FILE' | 'CUSTOMER_PAYMENT_FILE' | 'SITE_DELIVERY';
   sourceId: string;
   appendixId?: string;
 };
@@ -24,6 +25,7 @@ export async function lockCustomerFileOwnership(tx: Prisma.TransactionClient) {
   // decision after storage I/O; global table contention returns 409. Replace
   // these locks with typed FileAsset FKs if registration volume requires it.
   // ContractDocument/release are our own writes and must not take SHARE locks.
+  // SiteDelivery now has a typed FileAsset FK; FOR UPDATE on the file serializes its links.
   try {
     await tx.$executeRaw`LOCK TABLE
       "AcceptanceRecord", "CustomerConfirmation",
@@ -32,7 +34,7 @@ export async function lockCustomerFileOwnership(tx: Prisma.TransactionClient) {
       "ProjectRequiredDocument", "ProjectRequiredDocumentVersion", "ProjectStageApproval",
       "PunchItem", "PurchaseOrderDocument", "QualityInspectionLine", "QualityReport",
       "QuotationDocument", "SampleApproval", "ServiceResolution", "ServiceVisit",
-      "ShipmentDocument", "SiteDelivery", "StockIssue", "SupplierQuotationDocument",
+      "ShipmentDocument", "StockIssue", "SupplierQuotationDocument",
       "SupplierRFQDocument", "TechnicalApprovalRevision" IN SHARE MODE NOWAIT`;
   } catch (error) {
     if (
@@ -51,6 +53,90 @@ export async function customerFileSource(
   input: CustomerFileInput,
   registration = false,
 ) {
+  if (input.sourceType === 'SITE_DELIVERY') {
+    if (input.appendixId)
+      throw new BadRequestException('Giao hàng không có phụ lục');
+    const required = [['installation.read'], ['file.read', 'file.download']];
+    const groups = required.map((permissions) =>
+      actorsForPermission(actor, permissions[0]!).filter((binding) =>
+        permissions.every((p) => binding.permissions.includes(p)),
+      ),
+    );
+    if (groups.some((group) => !group.length)) throw new NotFoundException();
+    const project = await tx.project.findFirst({
+      where: {
+        id: projectId,
+        organizationId: actor.organizationId,
+        deletedAt: null,
+        AND: groups.map((group, i) => ({
+          OR: group.map((binding) =>
+            projectWhereForPermissions(binding, required[i]!),
+          ),
+        })),
+      },
+    });
+    if (!project?.customerId) throw new NotFoundException();
+    const delivery = await tx.siteDelivery.findFirst({
+      where: {
+        id: input.sourceId,
+        organizationId: actor.organizationId,
+        projectId,
+      },
+      include: { workOrder: true },
+    });
+    if (
+      !delivery ||
+      !delivery.evidenceFileId ||
+      !delivery.evidenceFileVersion ||
+      !delivery.evidenceChecksum ||
+      !delivery.clientKey ||
+      !delivery.requestHash ||
+      delivery.workOrder.organizationId !== actor.organizationId ||
+      delivery.workOrder.projectId !== projectId ||
+      !Array.isArray(delivery.items) ||
+      !delivery.items.length ||
+      delivery.items.some(
+        (item) =>
+          !item ||
+          typeof item !== 'object' ||
+          Array.isArray(item) ||
+          item.projectId !== projectId ||
+          item.customerId !== project.customerId,
+      )
+    )
+      throw new ConflictException(
+        'Giao hàng chưa có bằng chứng được ghim đúng nguồn',
+      );
+    const snapshot = {
+      sourceType: 'SITE_DELIVERY',
+      sourceId: delivery.id,
+      organizationId: actor.organizationId,
+      projectId,
+      customerId: project.customerId,
+      purpose: 'Nhân viên ghi nhận giao tại công trường',
+      title: `Giao tại công trường · ${delivery.workOrder.workOrderNumber}`,
+      sourceUpdatedAt: delivery.createdAt.toISOString(),
+      workOrderId: delivery.installationWorkOrderId,
+      deliveryDate: delivery.deliveryDate.toISOString(),
+      recipient: delivery.recipient,
+      items: delivery.items as Prisma.InputJsonArray,
+      evidenceFileId: delivery.evidenceFileId,
+      evidenceFileVersion: delivery.evidenceFileVersion,
+      evidenceChecksum: delivery.evidenceChecksum,
+    };
+    return {
+      snapshot,
+      updatedAt: delivery.createdAt,
+      fingerprint: createHash('sha256')
+        .update(JSON.stringify(snapshot))
+        .digest('hex'),
+      pinnedFile: {
+        id: delivery.evidenceFileId,
+        version: delivery.evidenceFileVersion,
+        checksum: delivery.evidenceChecksum,
+      },
+    };
+  }
   const paymentFile = input.sourceType === 'CUSTOMER_PAYMENT_FILE';
   if (paymentFile && input.appendixId)
     throw new BadRequestException('Khoản thu không có phụ lục');
@@ -87,6 +173,7 @@ export async function customerFileSource(
   };
   return {
     snapshot,
+    pinnedFile: undefined,
     updatedAt: source.updatedAt,
     fingerprint: createHash('sha256')
       .update(JSON.stringify(snapshot))
@@ -117,7 +204,7 @@ export async function eligibleCustomerFile(
       stageOneDocumentVersions: { none: {} },
       importJobs: { none: {} },
       contractDocuments:
-        input.sourceType === 'CUSTOMER_PAYMENT_FILE'
+        input.sourceType !== 'CONTRACT_FILE'
           ? { none: {} }
           : {
               none: {
@@ -129,17 +216,27 @@ export async function eligibleCustomerFile(
               },
             },
       chatReleases:
-        input.sourceType === 'CUSTOMER_PAYMENT_FILE'
+        input.sourceType === 'SITE_DELIVERY'
           ? {
               every: {
-                customerPaymentId: input.sourceId,
+                siteDeliveryId: input.sourceId,
                 sourceSnapshot: {
                   path: ['sourceType'],
-                  equals: 'CUSTOMER_PAYMENT_FILE',
+                  equals: 'SITE_DELIVERY',
                 },
               },
             }
-          : { none: { contractDocumentId: null } },
+          : input.sourceType === 'CUSTOMER_PAYMENT_FILE'
+            ? {
+                every: {
+                  customerPaymentId: input.sourceId,
+                  sourceSnapshot: {
+                    path: ['sourceType'],
+                    equals: 'CUSTOMER_PAYMENT_FILE',
+                  },
+                },
+              }
+            : { none: { contractDocumentId: null } },
     },
     include: {
       attachments: { include: { project: { select: { customerId: true } } } },
@@ -195,7 +292,14 @@ export async function eligibleCustomerFile(
     tx.supplierRFQDocument.count({ where: { fileAssetId: file.id } }),
     tx.supplierQuotationDocument.count({ where: { fileAssetId: file.id } }),
     tx.customsDocument.count({ where: { fileId: file.id } }),
-    tx.siteDelivery.count({ where: { evidenceFileId: file.id } }),
+    tx.siteDelivery.count({
+      where: {
+        evidenceFileId: file.id,
+        ...(input.sourceType === 'SITE_DELIVERY'
+          ? { id: { not: input.sourceId } }
+          : {}),
+      },
+    }),
     tx.shipmentDocument.count({ where: { fileId: file.id } }),
     tx.contractDocument.count({
       where: {
@@ -232,4 +336,24 @@ export function customerFileSnapshot(
       .update(JSON.stringify(snapshot))
       .digest('hex'),
   };
+}
+
+export async function verifiedCustomerFileBytes(
+  storage: FileStorage,
+  storageKey: string,
+  checksum: string,
+) {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of await storage.stream(storageKey)) {
+    const bytes = Buffer.from(chunk);
+    size += bytes.length;
+    if (size > 10 * 1024 * 1024)
+      throw new ConflictException('Bản phát hành vượt giới hạn 10 MiB');
+    chunks.push(bytes);
+  }
+  const data = Buffer.concat(chunks);
+  if (createHash('sha256').update(data).digest('hex') !== checksum)
+    throw new ConflictException('Nội dung nguồn không khớp checksum');
+  return data;
 }

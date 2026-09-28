@@ -121,6 +121,7 @@ export class ChatReleaseDto {
     'PAYMENT',
     'CUSTOMER_PAYMENT_RECORD',
     'CUSTOMER_PAYMENT_FILE',
+    'SITE_DELIVERY',
     'DELIVERY_INSTALL',
   ])
   sourceType?:
@@ -134,6 +135,7 @@ export class ChatReleaseDto {
     | 'PAYMENT'
     | 'CUSTOMER_PAYMENT_RECORD'
     | 'CUSTOMER_PAYMENT_FILE'
+    | 'SITE_DELIVERY'
     | 'DELIVERY_INSTALL';
   @IsUUID() sourceId!: string;
   @IsOptional() @IsUUID() fileId?: string;

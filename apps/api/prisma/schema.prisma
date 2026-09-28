@@ -1092,6 +1092,7 @@ model ChatDocumentRelease {
   contractDocumentId String? @db.Uuid
   paymentScheduleId String? @db.Uuid
   customerPaymentId String? @db.Uuid
+  siteDeliveryId String? @db.Uuid
   installationPlanId String? @db.Uuid
   prepareKey String? @db.Uuid
   prepareHash String?
@@ -1125,6 +1126,7 @@ model ChatDocumentRelease {
   contractDocument ContractDocument? @relation(fields:[contractDocumentId],references:[id],onDelete:Restrict)
   paymentSchedule CustomerPaymentSchedule? @relation(fields:[paymentScheduleId],references:[id],onDelete:Restrict)
   customerPayment CustomerPayment? @relation(fields:[customerPaymentId],references:[id],onDelete:Restrict)
+  siteDelivery SiteDelivery? @relation(fields:[siteDeliveryId],references:[id],onDelete:Restrict)
   installationPlan InstallationPlan? @relation(fields:[installationPlanId],references:[id],onDelete:Restrict)
   @@unique([roomId,preparedBy,prepareKey])
   @@index([roomId,publishedAt])
@@ -3597,6 +3599,7 @@ model RequirementVersion {
 }
 
 model FileAsset {
+  siteDeliveries SiteDelivery[]
   contractDocuments ContractDocument[]
   chatReleases ChatDocumentRelease[]
   chatFiles ChatFile[]
@@ -4632,6 +4635,10 @@ model SiteDelivery {
   driverReference         String?
   recipient               String
   evidenceFileId          String?               @db.Uuid
+  evidenceFileVersion     Int?
+  evidenceChecksum        String?
+  clientKey               String?               @db.Uuid
+  requestHash             String?
   siteCondition           String?
   shortageNotes           String?
   damageNotes             String?
@@ -4639,7 +4646,10 @@ model SiteDelivery {
   createdBy               String                @db.Uuid
   createdAt               DateTime              @default(now())
   workOrder               InstallationWorkOrder @relation(fields: [installationWorkOrderId], references: [id])
+  evidenceFile            FileAsset?            @relation(fields: [evidenceFileId], references: [id], onDelete: Restrict)
+  chatReleases            ChatDocumentRelease[]
 
+  @@unique([installationWorkOrderId, createdBy, clientKey])
   @@index([organizationId, projectId, deliveryDate])
 }
 

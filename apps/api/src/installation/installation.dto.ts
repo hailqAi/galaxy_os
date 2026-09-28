@@ -1,6 +1,7 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsDate,
@@ -9,9 +10,36 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  IsISO8601,
+  Length,
+  Matches,
   Min,
   ValidateNested,
 } from 'class-validator';
+
+export class SiteDeliveryItemDto {
+  @IsUUID() stockIssueLineId!: string;
+  @Matches(/^(?:0|[1-9]\d{0,16})(?:\.\d{1,3})?$/) quantity!: string;
+}
+
+export class CreateSiteDeliveryDto {
+  @IsUUID() clientKey!: string;
+  @IsISO8601({ strict: true }) deliveryDate!: string;
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
+  @Length(1, 200)
+  recipient!: string;
+  @IsUUID() evidenceFileId!: string;
+  @IsInt() @Min(1) evidenceFileVersion!: number;
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => SiteDeliveryItemDto)
+  items!: SiteDeliveryItemDto[];
+}
 
 export class CreateInstallationPlanDto {
   @IsUUID() projectId!: string;

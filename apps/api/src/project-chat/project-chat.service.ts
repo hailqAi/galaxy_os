@@ -15,6 +15,7 @@ import {
   eligibleCustomerFile,
   customerFileSnapshot,
   lockCustomerFileOwnership,
+  verifiedCustomerFileBytes,
 } from './contract-file-source';
 import {
   customerPublicationSource,
@@ -529,6 +530,52 @@ export class ProjectChatService {
             throw e;
         }
       }
+      const deliveries = await tx.siteDelivery.findMany({
+        where: {
+          organizationId: actor.organizationId,
+          projectId,
+          evidenceFileVersion: { not: null },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      for (const delivery of deliveries) {
+        const input: CustomerFileInput = {
+          sourceType: 'SITE_DELIVERY',
+          sourceId: delivery.id,
+        };
+        try {
+          const fresh = await this.freshActor(tx, actor);
+          const source = await customerFileSource(tx, fresh, projectId, input);
+          const file = await eligibleCustomerFile(
+            tx,
+            fresh,
+            projectId,
+            input,
+            delivery.evidenceFileId!,
+          );
+          if (
+            file.version !== delivery.evidenceFileVersion ||
+            file.checksum !== delivery.evidenceChecksum
+          )
+            continue;
+          result.push({
+            ...input,
+            fileId: file.id,
+            version: file.version,
+            sourceFingerprint: source.fingerprint,
+            name: 'Nhân viên ghi nhận giao tại công trường',
+          });
+        } catch (error) {
+          if (
+            !(
+              error instanceof NotFoundException ||
+              error instanceof ConflictException ||
+              error instanceof ForbiddenException
+            )
+          )
+            throw error;
+        }
+      }
       return result;
     });
   }
@@ -606,71 +653,8 @@ export class ProjectChatService {
     return link;
   }
 
-  private async freshActor(tx: Prisma.TransactionClient, actor: CurrentActor) {
-    if ((await this.access.live(actor, tx)).kind !== 'INTERNAL')
-      throw new ForbiddenException();
-    const assignments = await tx.userRole.findMany({
-      where: {
-        userId: actor.userId,
-        organizationId: actor.organizationId,
-        status: 'active',
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-        role: { status: 'active' },
-      },
-      include: {
-        role: { include: { permissions: { include: { permission: true } } } },
-      },
-    });
-    const managed = await tx.managedDepartment.findMany({
-      where: {
-        organizationId: actor.organizationId,
-        managerId: actor.organizationMembershipId,
-        status: 'active',
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-        department: { status: 'active' },
-      },
-    });
-    const units = managed.some((m) => m.includeChildren)
-      ? await tx.department.findMany({
-          where: { organizationId: actor.organizationId, status: 'active' },
-          select: { id: true, parentId: true },
-        })
-      : [];
-    const scopes = new Map<string, string[]>();
-    for (const m of managed) {
-      const ids = new Set([m.departmentId]);
-      if (m.includeChildren)
-        for (let changed = true; changed; ) {
-          changed = false;
-          for (const d of units)
-            if (d.parentId && ids.has(d.parentId) && !ids.has(d.id)) {
-              ids.add(d.id);
-              changed = true;
-            }
-        }
-      scopes.set(m.departmentId, [...ids]);
-    }
-    const fresh: CurrentActor = {
-      ...actor,
-      permissions: assignments.flatMap((a) =>
-        a.role.permissions.map((p) => p.permission.code),
-      ),
-      permissionSources: assignments.flatMap((a) =>
-        a.role.permissions.map((p) => ({
-          permission: p.permission.code,
-          assignmentId: a.id,
-          roleId: a.role.id,
-          roleName: a.role.name,
-          administrationTier: a.role.administrationTier,
-          scopeType: a.scopeType,
-          departmentId: a.departmentId,
-          managedDepartmentIds: a.departmentId
-            ? (scopes.get(a.departmentId) ?? [])
-            : [],
-        })),
-      ),
-    };
-    return fresh;
+  private freshActor(tx: Prisma.TransactionClient, actor: CurrentActor) {
+    return this.access.freshActor(tx, actor);
   }
 
   private async delegate(
@@ -1951,6 +1935,10 @@ export class ProjectChatService {
       );
       if (
         file.version !== input.version ||
+        (source.pinnedFile &&
+          (source.pinnedFile.id !== file.id ||
+            source.pinnedFile.version !== file.version ||
+            source.pinnedFile.checksum !== file.checksum)) ||
         source.fingerprint !== input.sourceFingerprint
       )
         throw new ConflictException(
@@ -2033,6 +2021,8 @@ export class ProjectChatService {
             input.sourceType === 'CUSTOMER_PAYMENT_FILE'
               ? input.sourceId
               : undefined,
+          siteDeliveryId:
+            input.sourceType === 'SITE_DELIVERY' ? input.sourceId : undefined,
           fileAssetId: current.file.id,
           version,
           checksum: current.file.checksum,
@@ -2293,7 +2283,8 @@ export class ProjectChatService {
   ) {
     if (
       input.sourceType === 'CONTRACT_FILE' ||
-      input.sourceType === 'CUSTOMER_PAYMENT_FILE'
+      input.sourceType === 'CUSTOMER_PAYMENT_FILE' ||
+      input.sourceType === 'SITE_DELIVERY'
     )
       return this.prepareCustomerFile(actor, roomId, {
         ...input,
@@ -2396,6 +2387,7 @@ export class ProjectChatService {
     if (
       r.contractDocumentId ||
       r.customerPaymentId ||
+      r.siteDeliveryId ||
       r.paymentScheduleId ||
       r.installationPlanId
     ) {
@@ -2410,17 +2402,23 @@ export class ProjectChatService {
         typeof r.sourceSnapshot === 'object' &&
         !Array.isArray(r.sourceSnapshot) &&
         r.sourceSnapshot.sourceType === 'CUSTOMER_PAYMENT_FILE';
-      if (document?.format === 'CUSTOMER_REVIEW_FILE' || paymentFile) {
-        const fileInput: CustomerFileInput = paymentFile
-          ? {
-              sourceType: 'CUSTOMER_PAYMENT_FILE',
-              sourceId: r.customerPaymentId!,
-            }
-          : {
-              sourceType: 'CONTRACT_FILE',
-              sourceId: document!.contractId,
-              appendixId: document!.appendixId ?? undefined,
-            };
+      if (
+        document?.format === 'CUSTOMER_REVIEW_FILE' ||
+        paymentFile ||
+        r.siteDeliveryId
+      ) {
+        const fileInput: CustomerFileInput = r.siteDeliveryId
+          ? { sourceType: 'SITE_DELIVERY', sourceId: r.siteDeliveryId }
+          : paymentFile
+            ? {
+                sourceType: 'CUSTOMER_PAYMENT_FILE',
+                sourceId: r.customerPaymentId!,
+              }
+            : {
+                sourceType: 'CONTRACT_FILE',
+                sourceId: document!.contractId,
+                appendixId: document!.appendixId ?? undefined,
+              };
         await tx.$queryRaw(
           Prisma.sql`SELECT "id" FROM "FileAsset" WHERE "id"=${r.fileAssetId}::uuid AND "organizationId"=${actor.organizationId}::uuid FOR UPDATE`,
         );
@@ -2448,7 +2446,11 @@ export class ProjectChatService {
               document.storageKey !== file.storageKey ||
               document.version !== r.version ||
               document.checksum !== r.checksum)) ||
-          (paymentFile && r.version !== file.version) ||
+          ((paymentFile || r.siteDeliveryId) && r.version !== file.version) ||
+          (source.pinnedFile &&
+            (source.pinnedFile.id !== file.id ||
+              source.pinnedFile.version !== file.version ||
+              source.pinnedFile.checksum !== file.checksum)) ||
           file.checksum !== r.checksum ||
           file.originalFilename !== r.filename ||
           file.mimeType !== r.mimeType
@@ -2638,21 +2640,8 @@ export class ProjectChatService {
     });
   }
 
-  private async releaseBytes(storageKey: string, checksum: string) {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    const ceiling = 10 * 1024 * 1024;
-    for await (const chunk of await this.storage.stream(storageKey)) {
-      const bytes = Buffer.from(chunk);
-      size += bytes.length;
-      if (size > ceiling)
-        throw new ConflictException('Bản phát hành vượt giới hạn 10 MiB');
-      chunks.push(bytes);
-    }
-    const data = Buffer.concat(chunks);
-    if (createHash('sha256').update(data).digest('hex') !== checksum)
-      throw new ConflictException('Nội dung nguồn không khớp checksum');
-    return data;
+  private releaseBytes(storageKey: string, checksum: string) {
+    return verifiedCustomerFileBytes(this.storage, storageKey, checksum);
   }
 
   async publishRelease(
