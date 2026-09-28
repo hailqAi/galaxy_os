@@ -1,4 +1,49 @@
-# M2 — Thiết kế cập nhật để duyệt
+# M2 — Thiết kế và phạm vi thực thi
+
+## Thiết kế thực thi M2-A theo chỉ đạo mới 2026-09-28
+
+DESIGN_STATUS: OWNER_DIRECTED_M2_A. B1–B5 đã chốt ở [DECISIONS](DECISIONS.md). Chủ dự án chốt phạm vi/chính sách bằng chỉ đạo hiện tại, ủy quyền lập và rà soát kỹ thuật kế hoạch để thực thi inline. Các đề xuất/điểm chờ phía dưới là lịch sử; không còn dùng chúng để hỏi lại B1–B5. PLAN được tác giả và reviewer kỹ thuật kiểm, không ghi chủ dự án đã đọc một PLAN chưa có.
+
+Baseline source hiện tại, giữ Project/User/Session/OrganizationMembership/IAM/FileAsset/storage/Task/ProductLine. Thêm mô hình chat và publication vì Comment không có ranh giới recipient/history/idempotency. Không migration lên main, không sửa domain nghĩa vụ.
+
+### Ranh giới dữ liệu và quyền
+
+- `OrganizationMembership` bổ sung loại INTERNAL/EXTERNAL (mặc định INTERNAL cho tương thích). Session vẫn là nền auth hiện có. External chỉ được route chat và các endpoint auth/self tối thiểu được đánh dấu rõ; mọi legacy route khác bị server từ chối. Không grant role nhân viên. DTO self cho external không chứa organization/role/nội dung nội bộ thừa.
+- `ChatProjectGrant` là extension target Project của IAM: user/org/Project, actions và trần room, người cấp, thời điểm/expiry/revoke. Grant quản trị/publisher cấp bởi IAM có quyền quản lý phân quyền, kiểm action/scope/target/tier cùng nguồn; không suy từ chức danh. Grant quản trị không ngầm READ và không cấp tiếp ADMIN/PUBLISH. Danh sách ứng viên chỉ active/cùng org/đúng target-policy; external phải có liên kết Project tường minh.
+- `ChatRoom` gắn Project, nhóm (02–05/06–07/08–10/11–12), INTERNAL/CUSTOMER, title, creator, locked, optional task/productLine cùng Project. `ChatRoomGrant` append-only mỗi lần cấp/re-add, quyền riêng và expiry, revoke không xóa lịch sử. `ChatHistoryGrant` khoảng thời gian gắn đúng lần cấp và action; chỉ mở đúng khoảng mà người cấp được phép công bố. Interval nửa mở [from,to); mốc server.
+- Project visibility không ngầm cấp restricted room. Cấp room khách không mở parent/internal panel. Mọi list/count/search/reply/file đều bắt đầu từ cùng predicate quyền + history. Không thêm search/unread/notification chat nếu chưa có nhu cầu trong lát cắt; endpoint legacy vẫn kiểm guest deny.
+- Mỗi mutation/read-delivery recheck actor/session/member/org active và grant hiện tại; replay cũng reauthorize. Lock theo Project/room trong transaction cho send/lock/grant/revoke, thứ tự lock cố định; recheck sau chờ lock. Không dựa actor permissions cache từ đầu request để quyết định mutation sau wait.
+
+### Tin, file và publication
+
+- `ChatMessage`: actor/time server, room sequence tăng dưới room lock; unique room/actor/client key cho action SEND, room cố định tenant. Payload hash cố định; retry khác payload 409, quyền mất trả deny trước replay. Cursor sequence tránh timestamp client/concurrent commit đảo thứ tự. Không edit/delete; text render plain React, không HTML/URL preview tự fetch.
+- Poll HTTP một request/lần, pause hidden/offline, backoff; generation/AbortController bỏ response phòng/actor/epoch cũ. Composer giữ RAM, clear khi revoke/account/logout, không browser/backend draft. UI pending/error không đánh success trước server. Tải thêm giữ anchor cuộn, tin mới chỉ auto-scroll nếu đang cuối.
+- File chat dùng `FilesService`/`FileStorage` hiện hữu, không upload service thứ hai. Mở target chat có idempotency và reauthorization cùng room; giữ quota/reservation/pending cleanup/size/MIME/signature/safe filename. `EntityAttachment` giữ reference để cleanup không xóa bytes; generic file/search API không trở thành bypass quyền history. File mới không gửi xong thì là pending attachment, không message giả; retry không xóa file dùng chung.
+- Khách upload vào room mình là EXTERNAL_SOURCE, không tài liệu Galaxy duyệt. File nội bộ chỉ sang phòng khách qua `DocumentRelease`: source asset/checksum/domain version, preparer/publisher khác actor, room/recipient, state/time. Publisher xem preview chính nguồn/snapshot; nguồn đổi giữa prepare/publish trả conflict. Đọc/tải release recheck room/history/download + state hiện tại, proxy bytes qua API, không public/signed URL tồn tại ngoài revoke.
+- Trạng thái nghiệp vụ lấy từ service/document version hiện có, không tin filename hoặc boolean client “approved”. Nguồn không có ánh xạ loại/trạng thái đủ căn cứ bị từ chối và ghi dependency, không tạo chữ ký hoặc nới gate. Bản rút gọn giữ source linkage và được review riêng.
+
+### UI, rollout, migration
+
+Tổng quan/Làm việc/Hạng mục/Hồ sơ & kiến thức; Làm việc có bốn nhóm, room list/history/composer, read-only reason, quản trị theo action, khóa, cấp/thu hồi/history, publication preview; mobile một panel. Các tab còn lại link domain thật khi có quyền, không payload nội bộ cho khách/AI giả. Entry chat ở route mới, giữ route cũ. Chỉ enable API/Web test riêng, không sửa env main.
+
+Migration additive tạo chat/release tables + membership kind, FKs/indexes/unique; không rewrite migration/backfill đoán. Generate bằng prisma:migrate create-only trên test DB/shadow riêng đã kiểm; review SQL rồi deploy đúng DB test. Rollback application bằng tắt route mới, giữ dữ liệu/bảng; không down SQL xóa history. Cleanup bảo vệ mọi message/release reference.
+
+Môi trường dùng G00 harness với namespace `galaxy_os_g00_20260928m2a`, PG55433/Redis56380/API33001/Web33002 loopback, cookie riêng, storage `/tmp/galaxy-os-g00-20260928m2a`. Kiểm collision/ownership/context/DB identity trước write; credentials chỉ test, external effects tắt. Hai tenant O1/O2, O1 P1/P2, O2 P3+room/file/actor, hai actor prepare/publish. Giữ ma trận24 bên dưới: phần Lead-only của ca22 DEFERRED_BY_EXPLICIT_SLICE_SCOPE; roundtrip reference trên Project đã có vẫn phải kiểm. Thêm 30 ca prompt M2-A trong PLAN/VERIFICATION, không gắn PASS trước test.
+
+### Đối chiếu với phần đã code — không mở rộng approval
+
+Code đặt trong worktree riêng nêu ở [HANDOFF](HANDOFF.md). Trạng thái kiểm chứng và ma trận hiện hành ở [VERIFICATION](VERIFICATION.md); bảng NOT_RUN phía dưới giữ nguyên làm lịch sử lúc thiết kế, không là kết quả cuối lượt.
+
+- Khóa thực tế là row lock **Project** xuyên chat/grant/file/publication; không hai lock engine. Ceiling: serialize thao tác cùng Project; chỉ cân nhắc lock nhỏ hơn sau đo tải. Không claim đáp ứng tải production.
+- `ChatFile`/`ChatMessageAttachment` tham chiếu `FileAsset` và `EntityAttachment`, không storage riêng thứ hai. Nhãn nguồn khách thực tế `EXTERNAL_UNCONFIRMED`. DOWNLOAD và READ phải cùng mở thời điểm của tin/file; recheck cả lịch sử sau mở stream. Bytes đã giao hợp lệ không thu hồi được.
+- Liên kết room tới `Task`/`ProjectProductLine` hiện hữu là FK, không copy. Dùng `TasksService.visibleWhere`, `actorsForPermission` và predicate domain hiện có. Mỗi poll chỉ trả metadata liên kết còn được phép; external không nhận panel nội bộ. Candidate giới hạn 100 và UI ghi rõ, không quảng cáo tìm toàn bộ.
+- History yêu cầu Project ACCESS_ADMIN + HISTORY và nguồn room HISTORY, từng đoạn READ/DOWNLOAD truy nguyên grant cha; thu hồi nguồn làm mất khoảng kế thừa. Room LOCK có thể được cấp riêng cho internal; không ngầm ADMIN/PUBLISH.
+- Publication hiện **chỉ triển khai** `ProjectRequiredDocument` STAGE_1/PROPOSAL/PROPOSAL đã APPROVED, current version và FileAsset đủ nguồn. Có preview bytes/checksum, fingerprint/snapshot người nhận, hai actor, source/version drift conflict, revoke và tải qua API. Không đổi bản đã phát hành khi nguồn có version mới.
+- Các loại B5 khác vẫn là yêu cầu đã duyệt nhưng chưa hoàn tất: QuotationDocument có binary riêng không qua FileAsset; TechnicalApproval/SampleApproval/HandoverDocument cần adapter/version/approval/locking cụ thể. Contract/appendix/payment/kế hoạch giao-lắp chưa có đường approved-binary/version đủ căn cứ cho publication. Không sửa domain tiền/hợp đồng để đoán liên kết hoặc nới gate; cần review prerequisite nguồn tương ứng trước mở loại đó. Đây là dependency/thiếu implementation, không B1–B5 chưa chốt.
+- Không implement reply/quote, search/unread hoặc notification chat mới: không endpoint giả. Generic search/file/audit không được lộ ChatRoom; legacy notification không nhận body/file chat. Không có edit/delete, AI, bộ nhớ runtime hay retention mới.
+- Nháp RAM: lock/unlock không xóa; đổi nhóm/phòng/link hỏi trước bỏ, beforeunload khi trình duyệt hỗ trợ. Logout/account/revoke vẫn xóa ngay. **Giới hạn UX còn mở:** Back/Forward Next SPA chưa có popstate confirmation; không hứa nháp sống qua reload/navigation.
+
+## Lịch sử thiết kế trước chỉ đạo M2-A (không phải gate hiện tại)
 
 DESIGN_APPROVAL_STATUS: NOT_APPROVED. PLAN_APPROVAL_STATUS: NOT_CREATED_AWAITING_DESIGN_APPROVAL. IMPLEMENTATION_GATE: BLOCKED_APPROVAL. Ngày 2026-09-28; chỉ docs trước gate, không source/config/migration/test stack.
 

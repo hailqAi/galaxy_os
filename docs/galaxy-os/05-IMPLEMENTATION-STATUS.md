@@ -1,6 +1,17 @@
 # Trạng thái triển khai và điểm tiếp tục
 
-## Hiện tại — M2 trước gate, 2026-09-28
+## Hiện tại — M2-A triển khai một phần, 2026-09-28
+
+- OWNER_REQUIREMENT mới chốt B1–B5 và thực thi INLINE; [DECISIONS](milestones/M2/DECISIONS.md). DESIGN owner-directed đúng M2-A; PLAN technical reviewed theo ủy quyền, không PLAN_APPROVED_BY_OWNER.
+- M2_ENTRY_GATE: READY cho code test; **M2_A_STATUS: PARTIAL; M2_OVERALL_STATUS: PARTIAL**. Đã code chat nội bộ/khách trên Project hiện hữu, IAM/file/history/expiry/publication PROPOSAL/UI. Không AI/memory runtime hoặc M3–M7.
+- Điểm tiếp tục **worktree** `/home/galaxy_os/.worktrees/m2-a-20260928`, branch `m2/project-chat-20260928`; START_SHA `7faeb58eea534dbb6c11238906ede6df84ce0302`. Không quay main/reset về M1.
+- Handoff mới nhất: [M2/HANDOFF](milestones/M2/HANDOFF.md), có CODE_SHA/TESTED_SHA/TREE cuối; [VERIFICATION](milestones/M2/VERIFICATION.md) giữ pass/fail/not-run, [PLAN](milestones/M2/PLAN.md) có actual paths và giới hạn. Kết quả targeted không xóa full-run failure hoặc thay browser.
+- Test stack VERIFIED riêng (G00 smoke3/3, DB/storage/session giả,7 migration additive); main runtime **RUNTIME_VERSION_UNVERIFIED / MAIN_RUNTIME_CHANGED:NO**. Không merge/push/deploy, không G01/G02 wholesale integration.
+- Blocker/thiếu: các adapter B5 ngoài PROPOSAL; source approved binary/version cho một số domain cần prerequisite có review; 404/timeout chập chờn và các ca race/mobile chưa đủ; Back/Forward nháp. B1–B5 không còn là lý do chặn. Lead-only/lifecycle giữ DEFERRED_BY_EXPLICIT_SLICE_SCOPE, không xóa ca nghiệm thu.
+- Bwrap thiếu và sudo authorization cũ chưa thay đổi, không cài/lặp sudo; không tác vụ đã chạy nào bị chứng minh block vì thiếu binary. Không tuyên bố đã kiểm toàn sandbox.
+- Bước tiếp: đóng lỗi/test còn thiếu và source mapping theo HANDOFF trước nghiệm thu M2-A; không tự chuyển phần M2 còn lại/M3. Các mục phía dưới chỉ là lịch sử.
+
+## Lịch sử — M2 trước gate, 2026-09-28
 
 - M2_STATUS: AWAITING_OWNER_DECISIONS; **IMPLEMENTATION_GATE: BLOCKED_APPROVAL**.
   Đã đọc/đối chiếu B1–B5 và cập nhật spec; chưa code, chưa dựng test stack trước gate.

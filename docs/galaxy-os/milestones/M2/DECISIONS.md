@@ -1,5 +1,19 @@
 # M2 — Đối chiếu B1–B5 trước triển khai
 
+## Chỉ đạo mới M2-A — 2026-09-28
+
+OWNER_REQUIREMENT: prompt “CHỐT B1–B5 VÀ TRIỂN KHAI CODE M2-A”. **B1_B5_STATUS: RESOLVED_FOR_M2_A**. Chủ dự án chốt phạm vi/chính sách bằng chỉ đạo hiện tại, ủy quyền lập và rà soát kỹ thuật kế hoạch để thực thi inline. Không ghi PLAN_APPROVED_BY_OWNER; chỉ đạo không phê duyệt phần ngoài M2-A. Các bảng phía dưới giữ nguyên làm lịch sử trước chỉ đạo này.
+
+- **B1:** baseline hiện tại + docs hợp lệ, worktree riêng, không merge/cherry-pick G01/G02; chỉ sửa quyền trực tiếp ảnh hưởng M2-A, có regression. Không đổi final-admin/tiền/phê duyệt nghiệp vụ, không policy engine mới.
+- **B2:** quản trị truy cập đúng grant Project, tạo room/task không cấp quyền. Tạo room/gửi/khóa/quản trị/mở lịch sử là action riêng. Mốc gia nhập do server; mở lịch sử cũ có khoảng và audit, không vượt nguồn/quyền người cấp. Revoke/re-add giữ sự kiện cũ, lần cấp mới mặc định không đọc cả lịch sử lần cũ lẫn khoảng gián đoạn. Áp đồng bộ cho message/attachment/reply/preview/search/count/download. Nháp chỉ RAM tab, giữ khi lỗi, cảnh báo rời trang, xóa khi logout/đổi actor/mất quyền, không sống qua reload. Không edit/delete hoặc job retention tin mới; phòng khóa vẫn đọc theo quyền.
+- **B3:** Project đã có, cả chat nội bộ và khách, file/publication/UI nhiều vai trò. Không đổi Lead conversion, không Project giả, không sửa nghĩa vụ. Lead-only và tính xuyên suốt toàn vòng đời là **DEFERRED_BY_EXPLICIT_SLICE_SCOPE**, không NOT_APPLICABLE; M2 tổng thể vẫn PARTIAL.
+- **B4:** quản trị truy cập là grant tường minh theo Project, cấp bởi thẩm quyền IAM hiện hữu; không role-name/PM/creator bypass hoặc userId thật. UI chọn người hợp lệ trong scope. Trần riêng view/send/upload/download/join/lock/history; không cấp lại access-admin hoặc publisher. Admin không tự có quyền đọc. Nhân viên active đúng org có thể không expiry; khách/đối tác gắn Project, User/Session đã xác minh, không employee role/public link. Khách bắt buộc expiry, mỗi grant/gia hạn tối đa **30 ngày từ lúc có hiệu lực**, không tự gia hạn; gia hạn sau hết hạn là lần cấp mới. Chỉ fixture, không người thật/email/SMS.
+- **B5:** prepare/publish phải hai actor khác nhau (không phải hai session). Publisher có grant Project riêng và quyền xem/chia sẻ đúng nguồn. Chỉ phát hành tài liệu khách được chọn: phương án/mẫu/bản vẽ; báo giá bán không vốn; hợp đồng/phụ lục/hồ sơ thanh toán của khách; kế hoạch giao/lắp, biên bản/bàn giao/bảo hành. Phải đủ trạng thái nghiệp vụ, kiểm nội dung/version; tên file không là căn cứ. Cấm tự công bố vốn/margin/giá mua/PI/PO nội bộ/ngân hàng không liên quan/log/khách khác/ghi chú nội bộ. Lưu nguồn/version, preparer/publisher, room/recipient, thời gian/phạm vi/trạng thái revoke; nguồn đổi lúc duyệt buộc kiểm lại, bản đã phát hành không tự đổi. Text trong phòng khách không cần hai người nhưng không tự ký/duyệt. File khách upload là nguồn ngoài chưa xác nhận, safety check, đúng room, không tự chia sẻ. View/send/upload/download riêng; preview không vượt quyền file và không hứa chống sao chép.
+
+Chọn HTTP polling, test stack riêng, hai tenant, giữ 24 ca gốc + ca B2/B4/B5. Thực thi **INLINE** sau lập và review kỹ thuật PLAN; không cần thêm lượt xác nhận PLAN theo điều chỉnh thủ tục rõ của chủ dự án. Chỉ blocker kỹ thuật/thẩm quyền mới chặn đúng phần phụ thuộc.
+
+## Lịch sử trước khi chốt M2-A
+
 Quan sát: 2026-09-28T04:57:31+07:00. START_SHA `0fea6cc53db41c6520fda942c3bf412c35ab3dbb`. **IMPLEMENTATION_GATE: BLOCKED_APPROVAL**. Đây là ghi nhận yêu cầu/đề xuất, không phải phê duyệt thay chủ dự án.
 
 ## Nguồn và thứ tự áp dụng

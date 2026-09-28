@@ -1,5 +1,14 @@
 # Project status
 
+## M2-A — Code thử nghiệm trên worktree riêng — 2026-09-28
+
+- B1–B5 đã được chủ dự án chốt; thực thi INLINE theo ủy quyền lập/review kỹ thuật PLAN, không claim owner đã đọc PLAN.
+- M2_ENTRY_GATE: READY (stack riêng smoke thật). M2_A_STATUS: **PARTIAL**, M2_OVERALL_STATUS: **PARTIAL**. Có chat nội bộ/khách, file/history/expiry/quyền, UI và publication PROPOSAL; chưa đủ các nguồn B5 hoặc mọi ca kiểm chứng.
+- Worktree `/home/galaxy_os/.worktrees/m2-a-20260928`, branch `m2/project-chat-20260928`; SHA/tree và test cuối ở [HANDOFF](docs/galaxy-os/milestones/M2/HANDOFF.md), [VERIFICATION](docs/galaxy-os/milestones/M2/VERIFICATION.md).
+- G00 namespace riêng, API33001/Web33002 loopback, DB/storage/tài khoản giả; không ghi main DB, không API AI/email/payment thật. Bwrap chưa cài nhưng executor/DB/browser hoạt động qua quyền hợp lệ.
+- Full regression còn lỗi dù targeted pass; không tuyên bố VERIFIED. Lead-only/lifecycle DEFERRED_BY_EXPLICIT_SLICE_SCOPE; M3–M7 chưa làm. MAIN_RUNTIME_CHANGED:NO; không merge/cherry-pick/push/deploy.
+- Tiếp tục đúng worktree; không chạy lại M0/M1. Các mục dưới là lịch sử trước chỉ đạo M2-A.
+
 ## M2 — Điều kiện vào và quyết định thiết kế — 2026-09-28
 
 - M2_STATUS: AWAITING_OWNER_DECISIONS; IMPLEMENTATION_GATE: BLOCKED_APPROVAL.

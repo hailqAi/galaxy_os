@@ -1,4 +1,59 @@
-# M2 — Bàn giao trước gate phê duyệt
+# M2 — Bàn giao triển khai
+
+## Hiện hành: M2-A — 2026-09-28, Asia/Bangkok
+
+**M2_A_STATUS: PARTIAL; M2_OVERALL_STATUS: PARTIAL.** Không quay về main để làm lại M0/M1. Tiếp tục tại `/home/galaxy_os/.worktrees/m2-a-20260928`, branch `m2/project-chat-20260928`. Source, docs và stack test giữ tại đây; chưa tích hợp vào ứng dụng chính.
+
+### Quyền, SHA và phạm vi
+
+- B1_B5_STATUS: RESOLVED_FOR_M2_A; DESIGN_STATUS: OWNER_DIRECTED_M2_A. **Chủ dự án chốt phạm vi/chính sách bằng chỉ đạo hiện tại, ủy quyền lập và rà soát kỹ thuật kế hoạch để thực thi inline.** PLAN_STATUS: TECHNICALLY_REVIEWED_EXECUTED_PARTIALLY; không PLAN_APPROVED_BY_OWNER.
+- PLAN_REVIEW_METHOD: self-review + hai reviewer độc lập chỉ đọc; implementation INLINE/TDD. Ponytail giữ service/domain sẵn có, không thêm dependency hoặc rewrite IAM.
+- START_SHA: `7faeb58eea534dbb6c11238906ede6df84ce0302`; Task1 CODE_SHA: `b5a0859d45b6711e71cc8bad11f750b8ee498944`. Không tự tham chiếu docs commit.
+- CODE_SHA / TESTED_SHA: `be3aafe4ae84264e66ab12b773ca0c4f2825bf77`; TESTED_TREE: `c72af911b152faf757031109bda1f6cc2e2859f2`. Đây là code commit với 48 file source/test/migration, không phải docs commit. Browser8 chạy ngay trước commit trên cùng nội dung source (không delta); targeted được chạy lại sau commit, docs-only dirt tách riêng. DOCS_COMMIT_SHA trả sau commit cuối, không ghi tự tham chiếu vào file này.
+- M2_ENTRY_GATE: READY cho code trong test stack đã xác minh, không phải VERIFIED nghiệm thu. MAIN_RUNTIME_CHANGED: NO; runtime chính vẫn RUNTIME_VERSION_UNVERIFIED. PUSH_MERGE_DEPLOY: NOT_PERFORMED.
+- Gốc chỉ thêm ignore `.worktrees/` theo skill; không sửa runtime/config/main app. Không merge/cherry-pick G01/G02. G02 user dirty file giữ nguyên; không reset/stash/clean/restore.
+
+### Người dùng đã có gì trong bản thử
+
+Đăng nhập thật → `/work` → Project được cấp → bốn nhóm → phòng nội bộ/khách → tin lưu DB, polling, file dùng FileAsset, xem/tải theo READ/DOWNLOAD/history. Chỉ đọc không gửi; không quyền không nhận payload. Admin Project tường minh có UI cấp/thu hồi/hạn/history/khóa mà không tự đọc tin. Link Task/ProductLine chỉ khi có quyền domain, không copy dữ liệu. Khách có Session riêng, expiry≤30 ngày, không role nhân viên, không thấy nội bộ.
+
+Publication **PROPOSAL đã duyệt** có chuẩn bị, preview đúng nguồn/phiên bản/khách, hai actor, recipient fingerprint, phát hành/thu hồi/tải bản cố định. Nguồn khách gửi mang nhãn EXTERNAL_UNCONFIRMED. Không bot/AI giả, không lời hứa đã có memory runtime. UI nói rõ hồ sơ B5 khác chưa hỗ trợ.
+
+### Phần chưa hoàn tất / blocker cụ thể
+
+1. Các adapter B5 ngoài PROPOSAL vẫn thuộc M2-A được giao nhưng NOT_IMPLEMENTED, không tự loại khỏi phạm vi. ContractDocument có binary metadata, song chưa chứng minh mapping approval/version→FileAsset đúng nguồn; phụ lục/tiền/kế hoạch giao-lắp cũng chưa có đường đã kiểm. Không đổi business domain ngoài quyền để đoán nguồn hoặc cho file bất kỳ qua gate. Cần thiết kế/kiểm chứng mapping từng nguồn; chỉ phần buộc sửa domain nghĩa vụ ngoài M2-A mới cần scope prerequisite riêng. Không cần hỏi lại B1–B5.
+2. Full API còn failure/timeout; targeted pass không xóa lỗi chập chờn. Browser có lần second-preview404 dù poll có pending. Xem đầy đủ lần fail/rerun trong [VERIFICATION](VERIFICATION.md); không gọi production-ready hoặc M2-A VERIFIED.
+3. Back/Forward Next SPA chưa có xác nhận bỏ nháp. Đổi phòng/nhóm/link và beforeunload đã có guard; logout/revoke vẫn phải clear không hỏi. Các ca delayed polling/reconnect/lock race/mobile lỗi/filename adversarial còn thiếu assertion độc lập, không tick PASS toàn bộ.
+4. Lead-only intake/lifecycle toàn trình: DEFERRED_BY_EXPLICIT_SLICE_SCOPE. Không tạo Project giả; M2 tổng thể còn phần này. Không chuyển M3–M7.
+5. Bubblewrap chưa cài, cần OS authorization nếu muốn cài; không tác vụ code/DB/browser hiện tại bị chứng minh chặn bởi thiếu bwrap. Không lặp sudo hoặc tắt sandbox.
+
+### Test stack / cách tiếp tục
+
+Kiểm cuối: targeted API **165/165**, Web **507/507**, browser **8/8**, typecheck/build/format đạt. Full API gần nhất **1101pass/13fail**,3/60files thất bại; không xóa bằng targeted rerun. BROWSER_VERIFICATION_STATUS: PASS_8_CASES_NOT_FULL_ACCEPTANCE. Xem lệnh, thời điểm, failure và ma trận24+30 trong VERIFICATION.
+
+Test app có URL loopback thật `http://127.0.0.1:33002/work`; API `http://127.0.0.1:33001/api/v1`. Chỉ test worktree, không bản chính. Không tài khoản thật hoặc thông tin đăng nhập trong báo cáo. Browser fixture tự tạo actor giả qua `apps/api/test/m2-browser.fixture.ts`, không route seed/mời khách thật.
+
+Quan sát cuối khoảng07:55+07: API PID64684 (cwd W/apps/api), Web PID67616 (cwd W/apps/web); `/api/v1/health` và `/login` HTTP200. Đây là PID quan sát, không lệnh kill dùng lại về sau; luôn xác minh lại. Main worktree sạch tại `7faeb58…`; G02 next-env hash vẫn `9edff1c7cacb3bfac9a1eadcf6f51eaa99565e38`. Next-env M2 trở về nội dung baseline do Next dev tự sinh sau build, không reset/restore hoặc stage file đó.
+
+Từ worktree: `node scripts/m2-a-serve.mjs api` và `node scripts/m2-a-serve.mjs web` trong hai terminal, **chỉ khi kiểm cổng và owned process trước**. API cần build trước bằng lệnh trong VERIFICATION. Launcher đọc đúng recipe synthetic và assertG00Isolation. Dừng bằng Ctrl-C ở chính terminal launcher của test; nếu mất terminal phải xác minh PID/cwd/port trước signal, không kill hàng loạt. Stack compose `galaxy_os_g00_20260928m2a` và storage riêng vẫn giữ; không tự `down -v`/prune. PG tmpfs mất khi container bị dừng; nguồn fixture có thể tạo lại trong namespace được kiểm.
+
+Build/dist/.next/node_modules/test-results/Prisma client là generated output trong worktree, không commit. Next tự đổi next-env giữa build/dev; cuối lượt phải đối chiếu không stage file generated này. Browser artifacts có thể chứa cookie fixture, chỉ giữ ignored tại máy; báo cáo không chép raw trace.
+
+### Files thực tế (source và docs)
+
+- Task1: `scripts/m2-a-isolated.env.example`, `apps/api/src/access-control/{current-actor.ts,development-auth.guard.ts,access-control.test.ts}`.
+- API mới: `apps/api/src/access-control/project-chat.policy.ts`; `apps/api/src/project-chat/{project-chat.module.ts,project-chat.controller.ts,project-chat.dto.ts,project-chat.service.ts}`; `apps/api/test/{m2-project-chat.integration.test.ts,m2-browser.fixture.ts}`.
+- API điều chỉnh: `apps/api/src/access-control/{access-control.module.ts,access.decorators.ts,current-actor.ts,development-auth.guard.ts}`, `app.module.ts`, `auth/auth.controller.ts`, `me.controller.ts`, `me.service.ts`, `files/{files.service.ts,project-file.ts}`, `audit/audit.service.ts`, `search/search.controller.ts`, `tasks/{tasks.module.ts,tasks.service.ts}`, `projects/project-products.test.ts` (predicate mock thêm NOT ChatRoom, không bỏ assertion).
+- Schema `apps/api/prisma/schema.prisma`; bảy migration cụ thể liệt kê trong [PLAN](PLAN.md), chỉ additive/test DB.
+- Web mới: `apps/web/app/work/page.tsx`, `apps/web/app/projects/[projectId]/work/page.tsx`, `apps/web/features/project-chat/{project-chat.tsx,chat-controls.tsx,project-chat.test.tsx}`, `apps/web/playwright.m2.config.ts`, `apps/web/tests/browser/m2-project-chat.spec.ts`; launcher `scripts/m2-a-serve.mjs`.
+- Web điều chỉnh: `apps/web/app/{layout.tsx,portal-shell.tsx,portal-navigation.ts,lib/api.ts}`, `apps/web/app/login/{model.ts,model.test.ts,page.tsx}`, `apps/web/app/api/v1/[...path]/{route.ts,route.test.ts}`, `apps/web/proxy.ts`.
+- Docs: `PROJECT_STATUS.md`, `docs/galaxy-os/05-IMPLEMENTATION-STATUS.md`, `docs/galaxy-os/milestones/M2/{DECISIONS.md,DESIGN.md,PLAN.md,VERIFICATION.md,HANDOFF.md}`. Không viết lại charter/nguồn M0/AGENTS hoặc nhân bootstrap.
+
+### Bước tiếp theo chính xác
+
+Đọc HANDOFF → VERIFICATION (các failure cuối) → PLAN (đối chiếu file thật) trong **worktree M2**, kiểm HEAD/status. Ưu tiên tái hiện 404/timeout bằng barrier/clock/DB evidence, không tăng timeout; kiểm lại browser source-revoke/draft trên cây ổn định. Sau đó bổ sung các assertion còn thiếu và adapter publication có nguồn đã review. Chỉ mở loại hồ sơ khi chứng minh đúng version/approval/recipient; giữ failclosed phần thiếu. Không dọn worktree/stack trước khi đã quyết định giữ bằng chứng.
+
+## Lịch sử — bàn giao trước gate phê duyệt
 
 Ngày 2026-09-28, bắt đầu quan sát 04:55:44+07:00. START_SHA `0fea6cc53db41c6520fda942c3bf412c35ab3dbb`, tree `a7648137465aa44b711d62e89fb46403ae6ea9cd`; workspace `/home/galaxy_os`, branch `g00/build-test-isolation-20260914`. M0/M1 không thực hiện lại.
 

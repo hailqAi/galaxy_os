@@ -1,4 +1,150 @@
-# M2 — Bằng chứng kiểm tra điều kiện vào
+# M2 — Bằng chứng triển khai và kiểm chứng
+
+## Hiện hành — M2-A, 2026-09-28 (Asia/Bangkok)
+
+**M2_ENTRY_GATE: READY cho phạm vi code M2-A; không phải nghiệm thu hoàn tất. B1_B5: RESOLVED_FOR_M2_A. M2_A_STATUS: PARTIAL. M2_OVERALL_STATUS: PARTIAL.** Kết quả source/test/commit cuối được chốt trong [HANDOFF](HANDOFF.md); không dùng SHA docs làm code đã test. Các bảng trước gate phía cuối là lịch sử, không ghi lùi kết quả.
+
+### Baseline và môi trường
+
+- Cwd triển khai `W=/home/galaxy_os/.worktrees/m2-a-20260928`; branch `m2/project-chat-20260928`. START_SHA `7faeb58eea534dbb6c11238906ede6df84ce0302`; prerequisite commit `b5a0859d45b6711e71cc8bad11f750b8ee498944`. Các lệnh trước source commit chạy HEAD này + diff M2-A, không pretend tested clean SHA. Code/test tree cuối ghi trong HANDOFF sau commit và kiểm lại.
+- Gốc `/home/galaxy_os` ban đầu sạch tại `361d71878b67fbd3c9f5ff7cb161b5d11608d1d6`. Chỉ thêm `.worktrees/` vào ignore theo skill, commit `7faeb58…`; không application source/runtime main thay đổi. Không tích hợp G01/G02. Dirty next-env G02 giữ nguyên.
+- G00 recipe có guard kiểm identity DB/user/run ID/storage/ports; namespace `galaxy_os_g00_20260928m2a`, PostgreSQL 55433, Redis 56380, API 33001, Web 33002, tất cả loopback. DB/user riêng, PG tmpfs; storage `/tmp/galaxy-os-g00-20260928m2a/{files,uploads,avatars}`. Cookie `galaxy_m2a_test_session`, browser contexts riêng. Redis theo harness, không dependency mới của polling.
+- `scripts/m2-a-isolated.env.example` chỉ giá trị tổng hợp dành test; launcher không đọc `.env.local` của main. ALLOW_DEV_AUTH=false; guest login Session thật, hai org và nhiều Project/room/users giả. Không gọi email/AI/publishing/payment thật. Feature chat chỉ enable khi guard G00 xác nhận; build production kiểm với feature tắt.
+- Node20.20.2/pnpm10.33.4; offline frozen install: lần sandbox EROFS cache (exit226), approval hợp lệ chạy lại exit0,811 packages,0downloads; lockfile không đổi. Không thêm dependency/gói OS. Bwrap chưa có, không lặp sudo; NEEDS_OS_AUTHORIZATION chỉ việc cài, không chặn những kiểm thử thực tế dưới đây. Chromium `chromiumSandbox:true`, không dùng no-sandbox.
+- `check/up/prepare/smoke` G00 exit0, smoke3/3. Kiểm identity trước write; 69 baseline +7 additive migration =76 chỉ trên test. `prisma:migrate --create-only` cần TTY, lần noninteractive exit1; retry TTY đúng quyền, SQL review rồi deploy/generate exit0. Bỏ6 renameIndex ngoài phạm vi trong SQL **chưa áp**, không sửa migration đã áp, không reset/db push. Fixture test giữ trong namespace riêng, không production seed.
+
+### Cách tái chạy đúng đích
+
+Mọi lệnh dùng W ở trên; `E` dưới đây chỉ là ký hiệu viết tắt trong bảng, không biến env chứa secrets:
+
+```sh
+# cwd W/apps/api; môi trường mới chỉ PATH + recipe synthetic
+env -i PATH="$PATH" node --env-file=../../scripts/m2-a-isolated.env.example node_modules/vitest/vitest.mjs run --no-file-parallelism --poolOptions.forks.singleFork=false
+# targeted: thêm các đường test trước --no-file-parallelism
+# cwd W/apps/web
+env -i PATH="$PATH" node --env-file=../../scripts/m2-a-isolated.env.example node_modules/@playwright/test/cli.js test --config=playwright.m2.config.ts
+# cwd W; không deployment
+env -i PATH="$PATH" TRUST_PROXY=true APP_PUBLIC_ORIGIN=https://m2a.example.test INTERNAL_API_URL=http://127.0.0.1:33001/api/v1 NEXT_PUBLIC_API_URL=/api/v1 ALLOW_DEV_AUTH=false FEATURE_MARKETING=false FEATURE_PROJECT_CHAT=false pnpm build
+```
+
+Không chạy lại `prepare`/migrate/fixture trên stack khác chỉ vì cùng NODE_ENV. Sau nhiều browser runs, login fixture có thể chạm limiter IP 30/15phút của API test; không đổi limit, spoof IP, disable auth hoặc tăng timeout. Dùng vòng đời test server sạch/đợi cửa sổ, giữ bằng chứng lần bị chặn.
+
+### Nhật ký lệnh/kết quả — trước commit code
+
+| Mốc / cwd                   | Lệnh                                                                                                                                                                                                                                                                                                         | Exit / kết quả / giới hạn                                                                                                                                                                        |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Task1, W                    | G00 check/up/prepare/smoke qua recipe hiện có                                                                                                                                                                                                                                                                | 0; smoke3/3, identity đúng. Executor hoạt động; không suy sandbox toàn máy đã verified                                                                                                           |
+| Task1, W/apps/api           | Vitest access-control/files/guard                                                                                                                                                                                                                                                                            | RED provenance3fail/9pass → GREEN66; targeted52+14. Một lần thiếu env gây38 Zodfail; explicit recipe sửa setup, không source bypass                                                              |
+| Task2–4, W/apps/api         | `test/m2-project-chat.integration.test.ts`                                                                                                                                                                                                                                                                   | RED endpoint404, ceiling, self-history, audit, expired grant, READ/file interval → GREEN tăng5→9→10→14→18→20→26. Đây là tiến trình TDD, không tổng test độc lập để cộng số                       |
+| 07:33, W/apps/api           | E + `test/m2-project-chat.integration.test.ts test/sprint1.integration.test.ts test/project-required-document-upload.integration.test.ts src/access-control/access-control.test.ts src/projects/project-products.test.ts src/files/files.test.ts --no-file-parallelism --poolOptions.forks.singleFork=false` | 0; **165/165** =26+18+19+12+50+40. `/me` và upload targeted pass không đóng timeout chập chờn lịch sử                                                                                            |
+| Full API lần1               | Vitest full singleFork                                                                                                                                                                                                                                                                                       | 1;1080pass/1fail/4skip và7suitefail. Một mock exact predicate cần thêm NOT ChatRoom (bảo mật mạnh hơn), các suite env bị ALLOW_DEV_AUTH stub trước đó ảnh hưởng; không tắt guard                 |
+| Full API lần2               | E full, singleFork=false                                                                                                                                                                                                                                                                                     | 1;1112pass/1skip,59/60file. `project-product.integration` beforeAll timeout10s; isolated rerun1pass2.867s exit0. Không tăng timeout và không coi rerun xóa failure                               |
+| Web unit, 07:42             | `pnpm --filter @galaxy/web test` (W)                                                                                                                                                                                                                                                                         | 0; **507/507**,30files; UI unit2 chỉ kiểm merge/escaping/read-only, không thay browser                                                                                                           |
+| Typecheck, 07:40            | `pnpm typecheck` (W)                                                                                                                                                                                                                                                                                         | 0; API/Web/Edge. Kiểm lại cuối sau thay source xem phần chốt                                                                                                                                     |
+| Edge                        | `pnpm --filter @galaxy/edge test`                                                                                                                                                                                                                                                                            | Default sandbox EPERM listen; approval hợp lệ4/4pass exit0                                                                                                                                       |
+| Python placeholder          | `/home/galaxy_os/services/document-ai/.venv/bin/ruff check services/document-ai`; cùng executable `pytest services/document-ai` (cwd W)                                                                                                                                                                      | 0;ruff pass,pytest1pass. Chỉ dùng executable venv main đọc source worktree, không cài/sửa main. Sandbox pytest treo đã xác minh PID/cwd rồi dừng đúng process thử và rerun qua approval          |
+| Build                       | Lệnh build explicit test origin ở trên                                                                                                                                                                                                                                                                       | Không env: TRUST_PROXY guard fail; sandbox Turbopack EPERM spawn/listen. Approval hợp lệ build API/Web/Edge exit0,79pages; không deploy. Warning nested worktree root không sửa lock/config main |
+| Browser trước mở rộng       | 4 ca, rồi cross-tab riêng                                                                                                                                                                                                                                                                                    | 0;4/4 và1/1. Không thay bằng chứng bộ8 cuối                                                                                                                                                      |
+| Browser6                    | Cùng recipe                                                                                                                                                                                                                                                                                                  | 1;5pass/1timeout publication. Source/UI có hot reload trong lượt này; chưa đủ chứng minh nguyên nhân timeout                                                                                     |
+| Browser regression nháp RED | `--grep 'room-only LOCK'`                                                                                                                                                                                                                                                                                    | 1; mất textarea sau lock, đã tái hiện trước sửa                                                                                                                                                  |
+| Browser8 07:40–07:41        | Bộ8 trên source ổn định                                                                                                                                                                                                                                                                                      | 1;6pass/2fail. Publication lần preview thứ hai404 dù poll có pending; LOCK screenshot có nháp nhưng implicit accessible name không ổn định. Thêm aria-label, không giảm assertion                |
+| Browser2 rerun 07:42        | `--grep 'room-only LOCK\|preparer and distinct'`                                                                                                                                                                                                                                                             | 1; fixture login401 trước ca đầu, ca sau không chạy; limiter sau nhiều run là đầu mối, không kết luận lỗi app đã sửa                                                                             |
+
+Các test ràng buộc source/history sau I/O dùng barrier/mock stream nhưng đi qua API/DB/storage thật; không gọi mock là toàn bộ runtime. Test publication dùng domain approval thật trước prepare. Traces/screenshots chỉ fixture, nằm ignored `apps/web/test-results/m2-a/`, không commit cookie/trace nguyên bản. Artifact mặc định có thể bị run sau thay; kết quả lỗi được giữ trong bảng này.
+
+### Review và giới hạn an toàn
+
+Hai reviewer độc lập chỉ đọc; implementation INLINE. Plan review phát hiện5 điểm về route/file/authority/cursor/source và đã chỉnh. Foundation/code review phát hiện ceiling replacement, tự cấp history, multi-hop revoke, timestamp sau lock, discovery, generic file/search/audit, READ∩DOWNLOAD, renewal parent, source/recipient drift, stale UI/cache và draft; các sửa có regression tương ứng. SQL additive và diff/callers đã review; Ponytail không thêm dependency, queue, AI/WebSocket hay second upload store. Không có verdict toàn bộ M2-A sạch chỉ từ review.
+
+Publication hỗ trợ **approved PROPOSAL**. Các adapter B5 còn lại **vẫn thuộc M2-A đã được giao, hiện NOT_IMPLEMENTED**, không bị tự loại khỏi scope. QuotationDocument có storage/version riêng; TechnicalApprovalRevision/SampleApproval/HandoverDocument có file/status nhưng chưa có adapter đã kiểm chứng. ContractDocument có storageKey/checksum/version nhưng chưa có liên kết FileAsset và approval của đúng binary/version được chứng minh; không có nghĩa repository không có hồ sơ hợp đồng. Chỉ prerequisite bắt buộc thay domain hợp đồng/payment/kế hoạch giao-lắp ngoài ranh giới M2-A mới cần phạm vi riêng. Không dùng tên file hoặc quyền Project để phát hành; UI nói rõ loại hỗ trợ. Back/Forward SPA chưa hỏi bỏ nháp. RUNTIME_VERSION_UNVERIFIED cho ứng dụng chính giữ nguyên.
+
+### Ma trận 24 ca gốc — kết quả theo lớp, không xóa ca
+
+I = `apps/api/test/m2-project-chat.integration.test.ts`; B = `apps/web/tests/browser/m2-project-chat.spec.ts`; U = IAM/file/Web unit. PASS_API không tự là PASS toàn nghiệm thu. Chưa có reply/search/unread/socket mới; transport được chọn là HTTP polling.
+
+| M2-AC | Kết quả hiện có                  | Bằng chứng / phần thiếu                                                                                                    |
+| ----- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 01    | PARTIAL                          | I persist/replay; B reload thật. Đăng nhập lại đọc cùng tin chưa có assertion riêng                                        |
+| 02    | PASS_API                         | I unique/replay/concurrent same key, khác payload409                                                                       |
+| 03    | PARTIAL                          | I actor/room khác key, tenant isolation; toàn ma trận key cả hai tenant chưa exhaust                                       |
+| 04    | PASS_API                         | I concurrent send, sequence ổn định                                                                                        |
+| 05    | PASS_API                         | I interleaved paging +155 visible/5 hidden; browser cuộn ranh giới chưa riêng                                              |
+| 06    | PASS_API_BROWSER                 | I viewer deny; B disabled UI +poll quyền                                                                                   |
+| 07    | PASS_API                         | I room/discovery/generic search/file/audit deny; không tạo unread/snippet endpoint                                         |
+| 08    | PASS_API                         | I Project/room khác scope; browser nhiều mục riêng chưa exhaust                                                            |
+| 09    | PASS_API_UNIT                    | I authority ceiling + U binding provenance                                                                                 |
+| 10    | PASS_API                         | I forged actor/tenant/project fields và paging DTO deny                                                                    |
+| 11    | PARTIAL                          | I lock giữ lịch sử/chặn send; B lock/draft regression cần verdict cuối; concurrent lock/send chưa barrier riêng            |
+| 12    | PARTIAL                          | I current auth/replay/upload/history I/O barrier; B open room/management revoke. Mọi delayed poll ordering chưa exhaustive |
+| 13    | PARTIAL                          | Poll reauthorize; chưa riêng browser offline→reconnect sau revoke                                                          |
+| 14    | PASS_API_BROWSER                 | I FileAsset/disk bytes/version; B upload/download/reload                                                                   |
+| 15    | PASS_API                         | I khác room/project/org bị từ chối                                                                                         |
+| 16    | PARTIAL                          | I lỗi/duplicate/finalize race; browser offline upload/error/retry chưa riêng                                               |
+| 17    | PARTIAL                          | I source/internal generic denied + exact PROPOSAL release; chưa các loại B5 khác                                           |
+| 18    | PASS_API_BROWSER                 | I external legacy deny/cross room; B guest scope không nội bộ                                                              |
+| 19    | PASS_API                         | I effective history/re-add/renew/expiry/multi-hop; browser toàn vòng re-add chưa chạy                                      |
+| 20    | PARTIAL                          | B text script không chạy, U escape; filename adversarial browser chưa riêng                                                |
+| 21    | PASS_API                         | I generic audit/count/search không lộ; không phát chat notification mới                                                    |
+| 22    | DEFERRED_BY_EXPLICIT_SLICE_SCOPE | Lead-only/lifecycle chưa code/test; Project FK dùng lại, không thay contract/payment/PO                                    |
+| 23    | PARTIAL                          | B mobile khách read/send/attach; mobile offline/error và mọi persona chưa exhaust                                          |
+| 24    | PASS_API_BROWSER                 | Không provider AI, chat thật vẫn chạy                                                                                      |
+
+### 30 ca bổ sung B2/B4/B5 — giữ từng yêu cầu
+
+| ID  | Trạng thái / assertion đã có và giới hạn                                                               |
+| --- | ------------------------------------------------------------------------------------------------------ |
+| 01  | PARTIAL — reload B, persistence I; login-again cùng tin chưa riêng                                     |
+| 02  | PASS_API — retry/concurrent unique, payload mismatch409; double-click UI chưa riêng                    |
+| 03  | PARTIAL — I actor/room key isolation; toàn tổ hợp tenant key chưa exhaust                              |
+| 04  | PASS_API — sequence pagination interleaved +155-message burst                                          |
+| 05  | PASS_API_BROWSER — viewer deny server và UI                                                            |
+| 06  | PASS_API — tenant B không đọc/ghi Project A                                                            |
+| 07  | PASS_API — room khác scope deny, Project không tự READ                                                 |
+| 08  | PASS_API_UNIT — source assignment/tier/action/scope provenance                                         |
+| 09  | PASS_API — server effectiveAt lọc tin cũ                                                               |
+| 10  | PASS_API — explicit half-open history interval READ/DOWNLOAD                                           |
+| 11  | PASS_API — revoke/re-add không mở epoch/gap cũ                                                         |
+| 12  | PARTIAL — filename/file/history/genericsearch deny; reply/quote/unread không triển khai                |
+| 13  | PASS_API — guest expiry read/send/upload/download deny                                                 |
+| 14  | PASS_API — renew sau gap/parent lapse tạo epoch mới                                                    |
+| 15  | PASS_API — admin không READ/PUBLISH, không vượt ceiling/role source                                    |
+| 16  | PASS_API — cùng actor prepare/publish deny, kể cả session khác; browser hai actor                      |
+| 17  | PASS_API — source/version drift trước publish409, bản đã phát hành giữ bytes cũ                        |
+| 18  | PASS_API — generic source URL không mở cho guest sau publication                                       |
+| 19  | PASS_API_BROWSER — guest file EXTERNAL_UNCONFIRMED, đúng room                                          |
+| 20  | PASS_API_BROWSER — external khác room/tenant deny, không notification payload chat                     |
+| 21  | PARTIAL — upload replay/finalize + session revoke barrier I; browser lỗi upload chưa riêng             |
+| 22  | PARTIAL — I reauth sau I/O + B clear revoke/cross-tab; delayed stale poll barrier browser chưa đủ      |
+| 23  | PASS_API — forged request fields không cấp quyền                                                       |
+| 24  | PARTIAL — script text B/U escaped, không fetch URL; filename browser chưa riêng                        |
+| 25  | PARTIAL — server lock sequential I, lock/send race barrier riêng NOT_RUN                               |
+| 26  | PASS_API_BROWSER — không cấu hình AI vẫn chat                                                          |
+| 27  | PARTIAL — domain link/sharedfile regression; chưa E2E toàn màn hình/nghĩa vụ cũ                        |
+| 28  | PARTIAL — mobile guest read/send/attach B; error UX/mobile personas chưa đủ                            |
+| 29  | PASS_API — same-context FileAsset, old attachment không reattach để vượt history, generic helpers deny |
+| 30  | PASS_API — audit actor/project/event, generic feed/count chặn ChatRoom; không chứa body                |
+
+### Chốt kiểm chứng cuối
+
+CODE_SHA / TESTED_SHA: `be3aafe4ae84264e66ab12b773ca0c4f2825bf77`; TESTED_TREE: `c72af911b152faf757031109bda1f6cc2e2859f2`. Thời điểm chốt 2026-09-28 khoảng 07:55+07. Chỉ docs dirty sau code commit; không đổi source sau test. Browser cuối chạy cùng source ngay trước commit, được đối chiếu không delta; targeted/build chạy lại sau commit. Không tự gán docs commit là TESTED_SHA.
+
+Cập nhật ca11: browser LOCK/draft cuối PASS; trạng thái tổng của ca vẫn PARTIAL vì race lock/send chưa có barrier riêng. API/Web test health/login HTTP200 sau mở lại launcher; không dùng health để chứng minh acceptance. Kiểm cuối7docs/79link/24+30ca/bootstrap1 và privacy scan đều đạt; không in cookie, token hoặc mật khẩu vào docs.
+
+| Kiểm cuối / cùng lệnh ở trên                                  | Exit / kết quả thực tế                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Full API 07:44, cùng source API cuối                          | **1;1101 pass /13 fail /60files:57pass,3fail**. M2: lock404 kéo theo fixture thiếu, timeout upload/publication; upload baseline cũng có timeout. Build chạy đồng thời là điều kiện môi trường của lần này, chưa chứng minh là nguyên nhân. Không tăng timeout/đổi assertion. Chưa đóng full regression      |
+| M2 riêng 07:47                                                | 0;26/26. Rerun không xóa full failure                                                                                                                                                                                                                                                                       |
+| Browser8 khoảng07:49–07:50, clean owned test-server lifecycle | **0;8/8,1.2phút**. Internal reload/file/viewer/revoke; mobile guest/XSS/upload; management noREAD; cross-tab actorclear; two-actor publication + source-role revoke previewclear; LOCK giữ nháp/confirm; domain-picker và admin roster revoke. Giữ lần preview404 trước: chưa chứng minh lỗi chập chờn đóng |
+| Targeted API sau CODE_SHA,07:52                               | **0;165/165,6files,25.95s**. M2 26, `/me`18, upload19, IAM12, products50,files40                                                                                                                                                                                                                            |
+| Web unit sau CODE_SHA,07:52                                   | **0;507/507,30files,2.60s**                                                                                                                                                                                                                                                                                 |
+| Typecheck cuối                                                | 0;API/Web/Edge đều đạt trên source cuối                                                                                                                                                                                                                                                                     |
+| Lint                                                          | API/Edge0; Web ban đầu báo ref prop name (2errors), đổi đúng tên leaveGuardRef theo convention, không disable rule; rerun0, chỉ warning img ở profile có trước. Pythonruff0 qua venv đã có. Root wrapper cần `.venv` trong worktree nên báo lệnh thành phần, không giả `pnpm lint` root đã pass             |
+| Build sau CODE_SHA,07:53                                      | **0;API/Web/Edge**,Next79pages. Test Web đã dừng đúng launcher rồi mở lại, không tranh .next; main không thay đổi                                                                                                                                                                                           |
+| Format / diff / links                                         | `pnpm format:check`0; `git diff --check`0; Node fs/assert7docs/79 đích relative links có thật, bootstrap1. Đây là kiểm docs, không acceptance app                                                                                                                                                           |
+
+Giữ **M2_A_STATUS: PARTIAL**. Các nhãn PASS_API/PASS_BROWSER là ca cụ thể có bằng chứng, không suy tất cả B2/B4/B5 hoặc full regression đã đạt. Root `pnpm test` wrapper không được gọi thành PASS: API full còn failure; Web507/Edge4/Python1 chạy thành phần. Bản thử và fixture còn giữ để tiếp tục, chưa rollout.
+
+## Lịch sử trước chỉ đạo M2-A — chỉ kiểm tra điều kiện vào
 
 Ngày 2026-09-28, Asia/Bangkok; bắt đầu 04:55:44+07:00. Cwd `/home/galaxy_os`, branch `g00/build-test-isolation-20260914`, START_SHA `0fea6cc53db41c6520fda942c3bf412c35ab3dbb`, START_TREE `a7648137465aa44b711d62e89fb46403ae6ea9cd`. Đầu phiên sạch, index rỗng. Đây là kiểm docs/Git và đọc source chọn lọc; không test sản phẩm M2.
 
