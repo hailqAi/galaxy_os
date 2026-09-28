@@ -27,6 +27,7 @@ import { CommercialService } from '../src/commercial/commercial.service';
 import { QuotationDocumentsService } from '../src/commercial/quotation-documents.service';
 import ExcelJS from 'exceljs';
 import { assertFileCapacity } from '../src/files/file-quota';
+import { customerPublicationSource } from '../src/project-chat/customer-publication-source';
 
 const isolated = assertG00Isolation();
 
@@ -2387,7 +2388,8 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
         .body,
     ).toBe('Đã commit trước khóa');
   });
-  it('prepares customer contract, payment schedule and installation snapshots through real domain writers without business side effects', async () => {
+  const customerSnapshotFixture = async (paymentCurrency = 'VND') => {
+    const run = randomUUID();
     const permissions = [
       'contract.read',
       'receivable.read',
@@ -2439,13 +2441,24 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
         })
       ).id,
     };
-    const project = await db.project.findUniqueOrThrow({
+    const baseProject = await db.project.findUniqueOrThrow({
       where: { id: otherProjectId },
     });
+    const project = await db.project.create({
+      data: {
+        organizationId: orgId,
+        customerId: baseProject.customerId,
+        code: `snapshot-${run}`,
+        name: 'Hồ sơ nguồn khách giả lập',
+        createdBy: actor.userId,
+        updatedBy: actor.userId,
+      },
+    });
+    const snapshotProjectId = project.id;
     const quotation = await db.quotation.create({
       data: {
         organizationId: orgId,
-        projectId: otherProjectId,
+        projectId: snapshotProjectId,
         customerId: project.customerId,
         number: `CONTRACT-${run}`,
         currency: 'VND',
@@ -2463,12 +2476,12 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
         state === 'APPROVED'
           ? { ...actor, userId: users.publisher!.id }
           : actor,
-        otherProjectId,
+        snapshotProjectId,
         quotation.id,
         state,
       );
     const contracts = app.get(ContractsService);
-    const contract = await contracts.create(actor, otherProjectId, {
+    const contract = await contracts.create(actor, snapshotProjectId, {
       quotationId: quotation.id,
       contractNumber: `C-${run}`,
       sellerLegalEntity: 'Galaxy giả lập',
@@ -2476,7 +2489,7 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
     });
     const schedules = await contracts.schedules(
       actor,
-      otherProjectId,
+      snapshotProjectId,
       contract.id,
       {
         items: [
@@ -2489,16 +2502,73 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
         ],
       },
     );
-    const payment = await contracts.payment(actor, otherProjectId, {
+    const payment = await contracts.payment(actor, snapshotProjectId, {
       paymentDate: new Date('2027-01-03T00:00:00.000Z'),
       amount: '120000',
-      currency: 'VND',
+      currency: paymentCurrency,
       paymentMethod: 'BANK_TRANSFER',
       bankReference: `PRIVATE-${run}`,
       notes: `INTERNAL-${run}`,
       idempotencyKey: `m2-payment-${run}`,
       allocations: [{ scheduleId: schedules[0]!.id, amount: '120000' }],
     });
+    await post('authority', `/projects/${snapshotProjectId}/authorities`, {
+      userId: users.manager!.id,
+      actions: ['CREATE', 'ACCESS_ADMIN', 'HISTORY'],
+      roomCeiling: ['READ', 'SEND', 'UPLOAD', 'DOWNLOAD', 'HISTORY'],
+    }).expect(201);
+    await post('authority', `/projects/${snapshotProjectId}/authorities`, {
+      userId: users.publisher!.id,
+      actions: ['PUBLISH'],
+      roomCeiling: [],
+    }).expect(201);
+    await db.organizationMembership.updateMany({
+      where: { organizationId: orgId, userId: users.guest!.id },
+      data: { kind: 'EXTERNAL' },
+    });
+    await post('authority', `/projects/${snapshotProjectId}/participants`, {
+      userId: users.guest!.id,
+    }).expect(201);
+    const room = (
+      await post('manager', `/projects/${snapshotProjectId}/rooms`, {
+        title: 'Nguồn hợp đồng và kế hoạch',
+        group: 'COMMERCIAL',
+        audience: 'CUSTOMER',
+      }).expect(201)
+    ).body;
+    for (const name of ['sender', 'publisher', 'guest'])
+      await post('manager', `/rooms/${room.id}/grants`, {
+        userId: users[name]!.id,
+        actions: ['READ', 'UPLOAD', 'DOWNLOAD'],
+        ...(name === 'guest'
+          ? { expiresAt: new Date(Date.now() + 86400000).toISOString() }
+          : {}),
+      }).expect(201);
+    return {
+      actor,
+      contracts,
+      contract,
+      schedules,
+      payment,
+      room,
+      role,
+      permissions,
+      run,
+      otherProjectId: snapshotProjectId,
+    };
+  };
+  it('prepares customer contract, payment schedule and installation snapshots through real domain writers without business side effects', async () => {
+    const {
+      actor,
+      contracts,
+      contract,
+      schedules,
+      payment,
+      room,
+      role,
+      run,
+      otherProjectId,
+    } = await customerSnapshotFixture();
     const installation = app.get(InstallationService);
     const plan = await installation.createPlan(actor, {
       projectId: otherProjectId,
@@ -2515,38 +2585,6 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       approvedDrawing: false,
       checklist: [{ title: 'Kiểm tra', required: true }],
     });
-    await post('authority', `/projects/${otherProjectId}/authorities`, {
-      userId: users.manager!.id,
-      actions: ['CREATE', 'ACCESS_ADMIN', 'HISTORY'],
-      roomCeiling: ['READ', 'SEND', 'UPLOAD', 'DOWNLOAD', 'HISTORY'],
-    }).expect(201);
-    await post('authority', `/projects/${otherProjectId}/authorities`, {
-      userId: users.publisher!.id,
-      actions: ['PUBLISH'],
-      roomCeiling: [],
-    }).expect(201);
-    await db.organizationMembership.updateMany({
-      where: { organizationId: orgId, userId: users.guest!.id },
-      data: { kind: 'EXTERNAL' },
-    });
-    await post('authority', `/projects/${otherProjectId}/participants`, {
-      userId: users.guest!.id,
-    }).expect(201);
-    const room = (
-      await post('manager', `/projects/${otherProjectId}/rooms`, {
-        title: 'Nguồn hợp đồng và kế hoạch',
-        group: 'COMMERCIAL',
-        audience: 'CUSTOMER',
-      }).expect(201)
-    ).body;
-    for (const name of ['sender', 'publisher', 'guest'])
-      await post('manager', `/rooms/${room.id}/grants`, {
-        userId: users[name]!.id,
-        actions: ['READ', 'UPLOAD', 'DOWNLOAD'],
-        ...(name === 'guest'
-          ? { expiresAt: new Date(Date.now() + 86400000).toISOString() }
-          : {}),
-      }).expect(201);
     const sourceRows = (
       await get('sender', `/rooms/${room.id}/release-sources`).expect(200)
     ).body;
@@ -2803,5 +2841,171 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
         })
       ).status,
     ).toBe('DRAFT');
+  });
+  it('rejects inconsistent customer payment sources and stale publication while retaining published bytes', async () => {
+    const {
+      actor,
+      contract,
+      schedules,
+      payment,
+      room,
+      role,
+      permissions,
+      otherProjectId,
+    } = await customerSnapshotFixture('USD');
+    const sourceAssignment = await db.userRole.findFirstOrThrow({
+      where: { userId: actor.userId, roleId: role.id },
+    });
+    const sourceActor: CurrentActor = {
+      ...actor,
+      permissionSources: permissions.map((permission) => ({
+        permission,
+        assignmentId: sourceAssignment.id,
+        administrationTier: role.administrationTier,
+        roleId: role.id,
+        roleName: role.name,
+        scopeType: 'ORGANIZATION',
+        departmentId: null,
+      })),
+    };
+    const expectPaymentUnavailable = () =>
+      expect(
+        customerPublicationSource(db, sourceActor, otherProjectId, {
+          sourceType: 'CUSTOMER_PAYMENT_RECORD',
+          sourceId: payment.id,
+        }),
+      ).rejects.toThrow(ConflictException);
+    // The existing payment writer accepts mismatched currencies; publication must not.
+    await expectPaymentUnavailable();
+    expect(
+      (await get('sender', `/rooms/${room.id}/release-sources`).expect(200))
+        .body,
+    ).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceType: 'CUSTOMER_PAYMENT_RECORD',
+          sourceId: payment.id,
+        }),
+      ]),
+    );
+    // Restore a consistent fixture for the successful publication checks below.
+    await db.customerPayment.update({
+      where: { id: payment.id },
+      data: { currency: 'VND' },
+    });
+    const source = await customerPublicationSource(
+      db,
+      sourceActor,
+      otherProjectId,
+      {
+        sourceType: 'CUSTOMER_PAYMENT_RECORD',
+        sourceId: payment.id,
+      },
+    );
+    const input = {
+      sourceType: 'CUSTOMER_PAYMENT_RECORD',
+      sourceId: payment.id,
+      sourceFingerprint: source.fingerprint,
+      clientKey: randomUUID(),
+    };
+    const published = (
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+    ).body;
+    const bytes = (
+      await getBinary('publisher', `/releases/${published.id}/preview`).expect(
+        200,
+      )
+    ).body as Buffer;
+    const review = (
+      await get('publisher', `/releases/${published.id}/review`).expect(200)
+    ).body;
+    await post('publisher', `/releases/${published.id}/publish`, {
+      confirmed: true,
+      recipientHash: review.recipientHash,
+    }).expect(201);
+    const publishedPayment = { id: published.id, input, bytes };
+    const pendingPayment = (
+      await post('sender', `/rooms/${room.id}/releases`, {
+        ...publishedPayment.input,
+        clientKey: randomUUID(),
+      }).expect(201)
+    ).body;
+    await getBinary(
+      'publisher',
+      `/releases/${pendingPayment.id}/preview`,
+    ).expect(200);
+    const paymentReview = (
+      await get('publisher', `/releases/${pendingPayment.id}/review`).expect(
+        200,
+      )
+    ).body;
+    await db.customerPaymentSchedule.update({
+      where: { id: schedules[0]!.id },
+      data: { currency: 'USD' },
+    });
+    await expectPaymentUnavailable();
+    await get('publisher', `/releases/${pendingPayment.id}/preview`).expect(
+      409,
+    );
+    await post('publisher', `/releases/${pendingPayment.id}/publish`, {
+      confirmed: true,
+      recipientHash: paymentReview.recipientHash,
+    }).expect(409);
+    await db.customerPaymentSchedule.update({
+      where: { id: schedules[0]!.id },
+      data: { currency: 'VND' },
+    });
+    const wrongCustomer = await db.customer.create({
+      data: {
+        organizationId: orgId,
+        type: 'INDIVIDUAL',
+        displayName: 'Khách khác giả lập',
+        createdBy: actor.userId,
+        updatedBy: actor.userId,
+      },
+    });
+    // Corrupt only this run's fixture to exercise source-integrity rejection.
+    for (const data of [
+      { currency: 'USD' },
+      { customerId: wrongCustomer.id },
+      { status: 'CANCELLED' },
+    ]) {
+      await db.contract.update({ where: { id: contract.id }, data });
+      await expectPaymentUnavailable();
+      await db.contract.update({
+        where: { id: contract.id },
+        data: {
+          currency: 'VND',
+          customerId: contract.customerId,
+          status: 'DRAFT',
+        },
+      });
+    }
+    const allocations = await db.paymentAllocation.findMany({
+      where: { paymentId: payment.id },
+    });
+    await db.paymentAllocation.deleteMany({ where: { paymentId: payment.id } });
+    await expectPaymentUnavailable();
+    await db.paymentAllocation.createMany({ data: allocations });
+    await db.customerPaymentSchedule.update({
+      where: { id: schedules[0]!.id },
+      data: { milestoneName: 'Mốc đã thay đổi' },
+    });
+    await post('publisher', `/releases/${pendingPayment.id}/publish`, {
+      confirmed: true,
+      recipientHash: paymentReview.recipientHash,
+    }).expect(409);
+    expect(
+      (
+        await getBinary(
+          'guest',
+          `/releases/${publishedPayment.id}/download`,
+        ).expect(200)
+      ).body,
+    ).toEqual(publishedPayment.bytes);
+    await db.customerPaymentSchedule.update({
+      where: { id: schedules[0]!.id },
+      data: { milestoneName: schedules[0]!.milestoneName },
+    });
   });
 });

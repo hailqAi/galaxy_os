@@ -170,6 +170,8 @@ export async function customerPublicationSource(
       !payment.allocations.length ||
       payment.allocations.some(
         ({ schedule }) =>
+          schedule.currency !== payment.currency ||
+          schedule.contract.currency !== payment.currency ||
           schedule.organizationId !== actor.organizationId ||
           schedule.projectId !== projectId ||
           schedule.contract.organizationId !== actor.organizationId ||
@@ -178,7 +180,9 @@ export async function customerPublicationSource(
           ['CANCELLED', 'TERMINATED'].includes(schedule.contract.status),
       )
     )
-      throw new ConflictException('Khoản thu không thuộc khách của hồ sơ');
+      throw new ConflictException(
+        'Khoản thu không khớp khách hoặc tiền tệ của hồ sơ',
+      );
     customerPaymentId = payment.id;
     updatedAt = payment.createdAt;
     title = `Thông tin khoản thu đã ghi nhận · ${payment.paymentDate.toISOString().slice(0, 10)}`;
