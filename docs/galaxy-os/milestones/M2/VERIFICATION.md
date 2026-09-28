@@ -1,5 +1,151 @@
 # M2 — Bằng chứng triển khai và kiểm chứng
 
+## Tiếp tục sau Luna — 2026-09-28 (hiện hành)
+
+START_SHA `c7b74d190aca3340ba85027db523f10a10d656fc`; worktree/branch giữ nguyên. Bảo toàn code Luna, không chạy lại M0/M1. Log dự án khác đã được chủ dự án đính chính không dùng trong chẩn đoán này. Các mục phía dưới là lịch sử theo SHA riêng.
+
+### Kết quả cuối trên cây nguồn a13c2ec (ưu tiên hơn checkpoint trung gian bên dưới)
+
+CODE_SHA=TESTED_SHA `a13c2ec151688de2f59c832026a37fb568b6b9e7`; TESTED_TREE `1af600b273518ddb91c15ea324259610123f2f07`. “TESTED” ở đây chỉ các check có log sau đây, **không** có nghĩa M2 VERIFIED/full suite đã xanh. Web522 chạy trên nội dung source/test đúng commit này trước commit; lint/typecheck/build và Chrome sau commit. API production không đổi từ727697a;86unit/schema/migration dùng đúng source đó, không bị fixture-only commit sau đổi hành vi. Source commits và docs commit tách; không tự hash/amend docs.
+
+| Check/lệnh                                                        | Kết quả thật                                                                                                        | Log hoặc artifact                                                                                                 |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `pnpm --filter @galaxy/web test`                                  | 31files,522/522PASS; thêm2route tests từ520, discovery không giảm                                                   | `/tmp/m2-final-web-unit.log`                                                                                      |
+| API unit files/access-control/after-sales/production/installation | 5files,86/86PASS; không phải fullAPI                                                                                | `/tmp/m2-final-api-unit.log`                                                                                      |
+| `pnpm lint` (root, bao gồm Ruff venv riêng)                       | exit0, PASS                                                                                                         | `/tmp/m2-closeout-root-lint.log`                                                                                  |
+| `pnpm typecheck` (root)                                           | exit0, PASS                                                                                                         | `/tmp/m2-closeout-root-typecheck.log`                                                                             |
+| API build + Web build với recipe test                             | exit0; API727697a và Weba13c2ec                                                                                     | `/tmp/m2-c5-api-build.log`, `/tmp/m2-route-web-build.log`                                                         |
+| Prisma validate / migrate status trên DB riêng                    | schema hợp lệ;82migrations up to date                                                                               | `/tmp/m2-final-schema.log`, `/tmp/m2-final-migration-status.log`                                                  |
+| Python health trong `.venv` riêng                                 | 1PASS bằng executor được phép; lượt restricted trước bị treo, giữ log, chưa kết luận tác nhân                       | `/tmp/m2-final-python-test-authorized.log`, `m2-final-python-test.log`                                            |
+| `pnpm format:check`                                               | hai lượt fail do4JSON rồi1JSON evidence ignored chưa format; sửa định dạng của chính evidence, lượt cuối exit0/PASS | `/tmp/m2-closeout-format-before-docs.log`, `m2-closeout-format-main-evidence.log`, `m2-closeout-format-final.log` |
+| Browser native config `--list`                                    | 21case được tìm thấy; chưa chạy executable/suite; không phải21PASS                                                  | `/tmp/m2-c4c5-ui-postreview-chrome-list.log`                                                                      |
+| FullAPI run1/run2/repeat10/fullbrowser                            | BLOCKED_CLOCK; không dùng targeted cộng lại hoặc retry để thay                                                      | `post-luna-clock-final.json`                                                                                      |
+
+C7 routing RED2FAIL→GREEN10PASS (`/tmp/m2-installation-route-{red,green}.log`): proxy fallback `'/'→dashboard.read` chặn `/installations` dù actor có installation.read. Chỉ thêm mapping route phù hợp API/link Project, giữ sidebar/root; fixture project.read SELF cho sender owner/publisher member. Độc lập correctness/security/Ponytail review không finding cuối. Trên Chrome Web mới, WorkOrder mở được; quantity0 gửi422, nội dung có thể sửa;1.125 gửi201/id7413cdc6-f7bd-4124-98dc-73a315afd19f. Hành động không tạo stock movement hoặc đánh hoàn thành/nghiệm thu.
+
+API runtime PID157899,191compiledJS digest `81dce0dc961a5993be7b1f40e0be884872802b0524e0c1387e1b14498241b748`; Web PID170240/Next16.2.10 BUILD_ID `yx5SwbWAHvHa2vBwgFpx-`, origin đúng `https://localhost:33003` qua TLS121437. GET/login200 với CA test, không -k/tắtTLS. main Web3000 giữ7faeb58/Git sạch, không restart/copy code. Host/PID/cwd kiểm lại cuối, không chỉ tin source trên đĩa.
+
+#### Chrome UI nguồn thật C2/C4/C5
+
+Run `galaxy-m2-current-353d33b2-995b-41c0-8937-9c5c85512839`, Google Chrome Stable154.0.8037.57 Windows **headed**, MCP chính thức1.10.1/stdio Windows, loopback33004. Context sender/publisher/guest riêng, Project giả lập0ab03834-ebac-4f25-a2c7-814a2d6e9953, room96bfb715-1905-41d7-9894-bc920ec052fc. C4 nguồn được tạo bằng UI thật; C2/C5 nguồn từ HTTP domain writers của fixture, không seed publication DB. Từng nguồn chọn trên UI→chuẩn bị→publisher khác actor kiểm preview/text/recipient và xác nhận→guest đọc link/tải.
+
+| Nguồn/mục đích                                                                                   | Release/version                         | Authorized preview / guest download | SHA256 gốc=preview=guest                                           |
+| ------------------------------------------------------------------------------------------------ | --------------------------------------- | ----------------------------------- | ------------------------------------------------------------------ |
+| SITE_DELIVERY, nhân viên ghi nhận giao, không ký nghiệm thu                                      | 3cdbe056-79a3-4137-bcab-f6e9b9f722c0/v1 | 200/200,88bytes                     | `7d1f861f059c3312ac230205b7a4c5799ab18c47083a2f0b8c0f01e5defd174c` |
+| CONTRACT_FILE/RECORDED_SIGNED_COPY, trạng thái do actor có quyền ghi nhận, không xác minh chữ ký | fd2c72a5-d4f1-4817-aa30-564c95999ba6/v1 | 200/200,112bytes                    | `f71c20c28915eb911f364acf21b8cfe48006108314a2b0a1028ccae179f2c101` |
+| CUSTOMER_PAYMENT_FILE, chứng từ nhân viên cung cấp, chưa đối soát ngân hàng                      | cba25d50-3225-449c-9df5-ff2efdc6ce4f/v1 | 200/200,94bytes                     | `5f97d98ff2b9e92846acda98ff387375ff3d49175a86dcbbd10af55798dca26c` |
+
+Evidence `.superpowers/sdd/PLAN/post-luna-b5-visible-final.json`, ảnh `post-luna-site-delivery.png`, `post-luna-payment-review-narrow.png`, `post-luna-three-files-guest-narrow.png`. Preview fetch(blob:) trong probe bị CSP connect-src self chặn; đây là thao tác diagnostic, không đổi CSP hoặc coi là lỗi source. Đối chiếu bytes qua authorized preview endpoint; UI hiển thị text đúng. Thử fault-injection SiteDelivery có lệnh diagnostic malformed trước injection, nên **NOT_RUN lost-response retry case**, dù POST sửa số lượng thành công; không đổi tên thành PASS.
+
+Viewport390×844×1 do MCP xác nhận `isMobile=false,hasTouch=false`. Publisher preview/confirm thao tác được; guest clientWidth=scrollWidth375,innerWidth390, có composer và tải cả3file đúng. Đây là narrow viewport, không bằng chứng thiết bị/bàn phím/touch thật. Những lỗi schema tooling khi cấu hình viewport trước đó không chạy thành emulation; chỉ kết quả cấu hình cuối được dùng.
+
+Sau demo đóng hai context fixture sender/publisher, giữ user3000; tab guest test còn mở và được đưa lên trước theo URL/context đúng. PageId đổi khi MCP reconnect, không dùng ID cũ để điều khiển. Main cuối `/api/v1/me`401, URL/projects/DOM còn cached; `post-luna-main-final-read.json` giữ kết quả. Đã nhắc user đăng nhập qua UI một lần, không lấy credential hoặc thay cookie. `CHROME_SESSION=EXISTING_ATTACHED`, `SIGNED_IN_STATE=SESSION_REVALIDATION_401` ở main, không OBSERVED hợp lệ cuối lượt.
+
+#### Clock/gate/matrix cuối
+
+`post-luna-clock-final.json`: API native157899,600samples,monotonic59977.4708ms;4jumps khoảng-182844,+183458,-182301,+183461ms. Chẩn đoán clock ngoài test mock vẫn nhiễm; nguồn tác nhân host chưa xác định. Bản vá Vitest chỉ sửa elapsed timeout, không chữa realtime/history/expiry. Không lặp sudo khi user chưa thể xác thực; không đổi giờ/nới policy. Các API/browser positive trên host chỉ diagnostic, không phải clock-clean acceptance.
+
+Overlay giữ IDs24+30 và tất cả kết quả lịch sử36PASS theo lớp/17PARTIAL/1DEFERRED, không tăng tổng nghiệm thu toàn phần:
+
+| ID24 / ID30  | Evidence mới                                                                              | Kết luận                                                                                  |
+| ------------ | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 14–17 /16–18 | C2/C4/C5 UI→preview→publish→guest exact bytes ở trên; C1 lost-response riêng có RED/GREEN | PARTIAL toàn nhóm, chưa mọi publication/race/recipient/version tổ hợp                     |
+| 16 /21       | C4 form422 sửa lại201; C1 retry thật; C4 lost-response chưa thực hiện                     | PARTIAL, không thay ca uploader init/finalize/quota/revoke                                |
+| 23 /30       | Narrow390×844 preview/confirm/tải file                                                    | PARTIAL, không physical/touch/full mobile                                                 |
+| 12–13 /22    | Bằng chứng C1 documentBack thật no-store reload ở checkpoint dưới                         | NOT_ELIGIBLE_CONFIRMED trên cấu hình đó; các revoke/reconnect/polling biến thể vẫnPARTIAL |
+| 22 /29       | Lead-only/lifecycle không thuộc slice                                                     | DEFERRED_BY_EXPLICIT_SLICE_SCOPE                                                          |
+
+C3 `publishes handover documents with trusted bytes and explicit source signing state` (`apps/api/test/m2-project-chat.integration.test.ts`) setup room404 trước assertions; C4 `rechecks site delivery file after evidence storage I/O` UPLOAD404 trước barrier, correlation chứng minh auth trước validFrom; giữ đúng chưa verified. Browser cross-tab/reconnect/login các lỗi cũ chưa được fullsuite sạch xác nhận đóng; fixture membership404 và login lifecycle đã sửa theo nguyên nhân riêng, không quy mọi lỗi về clock. M2 PARTIAL; M3 BLOCKED/NOT_STARTED. Không có AI/provider live/index/UI M3 được viết hoặc gọi.
+
+Review cuối độc lập chỉ đọc (Astra/high được yêu cầu; actual metadata UNVERIFIED): source/security/Ponytail không finding mới, đồng ý giữ gate; không dùng review thay test. Người dùng chưa được yêu cầu duyệt lại B1–B5. Các checkpoint bên dưới ghi kết quả tại từng thời điểm; số515/UI pending/build cũ không thay kết quả cuối này.
+
+### Chrome và định danh bản đang xem
+
+`VISIBLE_CHROME_INTERACTIVE`: Google Chrome Stable154.0.8037.57 Windows, headed, profile Galaxy Dev bình thường. MCP chính thức1.10.1 thực sự được gọi qua Windows stdio, debugger chỉ127.0.0.1:33004; cổng3000 là ứng dụng, không phải debugger. Đã attach tab người dùng `http://localhost:3000/projects`, quan sát phiên hợp lệ và `/api/v1/me`200, điều hướng đọc-only và ảnh vùng navigation không chứa thông tin tài khoản. Không logout/copycookie/chuyển persona ở tab người dùng.
+
+Web3000 là dev process từ `/home/galaxy_os`, HEAD `7faeb58eea534dbb6c11238906ede6df84ce0302`, không có UI `/work` của worktree M2. API3001 là main dist, chưa chứng minh exact source/build. Lượt này không đổi/restart main. Bản mới ở test33003 có DB/storage/cookie riêng. Regression nhiều persona dùng context riêng, không dùng các tab chia cookie làm nhiều actor.
+
+Kiểm tra lại sau khi đóng đúng ba context fixture C1: vẫn attach và đưa tab3000/projects lên trước, title Galaxy OS/heading TỔNG QUAN DỰ ÁN, nhưng `/me` lúc này401. Giữ bằng chứng200 đầu lượt và401 mới, không tự kết luận cookie bị fixture ghi đè hay clock gây ra. Không logout/tabclose/usercredential thao tác; đã nhắc người dùng đăng nhập bằng UI khi thuận tiện. Phiên tương tác hiện `EXISTING_ATTACHED / SESSION_REVALIDATION_401`, không tiếp tục gọi đang đăng nhập hợp lệ.
+
+### Routing lập trình native
+
+Codex0.157.1, metadata `codex debug models --bundled` có gpt-6-astra/sol/luna và effort medium/high. Config project đã cập nhật Luna medium, Sol medium, Astra high; config/read native strict đạt, không đổi default của dự án khác hoặc model ứng dụng Galaxy.
+
+| Task                                   | Alias/model yêu cầu | Effort | Kết quả thực thi                                                       |
+| -------------------------------------- | ------------------- | ------ | ---------------------------------------------------------------------- |
+| Inventory có giới hạn                  | Luna / gpt-6-luna   | medium | Đã trả inventory nguồn/UI/12 giai đoạn                                 |
+| UI contract/payment, retry và test     | Sol / gpt-6-sol     | medium | Đã trả patch, unit/static, browser case; source commit b26c494/4c5c38d |
+| Currency, provenance, quyền/race và C4 | Astra / gpt-6-astra | high   | Đã sửa/review backend, C4 tiếp tục theo PLAN                           |
+| Review độc lập                         | Astra / gpt-6-astra | high   | Các findings source alias, retry và assertion supersession được sửa    |
+
+Native dispatch chấp nhận model/effort và task đã chạy. Công cụ không trả metadata model thực thi/usage: `VERIFIED_MODEL=UNVERIFIED`, không lấy tên agent/tự giới thiệu làm chứng cứ. `CONFIGURED=YES; AVAILABLE=YES; EXECUTED=YES`; không giả thread chính đã tự đổi model.
+
+### Clock và timeout
+
+Native observer/API vẫn ghi bước ±~183giây so với delta monotonic. Evidence `.superpowers/sdd/PLAN/post-luna-clock-tail.json`, `post-luna-clock-web-run.json`; API133447 có16jumps trong2400samples (~240giây). Tác nhân thay realtime WSL chưa xác định. Giữ quyền OS hiện tại; không lặp sudo hoặc nới expiry/JWT. API/E2E dùng giờ thật trên host này chỉ là diagnostic, không đủ acceptance.
+
+Một nguyên nhân riêng được chứng minh trong `@vitest/runner@3.2.6`: timeout elapsed dùng Date.now, duration dùng performance.now. Patch pnpm pin đúng phiên bản thay một dòng elapsed bằng captured performance.now; không đổi timestamp/app/auth/DB. Astra đã rà consumers, không có đường trừ khác epoch. Subprocess probe độc lập không import app/DB: forward183giây/test ngắn, backward183giây/overrun sync80ms và async80ms với timeout40ms. RED1PASS/2FAIL; GREEN3PASS, cả direct và node --test. Frozen offline install đạt. Commit `a93fb8881fff6ff211475941f7180c66dccf9137`; logs `/tmp/m2-vitest-clock-{red-authorized,green-final,node-test-final}.log`, `/tmp/m2-vitest-patch-frozen.log`. Các thử restricted EPERM được giữ riêng, không tính RED hành vi.
+
+Full Web trước patch510PASS/2FAIL: `compatibility.test.tsx › posts only real initialize and nonblank decision commands` và `project-stage-one.test.tsx › bridges a legacy Required Document anchor to the uploaded logical row`, timeout5000ms trong run duration2.42s. Sau patch512/512; sau C2/C3 UI515/515,30files,exit0 ở `/tmp/m2-c2c3-web-final.log`. Không suy tất cả401/404 do timeout hoặc tuyên bố host đã ổn.
+
+### Code và kiểm chứng mục tiêu
+
+| Phần                            | Thay đổi/code                                                                                                                                         | Bằng chứng và giới hạn                                                                                                                                                                                                                                 |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Khoản thu sai currency          | e8d4355: adapter từ chối payment không khớp nghĩa vụ/contract                                                                                         | TDD riêng; không sửa quy tắc ghi tiền                                                                                                                                                                                                                  |
+| Hợp đồng/phụ lục file thật      | 19220f7 +9344d19: CONTRACT_FILE, purpose CUSTOMER_REVIEW_FILE, typed ContractDocument/version/checksum, fresh quyền/two actors; chặn26 source aliases | API diagnostic19PASS, alias7PASS; `/tmp/m2-c1-final-targeted.log`, `m2-c1-alias-{red,green}.log`; không cộng hai run thành full                                                                                                                        |
+| Contract UI/retry               | b26c494: nguồn/file selector, auto refresh, key RAM giữ sau response mất                                                                              | Unit7PASS; Chrome RED hai keys/hai pending → GREEN cùng key/1pending; bytes xem bên dưới                                                                                                                                                               |
+| Chứng từ khoản thu              | be9cfaf: CUSTOMER_PAYMENT_FILE từ CustomerPayment thật; receivable.payment.record khi chuẩn bị, publisher riêng; không ghi payment/allocation         | 15ca mới; nhóm cuối35PASS/2FAIL/30lọc,67discovered tại `/tmp/m2-c2-final-targeted.log`. Contract scalar-writer case SETUP_FAILED candidate404; payment scalar-writer case timeout5000ms/duration1034ms trước runner patch. Chưa chạy lại để nghiệm thu |
+| Payment UI và mục đích handover | 4c5c38d: file chọn đúng nguồn, retry identity, nhãn nguồn; Web515PASS                                                                                 | Browser contract/payment mỗi ca có fixture/context riêng, chưa chạy full automation                                                                                                                                                                    |
+| Handover minutes/as-built       | C3 thêm real add/sign document writers, exact bytes và no-side-effects assertions, giữ warranty supersession                                          | `/tmp/m2-c3-handover-targeted.log`: POST tạo room404 trước assertions mới, SETUP_FAILED. Handover cha là fixture DB; không claim full workflow giao/lắp                                                                                                |
+
+### C4 — SiteDelivery evidence (acc9cfb)
+
+Nguồn ghi nhận qua HTTP installation + dòng stock issue ISSUED và file Project thật, không tạo stock movement/installation completion/acceptance. Migration additive đã review trước deploy, chỉ DB riêng:82 migrations. Source SITE_DELIVERY pin typed FK/version/checksum/khách; publisher khác preparer. WorkOrder sibling read kiểm lại nguồn/file/khách thay vì trả metadata mù. Finding đổi Project customer đã tái hiện RED và sửa GREEN; không nới quyền.
+
+12 ca mới (79discovered=67+12), 11 ca chạy thành công theo diagnostic hữu hạn; **không phải một lượt full PASS**. `/tmp/m2-c4-targeted.log`:7PASS/4FAIL; ba nguyên nhân sửa/kiểm lại3PASS trong `m2-c4-corrections.log` (DTO metatype validation; đúng conflict409 đối với source ownership cùng Project; fixture thiếu Project membership). Regression mới `m2-c4-sibling-red.log`1FAIL→`m2-c4-sibling-green.log`2PASS. Ca còn lại `rechecks site delivery file after evidence storage I/O` chưa tới barrier: UPLOAD404, correlation5790b571-ccd7-47c5-b174-d212fa2dbf27, auth11:50:54.160Z < grant11:53:56.482Z, hasFutureGrant=true; chỉ lỗi này có căn cứ clock cụ thể. Không retry săn xanh.
+
+`m2-c4-shared-regression.log`:4/4 C1/C2 scoped authority/scalar source ordering PASS sau patch runner. Hai lỗi C2 trước patch giữ nguyên log, đã có đối chứng mới nhưng chưa repeat10/clock-clean acceptance. Installation unit4/4; API typecheck/scoped ESLint/format/diffcheck exit0 (`m2-c4-installation-unit.log`, `m2-c4-typecheck-final2.log`, `m2-c4-eslint-final.log`, `m2-c4-format-check.log`). Independent Astra-requested/high static review: không còn concrete P1/P2 trong bounded diff; reviewer không chạy test. Tại checkpoint C4 này UI/runtime còn chờ; kết quả UI691e391 + routea13c2ec và runtime/Chrome cuối ghi ở overlay đầu file.
+
+### C5 và fixture thực trên API mới
+
+Backend `727697a`: CONTRACT_FILE có purpose RECORDED_SIGNED_COPY hữu hạn; Contract/Appendix trạng thái/ngày ký thật, quyền Appendix riêng, fingerprint/purpose/nguồn persist, publisher độc lập. Default CUSTOMER_REVIEW_FILE giữ hash/snapshot compatibility. Không xác minh chữ ký bằng mật mã, không tạo Approval hoặc side effect ký/tiền. RED1 (query purpose400) `/tmp/m2-c5-red.log`; GREEN3 `/tmp/m2-c5-targeted.log`; nhóm sau5PASS (`m2-c5-regression.log`:2ca C5 post-I/O source/revoke +3ca contract/appendix/delivery cũ). Tổng5ca C5 mới được diagnostic, discovery84=79+5. Typecheck/scopedlint/format/diffcheck đạt; independent static review không concrete P1/P2, không dùng review thay test.
+
+API build/health đạt, PID157899 từ727697a, digest191compiledJS `81dce0dc961a5993be7b1f40e0be884872802b0524e0c1387e1b14498241b748`, log `/tmp/m2-c5-api-build.log`; main.js riêng không đổi không đủ nhận diện toàn bundle. Manifest `post-luna-api-build.json` ghi code/tree/digest.
+
+Fixture mới RED: approve `/inventory/adjustments/515ec7a0-b91a-4201-b591-bde2e394c285/approve`404. Đọc DB xác nhận DRAFT tồn tại, publisher có inventory.adjustment.approve ORG nhưng không owner/manager/member. Domain assertView(Project) không truyền permission nên selfProjectAccess chặn. Fix fixture thêm đúng ProjectMember, không sửa policy/role. GREEN fixture HTTP thật đạt `/tmp/m2-current-browser-fixture-green.log`, project0ab03834-ebac-4f25-a2c7-814a2d6e9953; chứng cứ đọc-only `post-luna-fixture-404.json`. Đã qua nguồn kho create/approve/post bởi hai actor, contract transition SIGNED, payment writer và upload; không seed SiteDelivery để thay UI.
+
+Browser mới dùng một fixture publication riêng cho bốn case append-only, từng actor vẫn context riêng. Hai factory6login và3login UI =15 cho một worker lifecycle bình thường; không tăng limiter30/IP hoặc chèn sleep. Worker restart/rerun có thể cộng login, không cam kết vô hạn. Native suite chưa chạy; cấu hình/ca test không tự là PASS.
+
+### Chrome thật trên fixture M2 riêng
+
+Ba context sender/publisher/guest độc lập trên Chrome154 hiển thị, không dùng phiên người dùng3000. C1 prepare thật201 nhưng response mất; một GET nguồn lỗi; retry cùng key `89afae79-c491-406c-8fe2-383a1e5bb586` trả cùng bản, số pending chỉ tăng1. Trước sửa hai key đã tạo2pending; giữ evidence RED. Publisher khác actor xem nội dung, xác nhận và phát hành. Guest tải release `cdc3532a-8ea1-41e2-b450-7fc4c7ca56c5`:200/72bytes, SHA256 `6c9750f4150f3ac8bd536f7efd59d060f9d3a79ecda6d13bd244855278a78e99`, trùng binary gốc và authorized publisher preview. Probe fetch blob URL bị CSP chặn đúng; không đổi CSP, dùng preview endpoint được cấp quyền để đối chiếu.
+
+Mobile emulation390×844×1,touch: scrollWidth=clientWidth390, có composer, guest tải cùng binary. Không gọi đây là thiết bị/bàn phím vật lý hoặc fullmobile acceptance. Ảnh/log ignored: `.superpowers/sdd/PLAN/post-luna-{main-nav,contract-publisher,contract-guest,contract-mobile}.png`, `post-luna-ui-{red,green}.json`.
+
+Navigation thực: rời document fixture sang `/work`, Back thật; navigation type back_forward, marker cũ không còn; Chrome154 trả reasons `masked`, `response-cache-control-no-store`, `response-cache-control-no-store-with-js-network-request`. GET/me200 và rooms200 được thực hiện lại, không khôi phục selected room/nháp cũ. `BFCACHE_STATUS=NOT_ELIGIBLE_CONFIRMED` cho đường/browser/config này, không “BFCache PASS”; không bỏ no-store. Đường restore thật, revoke/offline và mọi biến thể polling vẫn cần acceptance phù hợp.
+
+### Inventory bốn nhóm và12 giai đoạn (không audit lại domain)
+
+UI/API tồn tại không đồng nghĩa toàn nghiệp vụ đã nghiệm thu. Source nền giữ từ baseline; chat/publication mới chỉ ở test33003. ProjectStage enum STAGE_ONE–FIVE không tự chứng minh toàn chuỗi12stage.
+
+| Giai đoạn / nhóm                 | Source/UI nền thấy trong repository                      | Hiện trạng phạm vi lượt này                                               |
+| -------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------- |
+| 01 Tiềm năng/cơ hội              | crm/leads, Lead/Opportunity                              | Có nền; Lead-only chat/lifecycle deferred                                 |
+| 02 Khảo sát / Tư vấn             | projects stage-1, survey/required documents              | Có nền; không nghiệm thu lại survey                                       |
+| 03 Thiết kế / Tư vấn             | projects stage-2/3, required-document/technical revision | Có nền và publication; coverage cuối còn thiếu                            |
+| 04 Sản phẩm/vật liệu / Tư vấn    | projects/products, ProjectProductLine, SAMPLE            | Có nền, linked item/chat; không engine mới                                |
+| 05 Dự toán/báo giá / Tư vấn      | commercial, estimates/quotations, QUOTATION              | Có nền và customer export; E2E mọi biến thể chưa đủ                       |
+| 06 Hợp đồng/phụ lục / Thương mại | contracts + ContractDocument, CONTRACT_FILE              | Có bản thông tin, file xem xét/bản lưu hồ sơ đã ký; không xác minh chữ ký |
+| 07 Thu tiền/công nợ / Thương mại | contracts payment schedule/CustomerPayment               | Có projection và file nhân viên cung cấp; không tự đối soát               |
+| 08 Đặt hàng / Cung ứng           | procurement/rfqs/purchase orders                         | Có nền; không sửa giá/PO/quyền duyệt                                      |
+| 09 Sản xuất/logistics / Cung ứng | production, logistics/shipments/customs                  | Có nền; không audit lại toàn domain                                       |
+| 10 Kho/giao / Cung ứng           | inventory/issues, SiteDelivery                           | Có writer/pin và UI C4 đã demo; race/full gate còn thiếu                  |
+| 11 Thi công/lắp / Hậu mãi        | installation plan/work-order/items                       | Có kế hoạch/source; publication không đánh hoàn thành                     |
+| 12 Bàn giao/bảo hành / Hậu mãi   | after-sales/HandoverDocument                             | Có source/doc writer; C3 setup lỗi, chưa nghiệm thu đầy đủ                |
+
+M2_A PARTIAL; M2 tổng thể PARTIAL_LEAD_LIFECYCLE_DEFERRED; M3 gate BLOCKED, M3 NOT_STARTED. Hai fullAPI/repeat10/fullbrowser sạch CLOCK chưa có; không dùng unit/mock/reviewer thay thế. Ma trận24+30 giữ ID/lịch sử, các evidence mới bổ sung theo lớp chứ chưa tăng số ca nghiệm thu toàn phần. Không tự đọc tài liệu khách hoặc gọi AI provider.
+
 ## Tiếp tục sau HEAD 945d1ca — 2026-09-28
 
 - Resume HEAD `945d1caaf972881b298c10141a0d2eef64783496`; source commit `06712258eb9f8b1f3a3349111634990769cda6cb`, tree `bddaa700e51c157fb1d70bdfb446f59066b4f05d`. Commit chỉ thêm adapter CustomerPayment đã ghi nhận vào publication B5: typed FK, projection allowlist không gồm bankReference/receiptNumber/notes/exchangeRate, migration additive; domain payment không bị tạo hoặc đổi bởi publication.
@@ -10,7 +156,7 @@
 - Nguyên nhân chưa qua gate: clock contaminated; full API/repeat10 và full browser chưa được nghiệm thu; CONTRACT vẫn chỉ information snapshot, PAYMENT record mới chỉ là khoản thu đã ghi chứ không chứng minh tiền ngân hàng đã đối soát; DELIVERY_INSTALL vẫn là kế hoạch chứ không có delivery/install evidence. M2-A PARTIAL, M3 gate BLOCKED.
 - Ngoài ra, user xác nhận Stop-Process/PID 26520/22016/work/four-fixes-20260928 là log dự án khác; các thông tin đó không được dùng làm bằng chứng Galaxy.
 
-## Hiện hành — Chrome hiển thị và sửa M2-A, 2026-09-28
+## Lịch sử — Chrome hiển thị và sửa M2-A, 2026-09-28
 
 **PARTIAL / M3_ENTRY_GATE: BLOCKED.** RESUME_START_SHA `5d6690b6c1ce5f08b2c52ddb810a6b36f57bca6d`; CODE_SHA `338b7b18581387bf2b1d6412c3b921670de70395`; TESTED_SHA ứng dụng `0a216ebab2109e6c6a2c444071fd4e6a671c22d5`; TESTED_TREE `7f5b3d462b2f3bd031cbcd772b597630e6467185`. TESTED chỉ xác định cây đã chạy các lớp bên dưới, không nghĩa VERIFIED. Commit338b7b1 sau kiểm thử chỉ thêm cwd Windows trong .codex/config.toml; `git diff 0a216eb 338b7b1 --name-only` chỉ đúng file này, API/Web/test/migration không đổi. MCP config mới đã được native mcp get kiểm; không chạy lại DB/browser vì thay cwd tool. App results gắn SHA0a216eb, không gán nhầm là lượt app đã chạy ở338b7b1; docs commit riêng lấy hash thật sau commit, không self-hash/amend.
 

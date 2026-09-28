@@ -1,5 +1,16 @@
 # Project status
 
+## Tiếp tục sau Luna — 2026-09-28 (hiện hành)
+
+- Giữ code Luna và worktree/branch hiện có; START_SHA `c7b74d190aca3340ba85027db523f10a10d656fc`. CODE_SHA/TESTED_SHA (phạm vi checks được ghi, không full nghiệm thu): `a13c2ec151688de2f59c832026a37fb568b6b9e7`; TESTED_TREE `1af600b273518ddb91c15ea324259610123f2f07`. Không có M3 source/UI.
+- Đã bổ sung file hợp đồng/phụ lục gửi xem xét hoặc bản lưu theo hồ sơ đã ký, chứng từ khoản thu do nhân viên cung cấp, ghi nhận giao công trường với source/version/binary/customer và hai actor. Sửa source currency/ownership/race, retry UI, timeout runner và quyền route giao/lắp; không tạo ký/đối soát/nghiệm thu giả.
+- Chrome Stable154.0.8037.57 Windows headed đã attach đúng tab `http://localhost:3000/projects`. Main vẫn sạch tại7faeb58; `/me`200 đầu lượt,401 ở kiểm cuối, không đổi phiên người dùng. Test mới riêng `https://localhost:33003`, Web build `yx5SwbWAHvHa2vBwgFpx-`, API build727697a. Demo ba loại file mới bằng UI/context riêng; guest nhận đúng88/112/94bytes/checksum. Viewport390×844 là emulation không touch, không thiết bị vật lý.
+- Web522/522 và API unit phạm vi86/86 PASS; root lint/typecheck, API/Web build, Prisma validate/82migrations và Python health đạt. Root format cuối PASS; hai lượt fail do JSON evidence chưa format được giữ riêng trong VERIFICATION. Full API2/repeat10/fullbrowser chưa nghiệm thu. Clock cuối600mẫu/~60giây vẫn4jumps ±183giây; patch runner không sửa host.
+- Native aliases requested/configured/dispatched: Astra=gpt-6-astra/high, Sol=gpt-6-sol/medium, Luna=gpt-6-luna/medium; task thực đã chạy. Công cụ không trả actual model metadata: VERIFIED_MODEL=UNVERIFIED. Không low, không đổi model ứng dụng.
+- **M2_A_STATUS: PARTIAL; M2_OVERALL_STATUS: PARTIAL_LEAD_LIFECYCLE_DEFERRED; M3_ENTRY_GATE: BLOCKED; M3_IMPLEMENTATION_STATUS: NOT_STARTED.** Main runtime/source không đổi lượt này; không push/merge/deploy. Bằng chứng và bước tiếp ở M2 VERIFICATION/HANDOFF; không dùng demo/reviewer thay full gate.
+
+[VERIFICATION](docs/galaxy-os/milestones/M2/VERIFICATION.md) · [HANDOFF](docs/galaxy-os/milestones/M2/HANDOFF.md). Các mục sau là lịch sử.
+
 ## Lượt kiểm tra Chrome và tiếp tục M2-A — 2026-09-28
 
 - Hiện trạng Git tại đầu lượt: worktree `/home/galaxy_os/.worktrees/m2-a-20260928`, branch `m2/project-chat-20260928`, HEAD `945d1caaf972881b298c10141a0d2eef64783496`; code mới commit `06712258eb9f8b1f3a3349111634990769cda6cb`, tree `bddaa700e51c157fb1d70bdfb446f59066b4f05d`. Docs còn được cập nhật riêng.
@@ -9,7 +20,7 @@
 - **M2_A_STATUS: PARTIAL; M2_OVERALL_STATUS: PARTIAL_LEAD_LIFECYCLE_DEFERRED; M3_ENTRY_GATE: BLOCKED; M3: NOT_STARTED.** CONTRACT vẫn chỉ snapshot thông tin; PAYMENT lịch nghĩa vụ và khoản thu ghi nhận, không phải receipt/đối soát; DELIVERY_INSTALL kế hoạch, không phải bằng chứng giao/lắp. Chưa đủ ngữ nghĩa/B5 và regression để mở M3.
 - Bản thử riêng: `https://localhost:33003/work`; main source/runtime không thay đổi trong lượt này. Không push/merge/deploy. Chi tiết ở [VERIFICATION](docs/galaxy-os/milestones/M2/VERIFICATION.md) và [HANDOFF](docs/galaxy-os/milestones/M2/HANDOFF.md).
 
-## Hiện tại — Chrome hiển thị và M2-A, 2026-09-28
+## Lịch sử — Chrome hiển thị và M2-A, 2026-09-28
 
 - M2_A_STATUS: **PARTIAL**; M2_OVERALL_STATUS: PARTIAL_LEAD_LIFECYCLE_DEFERRED; M3_ENTRY_GATE: BLOCKED; M3 NOT_STARTED.
 - Code `338b7b18581387bf2b1d6412c3b921670de70395`; app tested `0a216ebab2109e6c6a2c444071fd4e6a671c22d5` (commit sau chỉ cwd MCP), tree `7f5b3d462b2f3bd031cbcd772b597630e6467185`. Sửa binary đã phát hành bị mutation file thông thường; session fixture riêng khi logout; test navigation theo OWNER_DIRECTION mới. INLINE + một reviewer T3 chỉ đọc, không reviewer giả.

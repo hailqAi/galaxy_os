@@ -1,5 +1,37 @@
 # M2 — Bàn giao triển khai
 
+## Bàn giao sau Luna — 2026-09-28 (hiện hành)
+
+- Giữ code Luna và worktree/branch hiện có; START_SHA `c7b74d190aca3340ba85027db523f10a10d656fc`. CODE_SHA/TESTED_SHA (phạm vi checks được ghi, không full nghiệm thu): `a13c2ec151688de2f59c832026a37fb568b6b9e7`; TESTED_TREE `1af600b273518ddb91c15ea324259610123f2f07`. Không có M3 source/UI.
+- Đã bổ sung file hợp đồng/phụ lục gửi xem xét hoặc bản lưu theo hồ sơ đã ký, chứng từ khoản thu do nhân viên cung cấp, ghi nhận giao công trường với source/version/binary/customer và hai actor. Sửa source currency/ownership/race, retry UI, timeout runner và quyền route giao/lắp; không tạo ký/đối soát/nghiệm thu giả.
+- Chrome Stable154.0.8037.57 Windows headed đã attach đúng tab `http://localhost:3000/projects`. Main vẫn sạch tại7faeb58; `/me`200 đầu lượt,401 ở kiểm cuối, không đổi phiên người dùng. Test mới riêng `https://localhost:33003`, Web build `yx5SwbWAHvHa2vBwgFpx-`, API build727697a. Demo ba loại file mới bằng UI/context riêng; guest nhận đúng88/112/94bytes/checksum. Viewport390×844 là emulation không touch, không thiết bị vật lý.
+- Web522/522 và API unit phạm vi86/86 PASS; root lint/typecheck, API/Web build, Prisma validate/82migrations và Python health đạt. Root format cuối PASS; hai lượt fail do JSON evidence chưa format được giữ riêng trong VERIFICATION. Full API2/repeat10/fullbrowser chưa nghiệm thu. Clock cuối600mẫu/~60giây vẫn4jumps ±183giây; patch runner không sửa host.
+- Native aliases requested/configured/dispatched: Astra=gpt-6-astra/high, Sol=gpt-6-sol/medium, Luna=gpt-6-luna/medium; task thực đã chạy. Công cụ không trả actual model metadata: VERIFIED_MODEL=UNVERIFIED. Không low, không đổi model ứng dụng.
+- **M2_A_STATUS: PARTIAL; M2_OVERALL_STATUS: PARTIAL_LEAD_LIFECYCLE_DEFERRED; M3_ENTRY_GATE: BLOCKED; M3_IMPLEMENTATION_STATUS: NOT_STARTED.** Main runtime/source không đổi lượt này; không push/merge/deploy. Bằng chứng và bước tiếp ở M2 VERIFICATION/HANDOFF; không dùng demo/reviewer thay full gate.
+
+### Định danh và cách mở bản thử
+
+Worktree `/home/galaxy_os/.worktrees/m2-a-20260928`, branch `m2/project-chat-20260928`. API PID157899 từ727697a,191compiledJS digest `81dce0dc961a5993be7b1f40e0be884872802b0524e0c1387e1b14498241b748`; không API production diff sau commit đó. Web PID170240 từ `a13c2ec151688de2f59c832026a37fb568b6b9e7`, BUILD_ID `yx5SwbWAHvHa2vBwgFpx-`; TLS33003 PID121437 giữ nguyên. `/login`200 với CA test đã có. Khởi động từ root worktree bằng `node scripts/m2-a-serve.mjs api --clock-monitor`, `node scripts/m2-a-serve.mjs web --production`; TLS dùng recipe hiện hữu. Chỉ dừng PID sau đối chiếu cwd/cmd, không kill theo port. Không gọi source main đang chạy đã nâng cấp.
+
+Google Chrome154 hiển thị đúng bản3000 đã attach; sau demo đã đóng hai context sender/publisher thuộc test, giữ tab user3000. Tab guest giả lập `https://localhost:33003/projects/0ab03834-ebac-4f25-a2c7-814a2d6e9953/work` được đưa lên trước để xem ba file phát hành; đó không phải tài khoản người dùng. MCP pageId thay khi client kết nối lại: chọn theo origin/Project/context đã xác minh, không hard-code ID cũ. Phiên helper11003 đã kết thúc, không đóng Chrome. Profile/cookie/fixture credential không vào Git.
+
+### Việc đã kiểm trên Chrome và việc chưa đạt
+
+- Route giao/lắp trước đây `/forbidden`, sau mapping installation.read mở đúng; quantity0→422 rồi sửa1.125→201 qua form thật. Không phát hành lệnh kho/lắp hay nghiệm thu do thao tác này.
+- C4 SITE_DELIVERY; C5 CONTRACT_FILE/RECORDED_SIGNED_COPY; C2 CUSTOMER_PAYMENT_FILE: chuẩn bị qua UI, publisher khác actor xem source/text/binary/người nhận rồi xác nhận; guest tải200 đúng bản88/112/94bytes và SHA256 gốc/preview. Evidence `.superpowers/sdd/PLAN/post-luna-b5-visible-final.json`; ảnh `post-luna-site-delivery.png`, `post-luna-payment-review-narrow.png`, `post-luna-three-files-guest-narrow.png`. Nội dung nguồn ghi rõ giới hạn nghiệp vụ, không giả chữ ký/đối soát/nghiệm thu.
+- Narrow viewport390×844: preview/confirm khoản thu thao tác được, guest composer/tải file có mặt, không scroll ngang. `isMobile=false/hasTouch=false`, không kiểm bàn phím vật lý. Demo không thay toàn browser21cases. Fault injection mất response cho SiteDelivery chưa chạy do lệnh diagnostic sai trước injection; không ghi PASS retry đó. C1 retry thật đã có evidence RED/GREEN riêng.
+- `apps/api/test/m2-project-chat.integration.test.ts`: C3 `publishes handover documents with trusted bytes and explicit source signing state` setup404 và C4 `rechecks site delivery file after evidence storage I/O` setup404 trước barrier vẫn chưa nghiệm thu; C4 correlation chứng minh grant nằm tương lai khi clock lùi. FullAPI hai lần/repeat10/fullbrowser còn BLOCKED_CLOCK, không chạy săn xanh. Clock artifact `post-luna-clock-final.json`600mẫu59.977giây/4jumps. Tác nhân host chưa xác định; user chưa thể xác thực OS, không lặp sudo hoặc tự chỉnh giờ.
+
+### Bước tiếp nối chính xác
+
+1. Chủ máy cần xử lý quyền OS cho thử dừng tạm systemd-timesyncd đã được cho phép và đo đối chứng; chưa disable vĩnh viễn/chỉnh giờ/reboot. Chỉ khi observer sạch mới mở nghiệm thu thời gian thật; nếu jump tiếp phải tìm tác nhân, không quy mọi404/401 là clock.
+2. Tiếp tục targeted C3/C4 đã nêu, browser21cases với Google Chrome headed và fixture/context riêng, repeat10 và2fullAPI trên cùng tree/config. Kiểm source/binary/race/upload/filename/reconnect/navigation/B5 mục đích còn thiếu; giữ lỗi gốc và matrix24+30, không nới quyền/timeout.
+3. Sau M2_A VERIFIED mới triển khai M3 theo phạm vi chủ dự án đã giao trên Project hiện hữu. Hiện chưa có Hỏi AI/provider/index/registry M3; không cần người dùng xin lại B1–B5 hay giao lại prompt. Lead-only/lifecycle vẫn deferred.
+
+Local source commits từ START giữ nguyên Luna; CODE_SHA trên là cuối. DOCS_COMMIT_SHA lấy từ commit docs kế tiếp, không tự ghi hash vào chính commit bằng amend. Docs-only phải không đổi source/test/config/migration. Detailed verification/logs ở [VERIFICATION](VERIFICATION.md); PLAN giữ task kỹ thuật đã review. Foreign project log không dùng. MAIN_RUNTIME_CHANGED:NO; PUSH_MERGE_DEPLOY:NOT_PERFORMED.
+
+Các mục bên dưới là lịch sử, không ghi đè checkpoint này.
+
 ## Tiếp tục sau HEAD 945d1ca — 2026-09-28
 
 - Bản thử đang phục vụ đúng worktree/build mới tại `https://localhost:33003/work`; Chrome Stable154.0.8037.57, headed, Galaxy Dev riêng. Sau điều hướng an toàn/reload hiện là trang đăng nhập (`/login?returnTo=%2Fwork`); chưa có fixture đăng nhập và chưa có demo chat authenticated. Người dùng đã thấy app cũ ở localhost:3000 trước đó; source M2 nằm worktree riêng và chưa tích hợp nên URL cũ không có giao diện M2.
@@ -10,7 +42,7 @@
 - B5 vẫn chưa kín: CONTRACT thiếu artifact/version/approval hợp đồng/phụ lục thực, PAYMENT chưa có receipt/reconciliation approval/source, DELIVERY_INSTALL chưa có record/binary xác nhận giao/lắp. Không giả chứng từ hoặc thay đổi nghiệp vụ. Vì vậy M2_A PARTIAL, M2 overall PARTIAL_LEAD_LIFECYCLE_DEFERRED, M3 gate BLOCKED, M3 NOT_STARTED.
 - Không đổi main runtime/source, không push/merge/deploy. Ảnh app login không nhạy cảm: `/tmp/galaxy-m2a-current.png`. Test DB riêng, 81 migration up to date.
 
-## Hiện hành — Chrome hiển thị, M2-A PARTIAL, 2026-09-28
+## Lịch sử — Chrome hiển thị, M2-A PARTIAL, 2026-09-28
 
 Người dùng đã đăng nhập được **bản cũ http://localhost:3000/projects** trong Chrome Windows hiển thị riêng; Codex kết nối đúng phiên qua MCP, điều hướng đọc-only và /api/v1/me200. Code M2-A vẫn ở worktree riêng, chưa tích hợp vào bản3000. Đã sửa binary publication bị generic file.delete/update/restore vô hiệu hóa, session fixture logout lẫn phiên điều khiển, và tiêu chí kiểm navigation/no-store reload. Chưa đủ điều kiện sang M3.
 
