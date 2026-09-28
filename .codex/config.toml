@@ -5,6 +5,7 @@ max_concurrent_threads_per_session = 1
 [mcp_servers.galaxy_chrome]
 command = "/mnt/c/WINDOWS/system32/cmd.exe"
 args = ["/d", "/c", 'C:\Users\Admin\AppData\Local\GalaxyOS\Tools\galaxy-chrome-mcp.cmd']
+cwd = "/mnt/c/Users/Admin/AppData/Local/GalaxyOS/Tools"
 startup_timeout_sec = 30
 
 # In Galaxy only, avoid launching the inherited generic Linux Chrome server.
