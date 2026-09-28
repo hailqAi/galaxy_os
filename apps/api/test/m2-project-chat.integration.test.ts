@@ -4,7 +4,7 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { hash } from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
@@ -28,6 +28,7 @@ import { QuotationDocumentsService } from '../src/commercial/quotation-documents
 import ExcelJS from 'exceljs';
 import { assertFileCapacity } from '../src/files/file-quota';
 import { customerPublicationSource } from '../src/project-chat/customer-publication-source';
+import { ProjectChatService } from '../src/project-chat/project-chat.service';
 
 const isolated = assertG00Isolation();
 
@@ -1785,74 +1786,11 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       ),
     ).toEqual(bytes);
   });
-  it('pins approved drawing and sample sources without borrowing another approval or Project', async () => {
-    // This regression must also run by itself; do not borrow the proposal test's grants.
-    await post('authority', `/projects/${otherProjectId}/authorities`, {
-      userId: users.manager!.id,
-      actions: ['CREATE', 'ACCESS_ADMIN', 'HISTORY'],
-      roomCeiling: ['READ', 'SEND', 'UPLOAD', 'DOWNLOAD', 'HISTORY'],
-    }).expect(201);
-    await post('authority', `/projects/${otherProjectId}/authorities`, {
-      userId: users.publisher!.id,
-      actions: ['PUBLISH'],
-      roomCeiling: [],
-    }).expect(201);
-    await db.organizationMembership.updateMany({
-      where: { organizationId: orgId, userId: users.guest!.id },
-      data: { kind: 'EXTERNAL' },
-    });
-    await post('authority', `/projects/${otherProjectId}/participants`, {
-      userId: users.guest!.id,
-    }).expect(201);
-    const rights = [
-      'production.read',
-      'file.read',
-      'file.download',
-      'file.upload',
-      'file.delete',
-    ];
-    const role = await db.role.create({
-      data: {
-        organizationId: orgId,
-        code: `production-${run}`,
-        name: 'Production fixture',
-        permissions: {
-          create: rights.map((code) => ({ permission: { connect: { code } } })),
-        },
-      },
-    });
-    for (const name of ['sender', 'publisher'])
-      await db.userRole.create({
-        data: {
-          organizationId: orgId,
-          userId: users[name]!.id,
-          roleId: role.id,
-          scopeType: 'ORGANIZATION',
-        },
-      });
-    const actor = async (name: string): Promise<CurrentActor> => ({
-      userId: users[name]!.id,
-      organizationId: orgId,
-      permissions: rights,
-      administrationScope: 'ORGANIZATION',
-      managedDepartmentIds: [],
-      administrationTier: 0,
-      email: `${name}-${run}@example.test`,
-      displayName: name,
-      mustChangePassword: false,
-      organizationMembershipId: (
-        await db.organizationMembership.findUniqueOrThrow({
-          where: {
-            organizationId_userId: {
-              organizationId: orgId,
-              userId: users[name]!.id,
-            },
-          },
-        })
-      ).id,
-    });
-    const creator = await actor('sender'),
-      approver = await actor('publisher');
+  const productionOrderFixture = async (
+    creator: CurrentActor,
+    otherProjectId: string,
+  ) => {
+    const run = randomUUID();
     const ownership = {
       organizationId: orgId,
       projectId: otherProjectId,
@@ -1932,6 +1870,77 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
         ownerId: creator.userId,
       },
     });
+    return order;
+  };
+  it('pins approved drawing and sample sources without borrowing another approval or Project', async () => {
+    // This regression must also run by itself; do not borrow the proposal test's grants.
+    await post('authority', `/projects/${otherProjectId}/authorities`, {
+      userId: users.manager!.id,
+      actions: ['CREATE', 'ACCESS_ADMIN', 'HISTORY'],
+      roomCeiling: ['READ', 'SEND', 'UPLOAD', 'DOWNLOAD', 'HISTORY'],
+    }).expect(201);
+    await post('authority', `/projects/${otherProjectId}/authorities`, {
+      userId: users.publisher!.id,
+      actions: ['PUBLISH'],
+      roomCeiling: [],
+    }).expect(201);
+    await db.organizationMembership.updateMany({
+      where: { organizationId: orgId, userId: users.guest!.id },
+      data: { kind: 'EXTERNAL' },
+    });
+    await post('authority', `/projects/${otherProjectId}/participants`, {
+      userId: users.guest!.id,
+    }).expect(201);
+    const rights = [
+      'production.read',
+      'file.read',
+      'file.download',
+      'file.upload',
+      'file.delete',
+    ];
+    const role = await db.role.create({
+      data: {
+        organizationId: orgId,
+        code: `production-${run}`,
+        name: 'Production fixture',
+        permissions: {
+          create: rights.map((code) => ({ permission: { connect: { code } } })),
+        },
+      },
+    });
+    for (const name of ['sender', 'publisher'])
+      await db.userRole.create({
+        data: {
+          organizationId: orgId,
+          userId: users[name]!.id,
+          roleId: role.id,
+          scopeType: 'ORGANIZATION',
+        },
+      });
+    const actor = async (name: string): Promise<CurrentActor> => ({
+      userId: users[name]!.id,
+      organizationId: orgId,
+      permissions: rights,
+      administrationScope: 'ORGANIZATION',
+      managedDepartmentIds: [],
+      administrationTier: 0,
+      email: `${name}-${run}@example.test`,
+      displayName: name,
+      mustChangePassword: false,
+      organizationMembershipId: (
+        await db.organizationMembership.findUniqueOrThrow({
+          where: {
+            organizationId_userId: {
+              organizationId: orgId,
+              userId: users[name]!.id,
+            },
+          },
+        })
+      ).id,
+    });
+    const creator = await actor('sender'),
+      approver = await actor('publisher');
+    const order = await productionOrderFixture(creator, otherProjectId);
     const bytes = Buffer.from('Bản vẽ/mẫu đã duyệt dành cho khách');
     const file = await app.get(FilesService).upload(
       creator,
@@ -2388,7 +2397,10 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
         .body,
     ).toBe('Đã commit trước khóa');
   });
-  const customerSnapshotFixture = async (paymentCurrency = 'VND') => {
+  const customerSnapshotFixture = async (
+    paymentCurrency = 'VND',
+    extraPermissions: string[] = [],
+  ) => {
     const run = randomUUID();
     const permissions = [
       'contract.read',
@@ -2398,6 +2410,7 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       'file.download',
       'quotation.update',
       'quotation.approve',
+      ...extraPermissions,
     ];
     const role = await db.role.create({
       data: {
@@ -2841,6 +2854,849 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
         })
       ).status,
     ).toBe('DRAFT');
+  });
+  const contractFileFixture = async () => {
+    const fixture = await customerSnapshotFixture('VND', [
+      'contract.update',
+      'file.upload',
+      'file.update',
+      'file.delete',
+      'file.restore',
+    ]);
+    const bytes = Buffer.from(
+      'Hợp đồng gửi khách xem xét, chưa xác nhận chữ ký',
+    );
+    const file = (
+      await call()
+        .post('/api/v1/files')
+        .set('Cookie', users.sender!.cookie)
+        .field('entityType', 'Project')
+        .field('entityId', fixture.otherProjectId)
+        .field('category', 'PROJECT_DOCUMENT')
+        .attach('file', bytes, {
+          filename: 'hop-dong.txt',
+          contentType: 'text/plain',
+        })
+        .expect(201)
+    ).body;
+    const candidates = (
+      await get(
+        'sender',
+        `/rooms/${fixture.room.id}/contract-files?sourceId=${fixture.contract.id}`,
+      ).expect(200)
+    ).body;
+    expect(candidates.files).toContainEqual(
+      expect.objectContaining({ id: file.id, version: file.version }),
+    );
+    return {
+      ...fixture,
+      bytes,
+      file,
+      input: {
+        sourceType: 'CONTRACT_FILE',
+        sourceId: fixture.contract.id,
+        fileId: file.id,
+        version: file.version,
+        sourceFingerprint: candidates.sourceFingerprint,
+        clientKey: randomUUID(),
+      },
+    };
+  };
+  it('publishes a registered contract review file with exact bytes and typed provenance', async () => {
+    const { room, contract, file, bytes, input, actor, otherProjectId } =
+      await contractFileFixture();
+    const attachments = await db.entityAttachment.findMany({
+      where: { fileAssetId: file.id },
+    });
+    expect(
+      (await get('sender', `/rooms/${room.id}/release-sources`).expect(200))
+        .body,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceType: 'CONTRACT_FILE',
+          sourceId: contract.id,
+          sourceFingerprint: input.sourceFingerprint,
+        }),
+      ]),
+    );
+    await post('sender', `/rooms/${room.id}/releases`, {
+      ...input,
+      version: file.version + 1,
+    }).expect(409);
+    const prepared = (
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+    ).body;
+    expect(
+      (await post('sender', `/rooms/${room.id}/releases`, input).expect(201))
+        .body.id,
+    ).toBe(prepared.id);
+    await post('sender', `/rooms/${room.id}/releases`, {
+      ...input,
+      version: file.version + 1,
+    }).expect(409);
+    const release = await db.chatDocumentRelease.findUniqueOrThrow({
+      where: { id: prepared.id },
+      include: { contractDocument: true },
+    });
+    expect(release.contractDocument).toMatchObject({
+      contractId: contract.id,
+      fileAssetId: file.id,
+      format: 'CUSTOMER_REVIEW_FILE',
+      version: prepared.version,
+    });
+    expect(prepared.fileVersion).toBe(file.version);
+    expect(
+      (
+        await getBinary('publisher', `/releases/${prepared.id}/preview`).expect(
+          200,
+        )
+      ).body,
+    ).toEqual(bytes);
+    const review = (
+      await get('publisher', `/releases/${prepared.id}/review`).expect(200)
+    ).body;
+    await post('sender', `/releases/${prepared.id}/publish`, {
+      confirmed: true,
+      recipientHash: review.recipientHash,
+    }).expect(403);
+    await post('publisher', `/releases/${prepared.id}/publish`, {
+      confirmed: true,
+      recipientHash: review.recipientHash,
+    }).expect(201);
+    expect(
+      (
+        await getBinary('guest', `/releases/${prepared.id}/download`).expect(
+          200,
+        )
+      ).body,
+    ).toEqual(bytes);
+    await call()
+      .get(`/api/v1/files/${file.id}/download`)
+      .set('Cookie', users.guest!.cookie)
+      .expect(403);
+    await expect(app.get(FilesService).remove(actor, file.id)).rejects.toThrow(
+      ConflictException,
+    );
+    await expect(
+      app.get(FilesService).update(actor, file.id, { category: 'OTHER' }),
+    ).rejects.toThrow(ConflictException);
+    // Exercise the shared restore guard with a synthetic legacy-deleted publication.
+    await db.fileAsset.update({
+      where: { id: file.id },
+      data: { deletedAt: new Date() },
+    });
+    try {
+      await expect(
+        app.get(FilesService).restore(actor, file.id),
+      ).rejects.toThrow(ConflictException);
+    } finally {
+      await db.fileAsset.update({
+        where: { id: file.id },
+        data: { deletedAt: null },
+      });
+    }
+    expect(
+      await db.entityAttachment.findMany({ where: { fileAssetId: file.id } }),
+    ).toEqual(attachments);
+    expect(
+      await db.fileAsset.findUniqueOrThrow({ where: { id: file.id } }),
+    ).toMatchObject({
+      confidentiality: 'INTERNAL',
+      version: file.version,
+      deletedAt: null,
+    });
+    expect(
+      await db.contractDocument.count({ where: { contractId: contract.id } }),
+    ).toBe(1);
+    expect(
+      await db.chatDocumentRelease.count({ where: { roomId: room.id } }),
+    ).toBe(1);
+    const unchanged = await db.contract.findUniqueOrThrow({
+      where: { id: contract.id },
+    });
+    expect(unchanged.status).toBe('DRAFT');
+    expect(unchanged.signedDate).toBeNull();
+    expect(unchanged.currentValue.toString()).toBe('120000');
+    expect(
+      await db.customerPayment.count({ where: { projectId: otherProjectId } }),
+    ).toBe(1);
+  });
+  it('rejects contract review files with another Project, customer or internal source context', async () => {
+    const { room, contract, input, file, actor, otherProjectId } =
+      await contractFileFixture();
+    await post('sender', `/rooms/${room.id}/releases`, {
+      ...input,
+      sourceId: randomUUID(),
+    }).expect(409);
+    await post('sender', `/rooms/${room.id}/releases`, {
+      ...input,
+      appendixId: randomUUID(),
+    }).expect(409);
+    await post('sender', `/rooms/${room.id}/releases`, {
+      ...input,
+      sourceFingerprint: '0'.repeat(64),
+    }).expect(409);
+    const wrongCustomer = await db.customer.create({
+      data: {
+        organizationId: orgId,
+        type: 'INDIVIDUAL',
+        displayName: 'Sai khách',
+        createdBy: actor.userId,
+        updatedBy: actor.userId,
+      },
+    });
+    await db.contract.update({
+      where: { id: contract.id },
+      data: { customerId: wrongCustomer.id },
+    });
+    await post('sender', `/rooms/${room.id}/releases`, input).expect(409);
+    await db.contract.update({
+      where: { id: contract.id },
+      data: { customerId: contract.customerId, updatedAt: contract.updatedAt },
+    });
+    const foreign = await db.entityAttachment.create({
+      data: {
+        fileAssetId: file.id,
+        entityType: 'Project',
+        entityId: projectId,
+        projectId,
+        createdBy: actor.userId,
+      },
+    });
+    await post('sender', `/rooms/${room.id}/releases`, input).expect(404);
+    expect(
+      (
+        await get(
+          'sender',
+          `/rooms/${room.id}/contract-files?sourceId=${contract.id}`,
+        ).expect(200)
+      ).body.files,
+    ).toEqual([]);
+    await db.entityAttachment.delete({ where: { id: foreign.id } });
+    const attachment = await db.entityAttachment.findFirstOrThrow({
+      where: { fileAssetId: file.id, projectId: otherProjectId },
+    });
+    await db.entityAttachment.update({
+      where: { id: attachment.id },
+      data: { entityType: 'ChatRoom', entityId: room.id },
+    });
+    await post('sender', `/rooms/${room.id}/releases`, input).expect(404);
+    await db.entityAttachment.update({
+      where: { id: attachment.id },
+      data: {
+        entityType: 'Project',
+        entityId: otherProjectId,
+        customerId: wrongCustomer.id,
+      },
+    });
+    await post('sender', `/rooms/${room.id}/releases`, input).expect(404);
+    expect(
+      await db.contractDocument.count({ where: { contractId: contract.id } }),
+    ).toBe(0);
+  });
+  it('rejects unsupported contract review MIME metadata before reading or registering bytes', async () => {
+    const { room, contract, file, input } = await contractFileFixture();
+    await db.fileAsset.update({
+      where: { id: file.id },
+      data: { mimeType: 'text/html', originalFilename: 'hop-dong.html' },
+    });
+    expect(
+      (
+        await get(
+          'sender',
+          `/rooms/${room.id}/contract-files?sourceId=${contract.id}`,
+        ).expect(200)
+      ).body.files,
+    ).toEqual([]);
+    await post('sender', `/rooms/${room.id}/releases`, input).expect(404);
+    expect(
+      await db.contractDocument.count({ where: { contractId: contract.id } }),
+    ).toBe(0);
+  });
+  it.each(['source', 'file', 'permission'] as const)(
+    'rechecks contract review %s after storage reading before registration',
+    async (change) => {
+      const { room, contract, input, file, actor, contracts, otherProjectId } =
+        await contractFileFixture();
+      const assignments = await db.userRole.findMany({
+        where: {
+          organizationId: orgId,
+          userId: actor.userId,
+          status: 'active',
+        },
+        select: { id: true },
+      });
+      const storage = app.get(FileStorage),
+        stream = storage.stream.bind(storage);
+      const changed = vi
+        .spyOn(storage, 'stream')
+        .mockImplementationOnce(async (key) => {
+          if (change === 'source')
+            await contracts.transition(actor, otherProjectId, contract.id, {
+              status: 'INTERNAL_REVIEW',
+            });
+          else if (change === 'file')
+            await app
+              .get(FilesService)
+              .update(actor, file.id, { category: 'CHANGED' });
+          else
+            await db.userRole.updateMany({
+              where: { id: { in: assignments.map((a) => a.id) } },
+              data: { status: 'archived' },
+            });
+          return stream(key);
+        });
+      try {
+        await post('sender', `/rooms/${room.id}/releases`, input).expect(
+          change === 'permission' ? 404 : 409,
+        );
+      } finally {
+        changed.mockRestore();
+        if (change === 'permission')
+          await db.userRole.updateMany({
+            where: { id: { in: assignments.map((a) => a.id) } },
+            data: { status: 'active' },
+          });
+      }
+      expect(
+        await db.contractDocument.count({ where: { contractId: contract.id } }),
+      ).toBe(0);
+      expect(
+        await db.chatDocumentRelease.count({ where: { roomId: room.id } }),
+      ).toBe(0);
+    },
+  );
+  it('requires fresh contract review after source change and preserves an already published file', async () => {
+    const {
+      room,
+      contract,
+      input,
+      file,
+      actor,
+      contracts,
+      otherProjectId,
+      bytes,
+    } = await contractFileFixture();
+    const published = (
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+    ).body;
+    await getBinary('publisher', `/releases/${published.id}/preview`).expect(
+      200,
+    );
+    const review = (
+      await get('publisher', `/releases/${published.id}/review`).expect(200)
+    ).body;
+    await post('publisher', `/releases/${published.id}/publish`, {
+      confirmed: true,
+      recipientHash: review.recipientHash,
+    }).expect(201);
+    const pending = (
+      await post('sender', `/rooms/${room.id}/releases`, {
+        ...input,
+        clientKey: randomUUID(),
+      }).expect(201)
+    ).body;
+    await getBinary('publisher', `/releases/${pending.id}/preview`).expect(200);
+    await contracts.transition(actor, otherProjectId, contract.id, {
+      status: 'INTERNAL_REVIEW',
+    });
+    await get('publisher', `/releases/${pending.id}/preview`).expect(409);
+    await post('publisher', `/releases/${pending.id}/publish`, {
+      confirmed: true,
+      recipientHash: review.recipientHash,
+    }).expect(409);
+    expect(
+      (
+        await getBinary('guest', `/releases/${published.id}/download`).expect(
+          200,
+        )
+      ).body,
+    ).toEqual(bytes);
+    expect(
+      (await db.fileAsset.findUniqueOrThrow({ where: { id: file.id } }))
+        .version,
+    ).toBe(file.version);
+  });
+  it('pins contract review bytes and version across retries and later file mutation', async () => {
+    const { room, contract, input, file, actor, bytes, otherProjectId } =
+      await contractFileFixture();
+    const stored = await db.fileAsset.findUniqueOrThrow({
+      where: { id: file.id },
+    });
+    const binaryPath = join(process.env.FILE_STORAGE_PATH!, stored.storageKey);
+    try {
+      await writeFile(binaryPath, 'Khác bản đã tải');
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(409);
+    } finally {
+      await writeFile(binaryPath, bytes);
+    }
+    expect(
+      await db.contractDocument.count({ where: { contractId: contract.id } }),
+    ).toBe(0);
+    const prepared = (
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+    ).body;
+    const second = await app.get(FilesService).upload(
+      actor,
+      {
+        entityType: 'Project',
+        entityId: otherProjectId,
+        category: 'PROJECT_DOCUMENT',
+      },
+      {
+        originalname: 'khac.txt',
+        mimetype: 'text/plain',
+        size: bytes.length,
+        buffer: bytes,
+      } as Express.Multer.File,
+    );
+    await post('sender', `/rooms/${room.id}/releases`, {
+      ...input,
+      fileId: second.id,
+    }).expect(409);
+    await getBinary('publisher', `/releases/${prepared.id}/preview`).expect(
+      200,
+    );
+    const review = (
+      await get('publisher', `/releases/${prepared.id}/review`).expect(200)
+    ).body;
+    try {
+      await writeFile(binaryPath, 'Thay sau khi kiểm tra');
+      await post('publisher', `/releases/${prepared.id}/publish`, {
+        confirmed: true,
+        recipientHash: review.recipientHash,
+      }).expect(409);
+    } finally {
+      await writeFile(binaryPath, bytes);
+    }
+    await app.get(FilesService).update(actor, file.id, { category: 'CHANGED' });
+    await get('publisher', `/releases/${prepared.id}/preview`).expect(409);
+    await post('publisher', `/releases/${prepared.id}/publish`, {
+      confirmed: true,
+      recipientHash: review.recipientHash,
+    }).expect(409);
+    expect(
+      await db.contractDocument.count({ where: { contractId: contract.id } }),
+    ).toBe(1);
+    expect(
+      (
+        await db.chatDocumentRelease.findUniqueOrThrow({
+          where: { id: prepared.id },
+        })
+      ).publishedAt,
+    ).toBeNull();
+  });
+  it('does not borrow contract review registration authority from an out-of-scope binding', async () => {
+    const { room, contract, input, role, actor } = await contractFileFixture();
+    const otherAssignments = await db.userRole.findMany({
+      where: {
+        userId: actor.userId,
+        organizationId: orgId,
+        status: 'active',
+        roleId: { not: role.id },
+      },
+      select: { id: true },
+    });
+    const updatePermission = await db.permission.findUniqueOrThrow({
+      where: { code: 'contract.update' },
+    });
+    const updateRole = await db.role.create({
+      data: {
+        organizationId: orgId,
+        code: `contract-update-${randomUUID()}`,
+        name: 'Quyền ngoài hồ sơ',
+        permissions: { create: { permissionId: updatePermission.id } },
+      },
+    });
+    const updateAssignment = await db.userRole.create({
+      data: {
+        organizationId: orgId,
+        userId: actor.userId,
+        roleId: updateRole.id,
+        scopeType: 'SELF',
+      },
+    });
+    await db.rolePermission.delete({
+      where: {
+        roleId_permissionId: {
+          roleId: role.id,
+          permissionId: updatePermission.id,
+        },
+      },
+    });
+    await db.userRole.updateMany({
+      where: { id: { in: otherAssignments.map((a) => a.id) } },
+      data: { status: 'archived' },
+    });
+    try {
+      await get(
+        'sender',
+        `/rooms/${room.id}/contract-files?sourceId=${contract.id}`,
+      ).expect(404);
+      const sources = (
+        await get('sender', `/rooms/${room.id}/release-sources`).expect(200)
+      ).body;
+      expect(sources).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sourceType: 'CONTRACT',
+            sourceId: contract.id,
+          }),
+        ]),
+      );
+      expect(sources).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sourceType: 'CONTRACT_FILE',
+            sourceId: contract.id,
+          }),
+        ]),
+      );
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(404);
+      await db.userRole.update({
+        where: { id: updateAssignment.id },
+        data: { scopeType: 'ORGANIZATION' },
+      });
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(201);
+    } finally {
+      await db.userRole.updateMany({
+        where: { id: { in: otherAssignments.map((a) => a.id) } },
+        data: { status: 'active' },
+      });
+    }
+  });
+  it('registers a contract appendix review file against its exact appendix source', async () => {
+    const { room, contract, contracts, actor, input, otherProjectId, bytes } =
+      await contractFileFixture();
+    await contracts.transition(actor, otherProjectId, contract.id, {
+      status: 'INTERNAL_REVIEW',
+    });
+    await contracts.transition(actor, otherProjectId, contract.id, {
+      status: 'SIGNED',
+    });
+    const appendix = await contracts.createAppendix(
+      actor,
+      otherProjectId,
+      contract.id,
+      {
+        appendixNumber: 'PL-1',
+        type: 'SCHEDULE_CHANGE',
+        title: 'Lịch đề xuất',
+        valueChange: '0',
+        currency: 'VND',
+        idempotencyKey: randomUUID(),
+      },
+    );
+    const candidates = (
+      await get(
+        'sender',
+        `/rooms/${room.id}/contract-files?sourceId=${contract.id}&appendixId=${appendix.id}`,
+      ).expect(200)
+    ).body;
+    const prepared = (
+      await post('sender', `/rooms/${room.id}/releases`, {
+        ...input,
+        appendixId: appendix.id,
+        sourceFingerprint: candidates.sourceFingerprint,
+      }).expect(201)
+    ).body;
+    expect(
+      (
+        await db.chatDocumentRelease.findUniqueOrThrow({
+          where: { id: prepared.id },
+          include: { contractDocument: true },
+        })
+      ).contractDocument,
+    ).toMatchObject({
+      contractId: contract.id,
+      appendixId: appendix.id,
+      format: 'CUSTOMER_REVIEW_FILE',
+    });
+    expect(
+      (
+        await getBinary('publisher', `/releases/${prepared.id}/preview`).expect(
+          200,
+        )
+      ).body,
+    ).toEqual(bytes);
+    expect(
+      (
+        await db.contractAppendix.findUniqueOrThrow({
+          where: { id: appendix.id },
+        })
+      ).status,
+    ).toBe('DRAFT');
+  });
+  it.each(['quality', 'packing', 'milestone'] as const)(
+    'rejects contract review file ownership from a real production %s writer',
+    async (kind) => {
+      const { room, contract, file, input, actor, otherProjectId } =
+        await contractFileFixture();
+      const order = await productionOrderFixture(actor, otherProjectId);
+      const production = app.get(ProductionService);
+      if (kind === 'quality')
+        await production.quality(actor, order.id, {
+          reportNumber: randomUUID(),
+          inspectionDate: new Date(),
+          result: 'PASSED',
+          summary: 'Nội bộ sản xuất',
+          fileId: file.id,
+        });
+      else if (kind === 'packing')
+        await production.packing(actor, order.id, {
+          packingNumber: randomUUID(),
+          packageCount: 1,
+          packedAt: new Date(),
+          fileId: file.id,
+        });
+      else
+        await production.milestone(actor, order.id, {
+          name: 'Mốc nội bộ',
+          sequence: 1,
+          status: 'PLANNED',
+          evidenceFileId: file.id,
+        });
+      expect(
+        (
+          await get(
+            'sender',
+            `/rooms/${room.id}/contract-files?sourceId=${contract.id}`,
+          ).expect(200)
+        ).body.files,
+      ).toEqual([]);
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(409);
+      expect(
+        await db.contractDocument.count({ where: { contractId: contract.id } }),
+      ).toBe(0);
+    },
+  );
+  it('publishes a contract review file with source read permission and no contract update authority', async () => {
+    const { room, input } = await contractFileFixture();
+    const prepared = (
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+    ).body;
+    const assignments = await db.userRole.findMany({
+      where: {
+        organizationId: orgId,
+        userId: users.publisher!.id,
+        status: 'active',
+      },
+      select: { id: true },
+    });
+    const reader = await db.role.create({
+      data: {
+        organizationId: orgId,
+        code: `contract-reader-${randomUUID()}`,
+        name: 'Chỉ xem nguồn',
+        permissions: {
+          create: ['contract.read', 'file.read', 'file.download'].map(
+            (code) => ({ permission: { connect: { code } } }),
+          ),
+        },
+      },
+    });
+    await db.userRole.create({
+      data: {
+        organizationId: orgId,
+        userId: users.publisher!.id,
+        roleId: reader.id,
+        scopeType: 'ORGANIZATION',
+      },
+    });
+    await db.userRole.updateMany({
+      where: { id: { in: assignments.map((a) => a.id) } },
+      data: { status: 'archived' },
+    });
+    try {
+      await post('publisher', `/rooms/${room.id}/releases`, {
+        ...input,
+        clientKey: randomUUID(),
+      }).expect(404);
+      await getBinary('publisher', `/releases/${prepared.id}/preview`).expect(
+        200,
+      );
+      const review = (
+        await get('publisher', `/releases/${prepared.id}/review`).expect(200)
+      ).body;
+      await post('publisher', `/releases/${prepared.id}/publish`, {
+        confirmed: true,
+        recipientHash: review.recipientHash,
+      }).expect(201);
+    } finally {
+      await db.userRole.updateMany({
+        where: { id: { in: assignments.map((a) => a.id) } },
+        data: { status: 'active' },
+      });
+    }
+  });
+  it.each(['registration', 'preview', 'publication'] as const)(
+    'rejects contract review %s when an earlier scalar source writer is still in flight',
+    async (stage) => {
+      const { room, contract, file, input, actor, otherProjectId } =
+        await contractFileFixture();
+      const order = await productionOrderFixture(actor, otherProjectId);
+      const prepared =
+        stage === 'registration'
+          ? null
+          : (
+              await post('sender', `/rooms/${room.id}/releases`, input).expect(
+                201,
+              )
+            ).body;
+      if (stage === 'publication')
+        await getBinary('publisher', `/releases/${prepared.id}/preview`).expect(
+          200,
+        );
+      const review =
+        stage === 'publication'
+          ? (
+              await get('publisher', `/releases/${prepared.id}/review`).expect(
+                200,
+              )
+            ).body
+          : null;
+      await db.$transaction(async (tx) => {
+        await tx.qualityReport.create({
+          data: {
+            productionOrderId: order.id,
+            reportNumber: randomUUID(),
+            inspectionDate: new Date(),
+            result: 'PASSED',
+            summary: 'Chưa commit',
+            fileId: file.id,
+            createdBy: actor.userId,
+          },
+        });
+        if (stage === 'registration')
+          await post('sender', `/rooms/${room.id}/releases`, input).expect(409);
+        else if (stage === 'preview')
+          await getBinary(
+            'publisher',
+            `/releases/${prepared.id}/preview`,
+          ).expect(409);
+        else
+          await post('publisher', `/releases/${prepared.id}/publish`, {
+            confirmed: true,
+            recipientHash: review.recipientHash,
+          }).expect(409);
+      });
+      if (stage === 'registration')
+        expect(
+          await db.contractDocument.count({
+            where: { contractId: contract.id },
+          }),
+        ).toBe(0);
+      else {
+        const release = await db.chatDocumentRelease.findUniqueOrThrow({
+          where: { id: prepared.id },
+        });
+        expect(release.publishedAt).toBeNull();
+        if (stage === 'preview') expect(release.reviewedAt).toBeNull();
+      }
+    },
+  );
+  it('serializes a later scalar source writer behind final contract review publication without locking tables during storage reads', async () => {
+    const { room, file, bytes, input, actor, otherProjectId } =
+      await contractFileFixture();
+    const order = await productionOrderFixture(actor, otherProjectId);
+    const storage = app.get(FileStorage),
+      stream = storage.stream.bind(storage);
+    const storageRead = vi
+      .spyOn(storage, 'stream')
+      .mockImplementation(async (key) => {
+        const locks = await db.$queryRaw<
+          { count: bigint }[]
+        >`SELECT count(*) FROM pg_locks l JOIN pg_class c ON c.oid=l.relation WHERE c.relname='QualityReport' AND l.mode='ShareLock' AND l.granted`;
+        expect(locks[0]!.count).toBe(0n);
+        return stream(key);
+      });
+    const service = app.get(ProjectChatService) as unknown as {
+      event(
+        tx: Prisma.TransactionClient,
+        actor: CurrentActor,
+        projectId: string,
+        entityId: string,
+        action: string,
+        details?: Prisma.InputJsonObject,
+      ): Promise<unknown>;
+    };
+    const event = service.event.bind(service);
+    let writer: Promise<unknown> | undefined;
+    let blocked = false;
+    const publication = vi
+      .spyOn(service, 'event')
+      .mockImplementation(
+        async (tx, eventActor, projectId, entityId, action, details) => {
+          if (action === 'chat.release.publish') {
+            const [backend] = await tx.$queryRaw<
+              { pid: number }[]
+            >`SELECT pg_backend_pid() AS pid`;
+            writer = db.qualityReport
+              .create({
+                data: {
+                  productionOrderId: order.id,
+                  reportNumber: randomUUID(),
+                  inspectionDate: new Date(),
+                  result: 'PASSED',
+                  summary: 'Ghi sau quyết định',
+                  fileId: file.id,
+                  createdBy: actor.userId,
+                },
+              })
+              .then((row) => row);
+            await expect
+              .poll(
+                async () => {
+                  const rows = await db.$queryRaw<
+                    { blocked: boolean }[]
+                  >`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE ${backend!.pid}=ANY(pg_blocking_pids(pid)) AND query LIKE '%QualityReport%') AS blocked`;
+                  return rows[0]!.blocked;
+                },
+                { timeout: 1000 },
+              )
+              .toBe(true);
+            blocked = true;
+          }
+          return event(tx, eventActor, projectId, entityId, action, details);
+        },
+      );
+    try {
+      const prepared = (
+        await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+      ).body;
+      await getBinary('publisher', `/releases/${prepared.id}/preview`).expect(
+        200,
+      );
+      const review = (
+        await get('publisher', `/releases/${prepared.id}/review`).expect(200)
+      ).body;
+      await post('publisher', `/releases/${prepared.id}/publish`, {
+        confirmed: true,
+        recipientHash: review.recipientHash,
+      }).expect(201);
+      expect(blocked).toBe(true);
+      await writer;
+      expect(
+        (
+          await db.chatDocumentRelease.findUniqueOrThrow({
+            where: { id: prepared.id },
+          })
+        ).publishedAt,
+      ).not.toBeNull();
+      expect(storageRead).toHaveBeenCalledTimes(3);
+      expect(
+        (
+          await getBinary('guest', `/releases/${prepared.id}/download`).expect(
+            200,
+          )
+        ).body,
+      ).toEqual(bytes);
+    } finally {
+      publication.mockRestore();
+      storageRead.mockRestore();
+      await writer;
+    }
   });
   it('rejects inconsistent customer payment sources and stale publication while retaining published bytes', async () => {
     const {

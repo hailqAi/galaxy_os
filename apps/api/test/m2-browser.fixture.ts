@@ -108,6 +108,7 @@ export async function createM2BrowserFixture() {
         customerId: customer.id,
         code: `browser-${run}`,
         name: 'Project browser M2-A',
+        projectOwnerId: users.sender!.id,
         createdBy: users.authority!.id,
         updatedBy: users.authority!.id,
       },
@@ -180,6 +181,11 @@ export async function createM2BrowserFixture() {
       'file.upload',
       'project.document.manage',
       'project.document.review',
+      'contract.read',
+      'contract.create',
+      'contract.update',
+      'quotation.update',
+      'quotation.approve',
     ];
     const sourceRole = await db.role.create({
       data: {
@@ -270,6 +276,61 @@ export async function createM2BrowserFixture() {
       `/projects/${project.id}/required-documents/${document.id}/decision`,
       { decision: 'APPROVED' },
     );
+    const quotation = await db.quotation.create({
+      data: {
+        organizationId: org.id,
+        projectId: project.id,
+        customerId: customer.id,
+        number: `CONTRACT-${run}`,
+        currency: 'VND',
+        grandTotal: '120000',
+        createdBy: users.sender!.id,
+        updatedBy: users.sender!.id,
+        versions: {
+          create: {
+            version: 1,
+            createdBy: users.sender!.id,
+            grandTotal: '120000',
+          },
+        },
+      },
+    });
+    for (const action of ['submit', 'approve', 'mark-sent', 'mark-accepted'])
+      await domain(
+        action === 'approve' ? 'publisher' : 'sender',
+        `/projects/${project.id}/quotations/${quotation.id}/${action}`,
+        {},
+      );
+    const contract = await domain(
+      'sender',
+      `/projects/${project.id}/contracts`,
+      {
+        quotationId: quotation.id,
+        contractNumber: `C-${run}`,
+        sellerLegalEntity: 'Galaxy fixture',
+        buyerLegalEntity: 'Khách fixture',
+      },
+    );
+    const contractFilename = 'hop-dong-browser.txt';
+    const contractFileText =
+      'Hợp đồng browser gửi khách xem xét; chưa xác nhận chữ ký';
+    const contractForm = new FormData();
+    contractForm.append('entityType', 'Project');
+    contractForm.append('entityId', project.id);
+    contractForm.append('category', 'PROJECT_DOCUMENT');
+    contractForm.append(
+      'file',
+      new Blob([contractFileText], { type: 'text/plain' }),
+      contractFilename,
+    );
+    const contractUploaded = await fetch(`${api}/files`, {
+      method: 'POST',
+      headers: { Cookie: users.sender!.cookie },
+      body: contractForm,
+    });
+    if (!contractUploaded.ok)
+      throw new Error(`Fixture contract upload ${contractUploaded.status}`);
+    const contractFile = (await contractUploaded.json()) as { id: string };
     const taskRole = await db.role.create({
       data: {
         organizationId: org.id,
@@ -333,6 +394,10 @@ export async function createM2BrowserFixture() {
         }
       },
       sourceId: document.id,
+      contractId: contract.id,
+      contractFileId: contractFile.id,
+      contractFilename,
+      contractFileText,
       projectId: project.id,
       roomId: internal.id!,
       guestRoomId: external.id!,

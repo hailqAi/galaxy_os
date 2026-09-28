@@ -117,6 +117,7 @@ export class ChatReleaseDto {
     'SAMPLE',
     'HANDOVER',
     'CONTRACT',
+    'CONTRACT_FILE',
     'PAYMENT',
     'CUSTOMER_PAYMENT_RECORD',
     'DELIVERY_INSTALL',
@@ -128,6 +129,7 @@ export class ChatReleaseDto {
     | 'SAMPLE'
     | 'HANDOVER'
     | 'CONTRACT'
+    | 'CONTRACT_FILE'
     | 'PAYMENT'
     | 'CUSTOMER_PAYMENT_RECORD'
     | 'DELIVERY_INSTALL';
@@ -148,6 +150,10 @@ export class ChatReleaseDto {
   @IsOptional() @IsUUID() appendixId?: string;
   @IsOptional() @IsUUID() clientKey?: string;
   @IsOptional() @Matches(/^[0-9a-f]{64}$/) sourceFingerprint?: string;
+}
+export class ChatContractFilesQuery {
+  @IsUUID() sourceId!: string;
+  @IsOptional() @IsUUID() appendixId?: string;
 }
 export class ChatPublishDto {
   @IsIn([true]) confirmed!: boolean;
