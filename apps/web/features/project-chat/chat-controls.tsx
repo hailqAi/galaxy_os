@@ -452,6 +452,7 @@ type Source = {
     | 'HANDOVER'
     | 'CONTRACT'
     | 'PAYMENT'
+    | 'CUSTOMER_PAYMENT_RECORD'
     | 'DELIVERY_INSTALL';
   sourceId: string;
   fileId?: string;
@@ -487,19 +488,21 @@ export function SourceReviewLabel({
   return (
     <p>
       Loại nguồn: {source.title ?? source.type ?? source.sourceType} ·{' '}
-      {['CONTRACT', 'PAYMENT', 'DELIVERY_INSTALL'].includes(
-        source.sourceType ?? '',
-      )
-        ? 'Bản thông tin từ hồ sơ; trạng thái trong nội dung, không xác nhận phê duyệt, ký, thanh toán hoặc nghiệm thu'
-        : source.sourceType === 'SAMPLE'
-          ? 'Phiên bản file của mẫu đã duyệt'
-          : source.signedStatus === 'NOT_REQUIRED'
-            ? 'Nguồn không yêu cầu ký'
-            : source.signedStatus === 'SIGNED_MANUALLY'
-              ? 'Nguồn ghi nhận ký thủ công'
-              : source.signedStatus === 'SIGNED_EXTERNALLY'
-                ? 'Nguồn ghi nhận ký bên ngoài'
-                : 'Nguồn đã duyệt'}
+      {source.sourceType === 'CUSTOMER_PAYMENT_RECORD'
+        ? 'Khoản thu ghi nhận trong Galaxy; không phải biên lai ngân hàng hoặc xác nhận đối soát'
+        : ['CONTRACT', 'PAYMENT', 'DELIVERY_INSTALL'].includes(
+              source.sourceType ?? '',
+            )
+          ? 'Bản thông tin từ hồ sơ; trạng thái trong nội dung, không xác nhận phê duyệt, ký, thanh toán hoặc nghiệm thu'
+          : source.sourceType === 'SAMPLE'
+            ? 'Phiên bản file của mẫu đã duyệt'
+            : source.signedStatus === 'NOT_REQUIRED'
+              ? 'Nguồn không yêu cầu ký'
+              : source.signedStatus === 'SIGNED_MANUALLY'
+                ? 'Nguồn ghi nhận ký thủ công'
+                : source.signedStatus === 'SIGNED_EXTERNALLY'
+                  ? 'Nguồn ghi nhận ký bên ngoài'
+                  : 'Nguồn đã duyệt'}
     </p>
   );
 }
@@ -719,9 +722,9 @@ export function ReleasePanel({
           </button>
           <p>
             Nhận phương án, báo giá, mẫu, bản vẽ và hồ sơ bàn giao đủ căn cứ.
-            Bản thông tin hợp đồng/phụ lục, lịch nghĩa vụ thanh toán và kế hoạch
-            lắp đặt được tạo từ hồ sơ; không thay bản có chữ ký, biên lai đối
-            soát hoặc xác nhận đã giao/lắp.
+            Bản thông tin hợp đồng/phụ lục, lịch nghĩa vụ, khoản thu đã ghi nhận
+            và kế hoạch lắp đặt lấy từ hồ sơ; không thay bản có chữ ký, biên lai
+            ngân hàng, xác nhận đối soát hoặc xác nhận đã giao/lắp.
           </p>
         </div>
       )}

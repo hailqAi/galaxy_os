@@ -118,6 +118,7 @@ export class ChatReleaseDto {
     'HANDOVER',
     'CONTRACT',
     'PAYMENT',
+    'CUSTOMER_PAYMENT_RECORD',
     'DELIVERY_INSTALL',
   ])
   sourceType?:
@@ -128,14 +129,18 @@ export class ChatReleaseDto {
     | 'HANDOVER'
     | 'CONTRACT'
     | 'PAYMENT'
+    | 'CUSTOMER_PAYMENT_RECORD'
     | 'DELIVERY_INSTALL';
   @IsUUID() sourceId!: string;
   @IsOptional() @IsUUID() fileId?: string;
   @ValidateIf(
     (o: ChatReleaseDto) =>
-      !['CONTRACT', 'PAYMENT', 'DELIVERY_INSTALL'].includes(
-        o.sourceType ?? '',
-      ) || o.version !== undefined,
+      ![
+        'CONTRACT',
+        'PAYMENT',
+        'CUSTOMER_PAYMENT_RECORD',
+        'DELIVERY_INSTALL',
+      ].includes(o.sourceType ?? '') || o.version !== undefined,
   )
   @IsInt()
   @Min(1)

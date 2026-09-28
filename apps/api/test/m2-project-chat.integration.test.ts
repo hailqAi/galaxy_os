@@ -2489,6 +2489,16 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
         ],
       },
     );
+    const payment = await contracts.payment(actor, otherProjectId, {
+      paymentDate: new Date('2027-01-03T00:00:00.000Z'),
+      amount: '120000',
+      currency: 'VND',
+      paymentMethod: 'BANK_TRANSFER',
+      bankReference: `PRIVATE-${run}`,
+      notes: `INTERNAL-${run}`,
+      idempotencyKey: `m2-payment-${run}`,
+      allocations: [{ scheduleId: schedules[0]!.id, amount: '120000' }],
+    });
     const installation = app.get(InstallationService);
     const plan = await installation.createPlan(actor, {
       projectId: otherProjectId,
@@ -2505,6 +2515,23 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       approvedDrawing: false,
       checklist: [{ title: 'Kiểm tra', required: true }],
     });
+    await post('authority', `/projects/${otherProjectId}/authorities`, {
+      userId: users.manager!.id,
+      actions: ['CREATE', 'ACCESS_ADMIN', 'HISTORY'],
+      roomCeiling: ['READ', 'SEND', 'UPLOAD', 'DOWNLOAD', 'HISTORY'],
+    }).expect(201);
+    await post('authority', `/projects/${otherProjectId}/authorities`, {
+      userId: users.publisher!.id,
+      actions: ['PUBLISH'],
+      roomCeiling: [],
+    }).expect(201);
+    await db.organizationMembership.updateMany({
+      where: { organizationId: orgId, userId: users.guest!.id },
+      data: { kind: 'EXTERNAL' },
+    });
+    await post('authority', `/projects/${otherProjectId}/participants`, {
+      userId: users.guest!.id,
+    }).expect(201);
     const room = (
       await post('manager', `/projects/${otherProjectId}/rooms`, {
         title: 'Nguồn hợp đồng và kế hoạch',
@@ -2536,6 +2563,7 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
     for (const [sourceType, sourceId, word] of [
       ['CONTRACT', contract.id, 'Khách đúng hồ sơ'],
       ['PAYMENT', schedules[0]!.id, '120000'],
+      ['CUSTOMER_PAYMENT_RECORD', payment.id, '120000'],
       ['DELIVERY_INSTALL', plan.id, 'Lắp hạng mục A'],
     ] as const) {
       const source = sourceRows.find(
@@ -2574,7 +2602,7 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       ).body as Buffer;
       expect(preview.toString()).toContain(word);
       expect(preview.toString()).not.toMatch(
-        /bankReference|exchangeRate|internalNote|overrideReason/,
+        /bankReference|exchangeRate|internalNote|overrideReason|PRIVATE-|INTERNAL-/,
       );
       const review = (
         await get('publisher', `/releases/${prepared.id}/review`).expect(200)
@@ -2731,7 +2759,7 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
         ).expect(200)
       ).body.toString(),
     ).toContain('Điều chỉnh lịch dự kiến');
-    const installInput = { ...completed[2]!.input, clientKey: randomUUID() };
+    const installInput = { ...completed[3]!.input, clientKey: randomUUID() };
     const staleInstall = (
       await post('sender', `/rooms/${room.id}/releases`, installInput).expect(
         201,
@@ -2749,10 +2777,10 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       (
         await getBinary(
           'guest',
-          `/releases/${completed[2]!.id}/download`,
+          `/releases/${completed[3]!.id}/download`,
         ).expect(200)
       ).body,
-    ).toEqual(completed[2]!.bytes);
+    ).toEqual(completed[3]!.bytes);
     expect(
       (await db.contract.findUniqueOrThrow({ where: { id: contract.id } }))
         .status,
@@ -2761,7 +2789,13 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       await db.customerPayment.count({
         where: { organizationId: orgId, projectId: otherProjectId },
       }),
-    ).toBe(0);
+    ).toBe(1);
+    const recordedPayment = await db.customerPayment.findUniqueOrThrow({
+      where: { id: payment.id },
+    });
+    expect(recordedPayment.amount.toString()).toBe('120000');
+    expect(recordedPayment.bankReference).toBe(`PRIVATE-${run}`);
+    expect(recordedPayment.notes).toBe(`INTERNAL-${run}`);
     expect(
       (
         await db.installationWorkOrder.findFirstOrThrow({

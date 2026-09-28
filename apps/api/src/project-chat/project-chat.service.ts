@@ -427,18 +427,24 @@ export class ProjectChatService {
             throw e;
         }
       }
-      const [contracts, schedules, plans] = await Promise.all([
-        tx.contract.findMany({
-          where: { projectId, organizationId: actor.organizationId },
-          include: { appendices: true },
-        }),
-        tx.customerPaymentSchedule.findMany({
-          where: { projectId, organizationId: actor.organizationId },
-        }),
-        tx.installationPlan.findMany({
-          where: { projectId, organizationId: actor.organizationId },
-        }),
-      ]);
+      const [contracts, schedules, plans, customerPayments] = await Promise.all(
+        [
+          tx.contract.findMany({
+            where: { projectId, organizationId: actor.organizationId },
+            include: { appendices: true },
+          }),
+          tx.customerPaymentSchedule.findMany({
+            where: { projectId, organizationId: actor.organizationId },
+          }),
+          tx.installationPlan.findMany({
+            where: { projectId, organizationId: actor.organizationId },
+          }),
+          tx.customerPayment.findMany({
+            where: { projectId, organizationId: actor.organizationId },
+            orderBy: { createdAt: 'desc' },
+          }),
+        ],
+      );
       const snapshots: {
         sourceType: CustomerSnapshotType;
         sourceId: string;
@@ -458,6 +464,10 @@ export class ProjectChatService {
         })),
         ...plans.map((p) => ({
           sourceType: 'DELIVERY_INSTALL' as const,
+          sourceId: p.id,
+        })),
+        ...customerPayments.map((p) => ({
+          sourceType: 'CUSTOMER_PAYMENT_RECORD' as const,
           sourceId: p.id,
         })),
       ];
@@ -1966,6 +1976,7 @@ export class ProjectChatService {
               projectId,
               roomId,
               contractDocumentId,
+              customerPaymentId: current.customerPaymentId ?? null,
               paymentScheduleId:
                 input.sourceType === 'PAYMENT' ? input.sourceId : null,
               installationPlanId:
@@ -2104,7 +2115,12 @@ export class ProjectChatService {
       throw new NotFoundException();
     if (r.preparedBy !== actor.userId)
       await this.access.authority(tx, actor, r.projectId, 'PUBLISH');
-    if (r.contractDocumentId || r.paymentScheduleId || r.installationPlanId) {
+    if (
+      r.contractDocumentId ||
+      r.customerPaymentId ||
+      r.paymentScheduleId ||
+      r.installationPlanId
+    ) {
       const document = r.contractDocumentId
         ? await tx.contractDocument.findUniqueOrThrow({
             where: { id: r.contractDocumentId },
@@ -2113,11 +2129,16 @@ export class ProjectChatService {
       const input = {
         sourceType: (document
           ? 'CONTRACT'
-          : r.paymentScheduleId
-            ? 'PAYMENT'
-            : 'DELIVERY_INSTALL') as CustomerSnapshotType,
+          : r.customerPaymentId
+            ? 'CUSTOMER_PAYMENT_RECORD'
+            : r.paymentScheduleId
+              ? 'PAYMENT'
+              : 'DELIVERY_INSTALL') as CustomerSnapshotType,
         sourceId:
-          document?.contractId ?? r.paymentScheduleId ?? r.installationPlanId!,
+          document?.contractId ??
+          r.customerPaymentId ??
+          r.paymentScheduleId ??
+          r.installationPlanId!,
         appendixId: document?.appendixId ?? undefined,
       };
       const source = await customerPublicationSource(

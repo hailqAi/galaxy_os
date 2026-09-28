@@ -10,6 +10,7 @@ import { projectWhereForPermissions } from '../access-control/business-entity.po
 export const customerSnapshotTypes = [
   'CONTRACT',
   'PAYMENT',
+  'CUSTOMER_PAYMENT_RECORD',
   'DELIVERY_INSTALL',
 ] as const;
 export type CustomerSnapshotType = (typeof customerSnapshotTypes)[number];
@@ -27,6 +28,7 @@ export async function customerPublicationSource(
   const permission = {
     CONTRACT: 'contract.read',
     PAYMENT: 'receivable.read',
+    CUSTOMER_PAYMENT_RECORD: 'receivable.read',
     DELIVERY_INSTALL: 'installation.read',
   }[input.sourceType];
   const sourceScopes = actorsForPermission(actor, permission);
@@ -58,6 +60,7 @@ export async function customerPublicationSource(
   let updatedAt: Date;
   let details: Prisma.InputJsonObject;
   let contractId: string | undefined;
+  let customerPaymentId: string | undefined;
   let title: string;
   if (input.sourceType === 'CONTRACT') {
     const contract = await tx.contract.findFirst({
@@ -148,6 +151,51 @@ export async function customerPublicationSource(
       'Lưu ý':
         'Lịch theo hồ sơ, không phải biên lai, xác nhận đã thu tiền hoặc đối soát ngân hàng.',
     };
+  } else if (input.sourceType === 'CUSTOMER_PAYMENT_RECORD') {
+    const payment = await tx.customerPayment.findFirst({
+      where: {
+        id: input.sourceId,
+        organizationId: actor.organizationId,
+        projectId,
+      },
+      include: {
+        allocations: {
+          orderBy: { id: 'asc' },
+          include: { schedule: { include: { contract: true } } },
+        },
+      },
+    });
+    if (
+      !payment ||
+      !payment.allocations.length ||
+      payment.allocations.some(
+        ({ schedule }) =>
+          schedule.organizationId !== actor.organizationId ||
+          schedule.projectId !== projectId ||
+          schedule.contract.organizationId !== actor.organizationId ||
+          schedule.contract.projectId !== projectId ||
+          schedule.contract.customerId !== project.customerId ||
+          ['CANCELLED', 'TERMINATED'].includes(schedule.contract.status),
+      )
+    )
+      throw new ConflictException('Khoản thu không thuộc khách của hồ sơ');
+    customerPaymentId = payment.id;
+    updatedAt = payment.createdAt;
+    title = `Thông tin khoản thu đã ghi nhận · ${payment.paymentDate.toISOString().slice(0, 10)}`;
+    details = {
+      Ngày: payment.paymentDate.toISOString(),
+      'Số tiền ghi nhận': payment.amount.toString(),
+      'Tiền tệ': payment.currency,
+      'Phương thức ghi nhận': payment.paymentMethod,
+      'Phân bổ theo nghĩa vụ': payment.allocations.map(
+        ({ amount, schedule }) => ({
+          Mốc: schedule.milestoneName,
+          'Số tiền phân bổ': amount.toString(),
+        }),
+      ),
+      'Lưu ý':
+        'Thông tin từ khoản thu khách hàng đã ghi trong hệ thống; không phải biên lai ngân hàng hoặc xác nhận đối soát.',
+    };
   } else {
     const plan = await tx.installationPlan.findFirst({
       where: {
@@ -206,5 +254,13 @@ export async function customerPublicationSource(
   );
   if (bytes.length > 65536)
     throw new ConflictException('Bản thông tin vượt giới hạn 64 KiB');
-  return { snapshot, fingerprint, bytes, updatedAt, contractId, title };
+  return {
+    snapshot,
+    fingerprint,
+    bytes,
+    updatedAt,
+    contractId,
+    customerPaymentId,
+    title,
+  };
 }

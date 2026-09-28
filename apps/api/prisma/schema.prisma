@@ -1091,6 +1091,7 @@ model ChatDocumentRelease {
   handoverDocumentId String? @db.Uuid
   contractDocumentId String? @db.Uuid
   paymentScheduleId String? @db.Uuid
+  customerPaymentId String? @db.Uuid
   installationPlanId String? @db.Uuid
   prepareKey String? @db.Uuid
   prepareHash String?
@@ -1123,6 +1124,7 @@ model ChatDocumentRelease {
   file FileAsset @relation(fields:[fileAssetId],references:[id])
   contractDocument ContractDocument? @relation(fields:[contractDocumentId],references:[id],onDelete:Restrict)
   paymentSchedule CustomerPaymentSchedule? @relation(fields:[paymentScheduleId],references:[id],onDelete:Restrict)
+  customerPayment CustomerPayment? @relation(fields:[customerPaymentId],references:[id],onDelete:Restrict)
   installationPlan InstallationPlan? @relation(fields:[installationPlanId],references:[id],onDelete:Restrict)
   @@unique([roomId,preparedBy,prepareKey])
   @@index([roomId,publishedAt])
@@ -2094,6 +2096,7 @@ model CustomerPaymentSchedule {
 }
 
 model CustomerPayment {
+  chatReleases   ChatDocumentRelease[]
   id             String              @id @default(uuid()) @db.Uuid
   organizationId String              @db.Uuid
   projectId      String              @db.Uuid
