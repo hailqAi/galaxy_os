@@ -451,6 +451,7 @@ type Source = {
     | 'SAMPLE'
     | 'HANDOVER'
     | 'CONTRACT'
+    | 'CONTRACT_FILE'
     | 'PAYMENT'
     | 'CUSTOMER_PAYMENT_RECORD'
     | 'DELIVERY_INSTALL';
@@ -459,6 +460,62 @@ type Source = {
   version: number;
   name: string;
 };
+type ContractFile = {
+  id: string;
+  version: number;
+  filename: string;
+  mimeType: string;
+  sizeBytes: string;
+};
+export function releaseSourceKey(source: Source) {
+  return ['CONTRACT', 'CONTRACT_FILE'].includes(source.sourceType ?? '')
+    ? JSON.stringify([
+        source.sourceType,
+        source.sourceId,
+        source.appendixId,
+        source.sourceFingerprint,
+      ])
+    : source.appendixId
+      ? `${source.sourceId}:${source.appendixId}`
+      : source.sourceId;
+}
+export function releasePrepareBody(
+  source: Source,
+  file: ContractFile | undefined,
+  clientKey: string,
+) {
+  return {
+    sourceId: source.sourceId,
+    sourceType: source.sourceType,
+    fileId: file?.id ?? source.fileId,
+    version:
+      source.sourceType === 'CONTRACT_FILE'
+        ? file?.version
+        : source.sourceFingerprint
+          ? undefined
+          : source.version,
+    appendixId: source.appendixId,
+    sourceFingerprint: source.sourceFingerprint,
+    clientKey: source.sourceFingerprint ? clientKey : undefined,
+  };
+}
+export function releasePrepareIdentity(
+  roomId: string,
+  actorId: string,
+  source: Source,
+  file: ContractFile | undefined,
+) {
+  return JSON.stringify([
+    roomId,
+    actorId,
+    source.sourceType,
+    source.sourceId,
+    source.appendixId,
+    source.sourceFingerprint,
+    file?.id,
+    file?.version,
+  ]);
+}
 type Review = {
   id: string;
   filename: string;
@@ -471,6 +528,7 @@ type Review = {
     title?: string;
     signedStatus?: string;
     sourceType?: string;
+    file?: { id: string; version: number; filename: string };
   } | null;
   recipients: {
     userId: string;
@@ -490,19 +548,21 @@ export function SourceReviewLabel({
       Loại nguồn: {source.title ?? source.type ?? source.sourceType} ·{' '}
       {source.sourceType === 'CUSTOMER_PAYMENT_RECORD'
         ? 'Khoản thu ghi nhận trong Galaxy; không phải biên lai ngân hàng hoặc xác nhận đối soát'
-        : ['CONTRACT', 'PAYMENT', 'DELIVERY_INSTALL'].includes(
-              source.sourceType ?? '',
-            )
-          ? 'Bản thông tin từ hồ sơ; trạng thái trong nội dung, không xác nhận phê duyệt, ký, thanh toán hoặc nghiệm thu'
-          : source.sourceType === 'SAMPLE'
-            ? 'Phiên bản file của mẫu đã duyệt'
-            : source.signedStatus === 'NOT_REQUIRED'
-              ? 'Nguồn không yêu cầu ký'
-              : source.signedStatus === 'SIGNED_MANUALLY'
-                ? 'Nguồn ghi nhận ký thủ công'
-                : source.signedStatus === 'SIGNED_EXTERNALLY'
-                  ? 'Nguồn ghi nhận ký bên ngoài'
-                  : 'Nguồn đã duyệt'}
+        : source.sourceType === 'CONTRACT_FILE'
+          ? `Bản file gửi khách xem xét · phiên bản file ${source.file?.version ?? 'không rõ'}; không xác nhận phê duyệt hoặc chữ ký`
+          : ['CONTRACT', 'PAYMENT', 'DELIVERY_INSTALL'].includes(
+                source.sourceType ?? '',
+              )
+            ? 'Bản thông tin từ hồ sơ; trạng thái trong nội dung, không xác nhận phê duyệt, ký, thanh toán hoặc nghiệm thu'
+            : source.sourceType === 'SAMPLE'
+              ? 'Phiên bản file của mẫu đã duyệt'
+              : source.signedStatus === 'NOT_REQUIRED'
+                ? 'Nguồn không yêu cầu ký'
+                : source.signedStatus === 'SIGNED_MANUALLY'
+                  ? 'Nguồn ghi nhận ký thủ công'
+                  : source.signedStatus === 'SIGNED_EXTERNALLY'
+                    ? 'Nguồn ghi nhận ký bên ngoài'
+                    : 'Nguồn đã duyệt'}
     </p>
   );
 }
@@ -527,8 +587,15 @@ export function ReleasePanel({
 }) {
   const [sources, setSources] = useState<Source[]>([]),
     [sourceId, setSourceId] = useState(''),
+    [contractFiles, setContractFiles] = useState<{
+      sourceKey: string;
+      files: ContractFile[];
+    }>(),
+    [fileKey, setFileKey] = useState(''),
     [review, setReview] = useState<Review>();
   const [error, setError] = useState(''),
+    [sourceError, setSourceError] = useState(''),
+    [fileError, setFileError] = useState(''),
     [notice, setNotice] = useState(''),
     [busy, setBusy] = useState(false),
     [confirmed, setConfirmed] = useState(false);
@@ -539,6 +606,13 @@ export function ReleasePanel({
   const prepareRequest = useRef<
     { identity: string; clientKey: string } | undefined
   >(undefined);
+  const source = sources.find((s) => releaseSourceKey(s) === sourceId);
+  const file =
+    contractFiles?.sourceKey === sourceId
+      ? contractFiles.files.find(
+          (f) => JSON.stringify([f.id, f.version]) === fileKey,
+        )
+      : undefined;
   if (review && !list.pending.some((r) => r.id === review.id)) {
     setReview(undefined);
     setPreview(undefined);
@@ -566,19 +640,78 @@ export function ReleasePanel({
         headers: { 'X-Chat-Actor': actor.userId },
       })
         .then((value) => {
-          if (!controller.signal.aborted) setSources(value);
+          if (controller.signal.aborted) return;
+          setSources(value);
+          setSourceError('');
+          if (
+            sourceId &&
+            !value.some((s) => releaseSourceKey(s) === sourceId)
+          ) {
+            setSourceId('');
+            setContractFiles(undefined);
+            setFileKey('');
+            setSourceError('Nguồn đã đổi; tải lại và chọn phiên bản mới.');
+          }
         })
         .catch((e) => {
           if (!controller.signal.aborted) {
             setSources([]);
             setSourceId('');
-            setError((e as Error).message);
+            setContractFiles(undefined);
+            setFileKey('');
+            setSourceError((e as Error).message);
           }
         });
     return () => {
       controller.abort();
     };
-  }, [roomId, actor.userId, canPrepare, list]);
+  }, [roomId, actor.userId, canPrepare, list, sourceId]);
+  useEffect(() => {
+    if (!canPrepare || source?.sourceType !== 'CONTRACT_FILE') return;
+    const controller = new AbortController();
+    const query = new URLSearchParams({ sourceId: source.sourceId });
+    if (source.appendixId) query.set('appendixId', source.appendixId);
+    const selectedKey = releaseSourceKey(source);
+    api<{ sourceFingerprint: string; files: ContractFile[] }>(
+      `/project-chat/rooms/${roomId}/contract-files?${query}`,
+      { signal: controller.signal, headers: { 'X-Chat-Actor': actor.userId } },
+    )
+      .then((value) => {
+        if (controller.signal.aborted) return;
+        if (value.sourceFingerprint !== source.sourceFingerprint) {
+          setSourceId('');
+          setContractFiles(undefined);
+          setFileKey('');
+          setFileError('Nguồn đã đổi; tải lại và chọn phiên bản mới.');
+          return;
+        }
+        setFileError('');
+        setContractFiles({ sourceKey: selectedKey, files: value.files });
+        setFileKey((key) =>
+          value.files.some((f) => JSON.stringify([f.id, f.version]) === key)
+            ? key
+            : '',
+        );
+      })
+      .catch((e) => {
+        if (controller.signal.aborted) return;
+        setContractFiles(undefined);
+        setFileKey('');
+        if (e instanceof ApiError && [401, 412].includes(e.status)) onRevoked();
+        else setFileError((e as Error).message);
+      });
+    return () => controller.abort();
+  }, [
+    roomId,
+    actor.userId,
+    canPrepare,
+    sourceId,
+    source?.sourceId,
+    source?.appendixId,
+    source?.sourceFingerprint,
+    onRevoked,
+    list,
+  ]);
   async function action(path: string, body: unknown) {
     setBusy(true);
     setError('');
@@ -601,7 +734,19 @@ export function ReleasePanel({
     } catch (e) {
       if (active.current) {
         if (e instanceof ApiError && [401, 412].includes(e.status)) onRevoked();
-        else setError((e as Error).message);
+        else {
+          if (
+            e instanceof ApiError &&
+            e.status === 409 &&
+            path === `/project-chat/rooms/${roomId}/releases` &&
+            source?.sourceType === 'CONTRACT_FILE'
+          ) {
+            setSourceId('');
+            setContractFiles(undefined);
+            setFileKey('');
+          }
+          setError((e as Error).message);
+        }
       }
     } finally {
       if (active.current) setBusy(false);
@@ -659,7 +804,9 @@ export function ReleasePanel({
         Tin nhắn không phải ký kết. Hồ sơ nội bộ cần người phát hành khác người
         chuẩn bị.
       </p>
-      {error && <p role="alert">{error}</p>}
+      {(error || sourceError || fileError) && (
+        <p role="alert">{error || sourceError || fileError}</p>
+      )}
       {notice && <p role="status">{notice}</p>}
       {canPrepare && (
         <div>
@@ -667,18 +814,16 @@ export function ReleasePanel({
             Nguồn tài liệu đủ điều kiện
             <select
               value={sourceId}
-              onChange={(e) => setSourceId(e.target.value)}
+              onChange={(e) => {
+                setSourceId(e.target.value);
+                setContractFiles(undefined);
+                setFileKey('');
+                setError('');
+              }}
             >
               <option value="">Chọn nguồn/phiên bản</option>
               {sources.map((s) => (
-                <option
-                  value={
-                    s.appendixId ? `${s.sourceId}:${s.appendixId}` : s.sourceId
-                  }
-                  key={
-                    s.appendixId ? `${s.sourceId}:${s.appendixId}` : s.sourceId
-                  }
-                >
+                <option value={releaseSourceKey(s)} key={releaseSourceKey(s)}>
                   {s.name} ·{' '}
                   {s.sourceFingerprint
                     ? 'bản chụp dữ liệu nguồn'
@@ -687,35 +832,59 @@ export function ReleasePanel({
               ))}
             </select>
           </label>
+          {source?.sourceType === 'CONTRACT_FILE' && (
+            <label>
+              File hợp đồng gửi khách xem xét
+              <select
+                value={fileKey}
+                onChange={(e) => {
+                  setFileKey(e.target.value);
+                }}
+              >
+                <option value="">Chọn file/phiên bản</option>
+                {(contractFiles?.sourceKey === sourceId
+                  ? contractFiles.files
+                  : []
+                ).map((f) => (
+                  <option
+                    key={`${f.id}:${f.version}`}
+                    value={JSON.stringify([f.id, f.version])}
+                  >
+                    {f.filename} · phiên bản file {f.version}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <button
-            disabled={busy || locked || !sourceId}
+            disabled={
+              busy ||
+              locked ||
+              !source ||
+              (source.sourceType === 'CONTRACT_FILE' && !file)
+            }
             onClick={() => {
-              const source = sources.find(
-                (s) =>
-                  (s.appendixId
-                    ? `${s.sourceId}:${s.appendixId}`
-                    : s.sourceId) === sourceId,
+              if (!source || (source.sourceType === 'CONTRACT_FILE' && !file))
+                return;
+              const identity = releasePrepareIdentity(
+                roomId,
+                actor.userId,
+                source,
+                file,
               );
-              const identity = JSON.stringify([roomId, source]);
               if (prepareRequest.current?.identity !== identity)
                 prepareRequest.current = {
                   identity,
                   clientKey: crypto.randomUUID(),
                 };
-              if (source)
-                void action(`/project-chat/rooms/${roomId}/releases`, {
-                  sourceId: source.sourceId,
-                  sourceType: source.sourceType,
-                  fileId: source.fileId,
-                  version: source.sourceFingerprint
-                    ? undefined
-                    : source.version,
-                  appendixId: source.appendixId,
-                  sourceFingerprint: source.sourceFingerprint,
-                  clientKey: source.sourceFingerprint
-                    ? prepareRequest.current.clientKey
-                    : undefined,
-                });
+              void action(
+                `/project-chat/rooms/${roomId}/releases`,
+                releasePrepareBody(
+                  source,
+                  file,
+                  prepareRequest.current.clientKey,
+                ),
+              );
             }}
           >
             Chuẩn bị phát hành
@@ -724,7 +893,9 @@ export function ReleasePanel({
             Nhận phương án, báo giá, mẫu, bản vẽ và hồ sơ bàn giao đủ căn cứ.
             Bản thông tin hợp đồng/phụ lục, lịch nghĩa vụ, khoản thu đã ghi nhận
             và kế hoạch lắp đặt lấy từ hồ sơ; không thay bản có chữ ký, biên lai
-            ngân hàng, xác nhận đối soát hoặc xác nhận đã giao/lắp.
+            ngân hàng, xác nhận đối soát hoặc xác nhận đã giao/lắp. File hợp
+            đồng gửi khách xem xét là bản riêng theo đúng phiên bản file, không
+            chứng minh đã phê duyệt hoặc ký.
           </p>
         </div>
       )}
