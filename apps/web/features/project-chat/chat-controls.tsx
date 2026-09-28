@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Actor, api, apiUrl, ApiError } from '../../app/lib/api';
 
 const labels: Record<string, string> = {
@@ -442,7 +442,17 @@ export type ReleaseList = {
   }[];
 };
 type Source = {
-  sourceType?: 'PROPOSAL' | 'QUOTATION' | 'TECHNICAL' | 'SAMPLE' | 'HANDOVER';
+  appendixId?: string;
+  sourceFingerprint?: string;
+  sourceType?:
+    | 'PROPOSAL'
+    | 'QUOTATION'
+    | 'TECHNICAL'
+    | 'SAMPLE'
+    | 'HANDOVER'
+    | 'CONTRACT'
+    | 'PAYMENT'
+    | 'DELIVERY_INSTALL';
   sourceId: string;
   fileId?: string;
   version: number;
@@ -457,6 +467,7 @@ type Review = {
   recipientHash: string;
   sourceSnapshot?: {
     type?: string;
+    title?: string;
     signedStatus?: string;
     sourceType?: string;
   } | null;
@@ -468,6 +479,30 @@ type Review = {
     expiresAt: string | null;
   }[];
 };
+export function SourceReviewLabel({
+  source,
+}: {
+  source: NonNullable<Review['sourceSnapshot']>;
+}) {
+  return (
+    <p>
+      Loại nguồn: {source.title ?? source.type ?? source.sourceType} ·{' '}
+      {['CONTRACT', 'PAYMENT', 'DELIVERY_INSTALL'].includes(
+        source.sourceType ?? '',
+      )
+        ? 'Bản thông tin từ hồ sơ; trạng thái trong nội dung, không xác nhận phê duyệt, ký, thanh toán hoặc nghiệm thu'
+        : source.sourceType === 'SAMPLE'
+          ? 'Phiên bản file của mẫu đã duyệt'
+          : source.signedStatus === 'NOT_REQUIRED'
+            ? 'Nguồn không yêu cầu ký'
+            : source.signedStatus === 'SIGNED_MANUALLY'
+              ? 'Nguồn ghi nhận ký thủ công'
+              : source.signedStatus === 'SIGNED_EXTERNALLY'
+                ? 'Nguồn ghi nhận ký bên ngoài'
+                : 'Nguồn đã duyệt'}
+    </p>
+  );
+}
 export function ReleasePanel({
   roomId,
   actor,
@@ -498,6 +533,9 @@ export function ReleasePanel({
   const active = useRef(true),
     blobUrl = useRef<string | undefined>(undefined);
   const currentList = useRef(list);
+  const prepareRequest = useRef<
+    { identity: string; clientKey: string } | undefined
+  >(undefined);
   if (review && !list.pending.some((r) => r.id === review.id)) {
     setReview(undefined);
     setPreview(undefined);
@@ -549,6 +587,8 @@ export function ReleasePanel({
         body: JSON.stringify(body),
       });
       if (active.current) {
+        if (path === `/project-chat/rooms/${roomId}/releases`)
+          prepareRequest.current = undefined;
         setNotice(
           'Server đã xác nhận; danh sách sẽ cập nhật ở lần lấy tiếp theo.',
         );
@@ -628,8 +668,18 @@ export function ReleasePanel({
             >
               <option value="">Chọn nguồn/phiên bản</option>
               {sources.map((s) => (
-                <option value={s.sourceId} key={s.sourceId}>
-                  {s.name} · v{s.version}
+                <option
+                  value={
+                    s.appendixId ? `${s.sourceId}:${s.appendixId}` : s.sourceId
+                  }
+                  key={
+                    s.appendixId ? `${s.sourceId}:${s.appendixId}` : s.sourceId
+                  }
+                >
+                  {s.name} ·{' '}
+                  {s.sourceFingerprint
+                    ? 'bản chụp dữ liệu nguồn'
+                    : `v${s.version}`}
                 </option>
               ))}
             </select>
@@ -637,13 +687,31 @@ export function ReleasePanel({
           <button
             disabled={busy || locked || !sourceId}
             onClick={() => {
-              const source = sources.find((s) => s.sourceId === sourceId);
+              const source = sources.find(
+                (s) =>
+                  (s.appendixId
+                    ? `${s.sourceId}:${s.appendixId}`
+                    : s.sourceId) === sourceId,
+              );
+              const identity = JSON.stringify([roomId, source]);
+              if (prepareRequest.current?.identity !== identity)
+                prepareRequest.current = {
+                  identity,
+                  clientKey: crypto.randomUUID(),
+                };
               if (source)
                 void action(`/project-chat/rooms/${roomId}/releases`, {
                   sourceId: source.sourceId,
                   sourceType: source.sourceType,
                   fileId: source.fileId,
-                  version: source.version,
+                  version: source.sourceFingerprint
+                    ? undefined
+                    : source.version,
+                  appendixId: source.appendixId,
+                  sourceFingerprint: source.sourceFingerprint,
+                  clientKey: source.sourceFingerprint
+                    ? prepareRequest.current.clientKey
+                    : undefined,
                 });
             }}
           >
@@ -651,8 +719,9 @@ export function ReleasePanel({
           </button>
           <p>
             Nhận phương án, báo giá, mẫu, bản vẽ và hồ sơ bàn giao đủ căn cứ.
-            Hợp đồng, phụ lục, hồ sơ thanh toán và kế hoạch giao/lắp: chưa đủ
-            nguồn/căn cứ phát hành.
+            Bản thông tin hợp đồng/phụ lục, lịch nghĩa vụ thanh toán và kế hoạch
+            lắp đặt được tạo từ hồ sơ; không thay bản có chữ ký, biên lai đối
+            soát hoặc xác nhận đã giao/lắp.
           </p>
         </div>
       )}
@@ -673,18 +742,7 @@ export function ReleasePanel({
             {review.roomId}
           </p>
           {review.sourceSnapshot && (
-            <p>
-              Loại nguồn: {review.sourceSnapshot.type} ·{' '}
-              {review.sourceSnapshot.sourceType === 'SAMPLE'
-                ? 'Phiên bản file của mẫu đã duyệt'
-                : review.sourceSnapshot.signedStatus === 'NOT_REQUIRED'
-                  ? 'Nguồn không yêu cầu ký'
-                  : review.sourceSnapshot.signedStatus === 'SIGNED_MANUALLY'
-                    ? 'Nguồn ghi nhận ký thủ công'
-                    : review.sourceSnapshot.signedStatus === 'SIGNED_EXTERNALLY'
-                      ? 'Nguồn ghi nhận ký bên ngoài'
-                      : 'Nguồn đã duyệt'}
-            </p>
+            <SourceReviewLabel source={review.sourceSnapshot} />
           )}
           {preview.text !== undefined && (
             <pre className="max-h-60 overflow-auto whitespace-pre-wrap">

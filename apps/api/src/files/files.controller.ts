@@ -1,3 +1,4 @@
+import { multipartFilename } from './filename';
 import {
   Body,
   Controller,
@@ -51,6 +52,10 @@ export class FilesController {
     MultipartAdmissionInterceptor,
     FileInterceptor('file', {
       limits: genericFileUploadLimits,
+      fileFilter: (_req, file, done) => {
+        file.originalname = multipartFilename(file.originalname);
+        done(null, true);
+      },
     }),
   )
   upload(

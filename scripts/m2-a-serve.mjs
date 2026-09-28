@@ -15,22 +15,41 @@ assertG00Isolation(env);
 const mode = process.argv[2];
 if (!['api', 'web'].includes(mode))
   throw new Error('Use m2-a-serve.mjs api|web');
+const clockMonitor = process.argv.includes('--clock-monitor');
+const productionWeb = process.argv.includes('--production');
 const child = spawn(
   process.execPath,
   mode === 'api'
-    ? ['dist/main.js']
+    ? [
+        ...(clockMonitor
+          ? [
+              '--import',
+              fileURLToPath(new URL('scripts/m2-clock-monitor.mjs', root)),
+            ]
+          : []),
+        'dist/main.js',
+      ]
     : [
         'node_modules/next/dist/bin/next',
-        'dev',
+        productionWeb ? 'start' : 'dev',
         '--hostname',
         '127.0.0.1',
         '--port',
         '33002',
-        '--webpack',
+        ...(productionWeb ? [] : ['--webpack']),
       ],
   {
     cwd: fileURLToPath(new URL(`apps/${mode}/`, root)),
-    env: mode === 'web' ? { ...env, NODE_ENV: 'development' } : env,
+    env:
+      mode === 'web'
+        ? {
+            ...env,
+            NODE_ENV: productionWeb ? 'production' : 'development',
+            ...(productionWeb
+              ? { APP_PUBLIC_ORIGIN: 'https://localhost:33003' }
+              : {}),
+          }
+        : { ...env, ...(clockMonitor ? { M2_CLOCK_OBSERVE: 'true' } : {}) },
     stdio: 'inherit',
   },
 );

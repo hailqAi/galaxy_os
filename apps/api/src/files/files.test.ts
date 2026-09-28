@@ -18,6 +18,7 @@ import { PrismaService } from '../prisma.service';
 import { FileStorage } from './file-storage';
 import { FilesController, genericFileUploadLimits } from './files.controller';
 import { FilesService } from './files.service';
+import { safeFilename, multipartFilename } from './filename';
 const actor = {
   organizationId: 'organization',
   userId: 'actor',
@@ -1367,4 +1368,41 @@ describe('FilesService', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+});
+
+describe('untrusted upload names', () => {
+  it.each([
+    '../other.txt',
+    '/etc/passwd.txt',
+    'C:\\other.txt',
+    'line\r\nInjected.txt',
+    'nul\0.txt',
+    'a'.repeat(201) + '.txt',
+  ])(
+    'rejects storage traversal, control bytes and oversize names: %s',
+    (name) => expect(safeFilename(name)).toBeNull(),
+  );
+  it('keeps Vietnamese text while neutralizing HTML and quotes without choosing storage paths', () => {
+    expect(safeFilename('ảnh<img onerror=alert(1)>.txt')).toBe(
+      'ảnh_img onerror_alert_1__.txt',
+    );
+    expect(safeFilename('bản "khách".txt')).toBe('bản _khách_.txt');
+    expect(safeFilename('tài liệu.txt')).toBe('tài liệu.txt');
+  });
+});
+
+it('decodes browser multipart UTF-8 bytes without corrupting legacy Latin-1 or extended Unicode names', () => {
+  expect(
+    multipartFilename(Buffer.from('ảnh khách.txt', 'utf8').toString('latin1')),
+  ).toBe('ảnh khách.txt');
+  expect(multipartFilename('café.txt')).toBe('café.txt');
+  expect(multipartFilename('ảnh khách.txt')).toBe('ảnh khách.txt');
+});
+
+it('does not strip a multipart BOM before the control-character guard', () => {
+  expect(
+    safeFilename(
+      multipartFilename(Buffer.from('\uFEFFx.txt', 'utf8').toString('latin1')),
+    ),
+  ).toBeNull();
 });

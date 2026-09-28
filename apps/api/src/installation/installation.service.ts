@@ -6,6 +6,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
 import { findProjectFile } from '../files/project-file';
@@ -82,27 +83,32 @@ export class InstallationService {
       }))
     )
       throw new NotFoundException('Installation team not found');
-    return this.prisma.installationWorkOrder.create({
-      data: {
-        organizationId: actor.organizationId,
-        projectId: plan.projectId,
-        planId,
-        teamId: data.teamId,
-        workOrderNumber: data.workOrderNumber,
-        title: data.title,
-        area: data.area,
-        plannedDate: data.plannedDate,
-        requiredInventory: data.requiredInventory,
-        approvedDrawing: data.approvedDrawing,
-        createdBy: actor.userId,
-        checklist: {
-          create: data.checklist.map((item, position) => ({
-            ...item,
-            position,
-          })),
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "Project" WHERE "id"=${plan.projectId}::uuid FOR UPDATE`,
+      );
+      return tx.installationWorkOrder.create({
+        data: {
+          organizationId: actor.organizationId,
+          projectId: plan.projectId,
+          planId,
+          teamId: data.teamId,
+          workOrderNumber: data.workOrderNumber,
+          title: data.title,
+          area: data.area,
+          plannedDate: data.plannedDate,
+          requiredInventory: data.requiredInventory,
+          approvedDrawing: data.approvedDrawing,
+          createdBy: actor.userId,
+          checklist: {
+            create: data.checklist.map((item, position) => ({
+              ...item,
+              position,
+            })),
+          },
         },
-      },
-      include: { checklist: true },
+        include: { checklist: true },
+      });
     });
   }
 
@@ -167,6 +173,16 @@ export class InstallationService {
     )
       throw new ForbiddenException('Readiness override permission required');
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "Project" WHERE "id"=${item.projectId}::uuid FOR UPDATE`,
+      );
+      const current = await tx.installationWorkOrder.findUniqueOrThrow({
+        where: { id },
+      });
+      if (current.status !== item.status)
+        throw new ConflictException(
+          'Work order changed; reload before release',
+        );
       const updated = await tx.installationWorkOrder.update({
         where: { id },
         data: {

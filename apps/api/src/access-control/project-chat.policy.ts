@@ -9,6 +9,7 @@ import { ChatRoomGrant, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { CurrentActor } from './current-actor';
 import { readEnvironment } from '../config/env';
+import { createHash, randomUUID } from 'node:crypto';
 
 export const activeChatGrant = (now: Date) => ({
   revokedAt: null,
@@ -19,6 +20,63 @@ export const activeChatGrant = (now: Date) => ({
 @Injectable()
 export class ProjectChatPolicy {
   constructor(@Inject(PrismaService) private readonly db: PrismaService) {}
+
+  private async traceDeniedGrant(
+    tx: Prisma.TransactionClient,
+    actor: CurrentActor,
+    projectId: string,
+    action: string,
+    now: Date,
+    roomId?: string,
+  ) {
+    // Observer only in the isolated test bootstrap. Public denials remain opaque.
+    if (process.env.M2_CLOCK_OBSERVE !== 'true') return;
+    const grants = roomId
+      ? await tx.chatRoomGrant.findMany({
+          where: {
+            roomId,
+            userId: actor.userId,
+            organizationId: actor.organizationId,
+          },
+          include: { issuedUnder: true },
+        })
+      : await tx.chatProjectGrant.findMany({
+          where: {
+            projectId,
+            userId: actor.userId,
+            organizationId: actor.organizationId,
+            actions: { has: action },
+          },
+        });
+    const ranges = grants.flatMap((g) => [
+      g,
+      ...('issuedUnder' in g ? [g.issuedUnder] : []),
+    ]);
+    process.stderr.write(
+      JSON.stringify({
+        event: 'chat.authorization.denied',
+        correlationId: randomUUID(),
+        scopeHash: createHash('sha256')
+          .update([actor.userId, projectId, roomId ?? ''].join(':'))
+          .digest('hex')
+          .slice(0, 16),
+        action,
+        reason: 'GRANT_DENIED',
+        observations: {
+          hasFutureGrant: ranges.some((g) => g.effectiveAt > now),
+          hasExpiredGrant: ranges.some(
+            (g) => g.expiresAt && g.expiresAt <= now,
+          ),
+        },
+        authorizationTime: now.toISOString(),
+        ranges: ranges.map((g) => ({
+          effectiveAt: g.effectiveAt.toISOString(),
+          expiresAt: g.expiresAt?.toISOString() ?? null,
+          revoked: Boolean(g.revokedAt),
+        })),
+      }) + '\n',
+    );
+  }
 
   async live(actor: CurrentActor, tx: Prisma.TransactionClient) {
     const now = new Date();
@@ -92,6 +150,7 @@ export class ProjectChatPolicy {
     action: string,
   ) {
     if (actor.membershipKind === 'EXTERNAL') throw new ForbiddenException();
+    const now = new Date();
     return tx.chatProjectGrant
       .findFirst({
         where: {
@@ -99,7 +158,7 @@ export class ProjectChatPolicy {
           projectId,
           userId: actor.userId,
           actions: { has: action },
-          ...activeChatGrant(new Date()),
+          ...activeChatGrant(now),
           membership: {
             kind: 'INTERNAL',
             status: 'active',
@@ -108,8 +167,11 @@ export class ProjectChatPolicy {
         },
         orderBy: { effectiveAt: 'desc' },
       })
-      .then((grant) => {
-        if (!grant) throw new NotFoundException();
+      .then(async (grant) => {
+        if (!grant) {
+          await this.traceDeniedGrant(tx, actor, projectId, action, now);
+          throw new NotFoundException();
+        }
         return grant;
       });
   }
@@ -161,8 +223,17 @@ export class ProjectChatPolicy {
       },
       orderBy: [{ effectiveAt: 'desc' }, { id: 'desc' }],
     });
-    if (!grant || !grant.actions.includes('READ'))
+    if (!grant || !grant.actions.includes('READ')) {
+      await this.traceDeniedGrant(
+        tx,
+        actor,
+        room.projectId,
+        action,
+        now,
+        roomId,
+      );
       throw new NotFoundException();
+    }
     const parent = await tx.chatProjectGrant.findUniqueOrThrow({
       where: { id: grant.issuedUnderId },
     });

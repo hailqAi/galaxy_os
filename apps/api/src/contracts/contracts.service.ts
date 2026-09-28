@@ -159,6 +159,14 @@ export class ContractsService {
     if (!allowed[contract.status]?.includes(data.status))
       throw new ConflictException('Invalid contract transition');
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "Project" WHERE "id"=${projectId}::uuid FOR UPDATE`,
+      );
+      const current = await tx.contract.findUniqueOrThrow({ where: { id } });
+      if (current.status !== contract.status)
+        throw new ConflictException(
+          'Contract changed; reload before transition',
+        );
       const updated = await tx.contract.update({
         where: { id },
         data: {
@@ -250,6 +258,16 @@ export class ContractsService {
     if (!allowed[appendix.status]?.includes(data.status))
       throw new ConflictException('Invalid appendix transition');
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "Project" WHERE "id"=${projectId}::uuid FOR UPDATE`,
+      );
+      const current = await tx.contractAppendix.findUniqueOrThrow({
+        where: { id: appendixId },
+      });
+      if (current.status !== appendix.status)
+        throw new ConflictException(
+          'Appendix changed; reload before transition',
+        );
       if (data.status !== 'EFFECTIVE')
         return tx.contractAppendix.update({
           where: { id: appendixId },

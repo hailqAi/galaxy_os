@@ -1,3 +1,4 @@
+import { multipartFilename } from '../files/filename';
 import {
   Body,
   Controller,
@@ -167,7 +168,13 @@ export class ProjectChatController {
   @Post('rooms/:id/files')
   @UseInterceptors(
     MultipartAdmissionInterceptor,
-    FileInterceptor('file', { limits: genericFileUploadLimits }),
+    FileInterceptor('file', {
+      limits: genericFileUploadLimits,
+      fileFilter: (_req, file, done) => {
+        file.originalname = multipartFilename(file.originalname);
+        done(null, true);
+      },
+    }),
   )
   upload(
     @Actor() actor: CurrentActor,

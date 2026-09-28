@@ -7,7 +7,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { Readable } from 'node:stream';
+import {
+  customerPublicationSource,
+  customerSnapshotTypes,
+  CustomerSnapshotType,
+} from './customer-publication-source';
 import {
   CurrentActor,
   actorsForPermission,
@@ -24,6 +30,7 @@ import { TasksService } from '../tasks/tasks.service';
 import { readEnvironment } from '../config/env';
 import {
   assertFileCapacity,
+  fileStorageReservationExpiry,
   lockOrganizationFileCapacity,
 } from '../files/file-quota';
 import {
@@ -409,6 +416,65 @@ export class ProjectChatService {
         try {
           await this.releaseSource(tx, actor, projectId, input);
           result.push(input);
+        } catch (e) {
+          if (
+            !(
+              e instanceof ForbiddenException ||
+              e instanceof NotFoundException ||
+              e instanceof ConflictException
+            )
+          )
+            throw e;
+        }
+      }
+      const [contracts, schedules, plans] = await Promise.all([
+        tx.contract.findMany({
+          where: { projectId, organizationId: actor.organizationId },
+          include: { appendices: true },
+        }),
+        tx.customerPaymentSchedule.findMany({
+          where: { projectId, organizationId: actor.organizationId },
+        }),
+        tx.installationPlan.findMany({
+          where: { projectId, organizationId: actor.organizationId },
+        }),
+      ]);
+      const snapshots: {
+        sourceType: CustomerSnapshotType;
+        sourceId: string;
+        appendixId?: string;
+      }[] = [
+        ...contracts.flatMap((c) => [
+          { sourceType: 'CONTRACT' as const, sourceId: c.id },
+          ...c.appendices.map((a) => ({
+            sourceType: 'CONTRACT' as const,
+            sourceId: c.id,
+            appendixId: a.id,
+          })),
+        ]),
+        ...schedules.map((p) => ({
+          sourceType: 'PAYMENT' as const,
+          sourceId: p.id,
+        })),
+        ...plans.map((p) => ({
+          sourceType: 'DELIVERY_INSTALL' as const,
+          sourceId: p.id,
+        })),
+      ];
+      for (const input of snapshots) {
+        try {
+          const source = await customerPublicationSource(
+            tx,
+            await this.freshActor(tx, actor),
+            projectId,
+            input,
+          );
+          result.push({
+            ...input,
+            sourceFingerprint: source.fingerprint,
+            version: 1,
+            name: source.title,
+          });
         } catch (e) {
           if (
             !(
@@ -1716,11 +1782,241 @@ export class ProjectChatService {
     };
   }
 
+  private async prepareCustomerSnapshot(
+    actor: CurrentActor,
+    roomId: string,
+    input: ChatReleaseDto,
+  ) {
+    if (!input.clientKey || !input.sourceFingerprint || input.fileId)
+      throw new BadRequestException(
+        'Cần khóa yêu cầu và dấu nguồn; binary do server tạo',
+      );
+    const projectId = await this.access.roomProject(actor, roomId);
+    const sourceInput = {
+      sourceType: input.sourceType as CustomerSnapshotType,
+      sourceId: input.sourceId,
+      appendixId: input.appendixId,
+    };
+    if (input.appendixId && input.sourceType !== 'CONTRACT')
+      throw new BadRequestException('Phụ lục chỉ thuộc hợp đồng');
+    const prepareHash = createHash('sha256')
+      .update(
+        JSON.stringify({
+          ...sourceInput,
+          sourceFingerprint: input.sourceFingerprint,
+        }),
+      )
+      .digest('hex');
+    const reservationId = randomUUID(),
+      storageKey = this.storage.createKey(actor.organizationId);
+    const projectRead = async (tx: Prisma.TransactionClient) => {
+      const { room } = await this.access.assertRoom(
+        actor,
+        roomId,
+        'UPLOAD',
+        tx,
+      );
+      if (
+        room.audience !== 'CUSTOMER' ||
+        room.locked ||
+        actor.membershipKind === 'EXTERNAL'
+      )
+        throw new ForbiddenException();
+      return customerPublicationSource(
+        tx,
+        await this.freshActor(tx, actor),
+        projectId,
+        sourceInput,
+      );
+    };
+    const replay = async (tx: Prisma.TransactionClient) => {
+      const row = await tx.chatDocumentRelease.findUnique({
+        where: {
+          roomId_preparedBy_prepareKey: {
+            roomId,
+            preparedBy: actor.userId,
+            prepareKey: input.clientKey!,
+          },
+        },
+      });
+      if (row && (row.prepareHash !== prepareHash || row.revokedAt))
+        throw new ConflictException(
+          'Khóa chuẩn bị đã dùng cho nội dung khác hoặc bản bị thu hồi',
+        );
+      return row;
+    };
+    const initial = await this.access.project(actor, projectId, async (tx) => {
+      const source = await projectRead(tx);
+      const existing = await replay(tx);
+      if (existing) return { existing, source };
+      if (source.fingerprint !== input.sourceFingerprint)
+        throw new ConflictException('Nguồn đã đổi; tải lại danh sách');
+      await lockOrganizationFileCapacity(tx, actor.organizationId);
+      const env = readEnvironment();
+      await assertFileCapacity(tx, {
+        organizationId: actor.organizationId,
+        actorId: actor.userId,
+        incomingBytes: BigInt(source.bytes.length),
+        staging: false,
+        organizationLimitBytes: BigInt(env.UPLOAD_ORGANIZATION_QUOTA_BYTES),
+        globalLimitBytes: BigInt(env.UPLOAD_GLOBAL_QUOTA_BYTES),
+        unmeasuredFileBytes: BigInt(env.UPLOAD_MAX_FILE_BYTES),
+        actorStagingLimit: env.UPLOAD_ACTOR_STAGING_LIMIT,
+      });
+      await tx.fileStorageReservation.create({
+        data: {
+          id: reservationId,
+          organizationId: actor.organizationId,
+          actorId: actor.userId,
+          storageKey,
+          sizeBytes: BigInt(source.bytes.length),
+          expiresAt: fileStorageReservationExpiry(),
+        },
+      });
+      return { source, existing: null };
+    });
+    const view = (r: { id: string; version: number; filename: string }) => ({
+      id: r.id,
+      version: r.version,
+      filename: r.filename,
+      roomId,
+    });
+    if (initial.existing) return view(initial.existing);
+    const cleanup = async () => {
+      if (await this.db.fileAsset.findUnique({ where: { storageKey } })) return;
+      await this.storage.removePending(storageKey, reservationId);
+      await this.storage.remove(storageKey);
+      await this.db.fileStorageReservation.deleteMany({
+        where: { id: reservationId, storageKey },
+      });
+    };
+    try {
+      await this.storage.putStream(
+        actor.organizationId,
+        Readable.from(initial.source.bytes),
+        storageKey,
+        reservationId,
+      );
+      const release = await this.access.project(
+        actor,
+        projectId,
+        async (tx) => {
+          const current = await projectRead(tx);
+          const existing = await replay(tx);
+          if (existing) return existing;
+          if (
+            current.fingerprint !== initial.source.fingerprint ||
+            current.fingerprint !== input.sourceFingerprint
+          )
+            throw new ConflictException('Nguồn đã đổi trong lúc tạo bản xuất');
+          const reservations = await tx.$queryRaw<{ id: string }[]>(
+            Prisma.sql`SELECT "id" FROM "FileStorageReservation" WHERE "id"=${reservationId}::uuid AND "expiresAt">clock_timestamp() FOR UPDATE`,
+          );
+          if (!reservations.length)
+            throw new ConflictException('Đặt chỗ file hết hạn');
+          const checksum = createHash('sha256')
+            .update(initial.source.bytes)
+            .digest('hex');
+          const filename = `${input.sourceType!.toLowerCase()}-${current.fingerprint.slice(0, 12)}.txt`;
+          const file = await tx.fileAsset.create({
+            data: {
+              organizationId: actor.organizationId,
+              originalFilename: filename,
+              storedFilename: storageKey.split('/').at(-1)!,
+              storageKey,
+              checksum,
+              sizeBytes: BigInt(current.bytes.length),
+              mimeType: 'text/plain',
+              category: 'CUSTOMER_SNAPSHOT',
+              uploadedById: actor.userId,
+            },
+          });
+          let contractDocumentId: string | null = null,
+            version = 1;
+          if (current.contractId) {
+            const latest = await tx.contractDocument.aggregate({
+              where: { contractId: current.contractId },
+              _max: { version: true },
+            });
+            version = (latest._max.version ?? 0) + 1;
+            const document = await tx.contractDocument.create({
+              data: {
+                contractId: current.contractId,
+                appendixId: input.appendixId,
+                fileAssetId: file.id,
+                version,
+                language: 'VI',
+                format: 'TXT',
+                storageKey,
+                checksum,
+                generatedBy: actor.userId,
+                sourceSnapshot: current.snapshot,
+                sourceFingerprint: current.fingerprint,
+              },
+            });
+            contractDocumentId = document.id;
+          }
+          await this.storage.publishPending(storageKey, reservationId);
+          const finalSource = await projectRead(tx);
+          if (finalSource.fingerprint !== initial.source.fingerprint)
+            throw new ConflictException('Nguồn đã đổi trước khi ghi bản xuất');
+          const row = await tx.chatDocumentRelease.create({
+            data: {
+              organizationId: actor.organizationId,
+              projectId,
+              roomId,
+              contractDocumentId,
+              paymentScheduleId:
+                input.sourceType === 'PAYMENT' ? input.sourceId : null,
+              installationPlanId:
+                input.sourceType === 'DELIVERY_INSTALL' ? input.sourceId : null,
+              sourceSnapshot: current.snapshot,
+              sourceFingerprint: current.fingerprint,
+              sourceUpdatedAt: current.updatedAt,
+              fileAssetId: file.id,
+              version,
+              checksum,
+              filename,
+              mimeType: file.mimeType,
+              preparedBy: actor.userId,
+              prepareKey: input.clientKey,
+              prepareHash,
+            },
+          });
+          await tx.fileStorageReservation.delete({
+            where: { id: reservationId },
+          });
+          await this.event(
+            tx,
+            actor,
+            projectId,
+            row.id,
+            'chat.release.prepare',
+            { sourceId: input.sourceId, sourceType: input.sourceType, roomId },
+          );
+          return row;
+        },
+      );
+      await cleanup();
+      return view(release);
+    } catch (error) {
+      // Only this request's unique object is eligible. On cleanup failure keep the reservation for the existing sweeper.
+      await cleanup().catch(() => undefined);
+      throw error;
+    }
+  }
+
   async prepareRelease(
     actor: CurrentActor,
     roomId: string,
     input: ChatReleaseDto,
   ) {
+    if (
+      input.sourceType &&
+      customerSnapshotTypes.includes(input.sourceType as CustomerSnapshotType)
+    )
+      return this.prepareCustomerSnapshot(actor, roomId, input);
+    if (!input.version) throw new BadRequestException('Thiếu phiên bản nguồn');
     const projectId = await this.access.roomProject(actor, roomId);
     return this.access.project(actor, projectId, async (tx) => {
       const { room } = await this.access.assertRoom(
@@ -1808,6 +2104,56 @@ export class ProjectChatService {
       throw new NotFoundException();
     if (r.preparedBy !== actor.userId)
       await this.access.authority(tx, actor, r.projectId, 'PUBLISH');
+    if (r.contractDocumentId || r.paymentScheduleId || r.installationPlanId) {
+      const document = r.contractDocumentId
+        ? await tx.contractDocument.findUniqueOrThrow({
+            where: { id: r.contractDocumentId },
+          })
+        : null;
+      const input = {
+        sourceType: (document
+          ? 'CONTRACT'
+          : r.paymentScheduleId
+            ? 'PAYMENT'
+            : 'DELIVERY_INSTALL') as CustomerSnapshotType,
+        sourceId:
+          document?.contractId ?? r.paymentScheduleId ?? r.installationPlanId!,
+        appendixId: document?.appendixId ?? undefined,
+      };
+      const source = await customerPublicationSource(
+        tx,
+        await this.freshActor(tx, actor),
+        r.projectId,
+        input,
+      );
+      const file = await tx.fileAsset.findFirst({
+        where: {
+          id: r.fileAssetId,
+          organizationId: actor.organizationId,
+          deletedAt: null,
+        },
+        include: { attachments: true },
+      });
+      const digest = createHash('sha256').update(source.bytes).digest('hex');
+      if (
+        !file ||
+        file.confidentiality !== 'INTERNAL' ||
+        file.attachments.length ||
+        source.fingerprint !== r.sourceFingerprint ||
+        digest !== r.checksum ||
+        file.checksum !== r.checksum ||
+        file.mimeType !== r.mimeType ||
+        file.originalFilename !== r.filename ||
+        (document &&
+          (document.fileAssetId !== file.id ||
+            document.checksum !== r.checksum ||
+            document.sourceFingerprint !== r.sourceFingerprint))
+      )
+        throw new ConflictException(
+          'Nguồn/bản xuất đã đổi; chuẩn bị và kiểm tra lại',
+        );
+      return { r, file };
+    }
     const source = await this.releaseSource(tx, actor, r.projectId, {
       sourceType: r.technicalRevisionId
         ? 'TECHNICAL'

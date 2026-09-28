@@ -158,6 +158,8 @@ test('preparer and distinct publisher release reviewed proposal to the correct c
     const a = await preparer.newPage(),
       b = await publisher.newPage(),
       c = await customer.newPage();
+    for (const page of [a, b, c])
+      await page.setViewportSize({ width: 390, height: 844 });
     await login(a, 'sender');
     await a.getByRole('button', { name: /Khách thử nghiệm/ }).click();
     await a
@@ -416,7 +418,7 @@ test('reconnect retries a committed send with the same key and clears a recovere
   expect(keys[1]).toBe(keys[0]);
   await expect(page.getByText(text, { exact: true })).toHaveCount(1);
   const response = await page.request.get(
-    `${process.env.INTERNAL_API_URL}/project-chat/rooms/${fixture.guestRoomId}/messages`,
+    `${process.env.APP_PUBLIC_ORIGIN}/api/v1/project-chat/rooms/${fixture.guestRoomId}/messages`,
   );
   expect(response.status()).toBe(200);
   expect(
@@ -429,6 +431,116 @@ test('reconnect retries a committed send with the same key and clears a recovere
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
+});
+
+test('mobile upload retains the same request after a lost response and safely downloads a hostile filename', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page, 'guest');
+  await page.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+  const requests: string[] = [],
+    files: string[] = [];
+  await page.route('**/project-chat/rooms/*/files', async (route) => {
+    requests.push(route.request().postData() ?? '');
+    const response = await route.fetch();
+    expect(response.status()).toBe(201);
+    files.push((await response.json()).id);
+    if (files.length === 1) await route.abort('failed');
+    else await route.fulfill({ response });
+  });
+  await page
+    .getByLabel('Tin nhắn', { exact: true })
+    .fill('Nháp tiếng Việt khi tải lỗi');
+  await page.getByLabel('File đính kèm').setInputFiles({
+    name: 'ảnh<img onerror=alert(1)>.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('Binary tiếng Việt riêng biệt'),
+  });
+  await page.getByRole('button', { name: 'Gửi file', exact: true }).click();
+  await expect(
+    page.getByText('Upload chưa được xác nhận. Chọn Gửi file để thử lại.', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByText(/Đã lưu file:/)).toHaveCount(0);
+  await expect(page.getByLabel('Tin nhắn', { exact: true })).toHaveValue(
+    'Nháp tiếng Việt khi tải lỗi',
+  );
+  await page.getByRole('button', { name: 'Gửi file', exact: true }).click();
+  await expect(page.getByText(/Đã lưu file:/)).toBeVisible();
+  expect(files).toHaveLength(2);
+  expect(files[1]).toBe(files[0]);
+  const key = (body: string) =>
+    body.match(/name="clientKey"\r\n\r\n([^\r]+)/)?.[1];
+  expect(key(requests[0]!)).toBeTruthy();
+  expect(key(requests[1]!)).toBe(key(requests[0]!));
+  await page.getByRole('button', { name: 'Gửi tin', exact: true }).click();
+  await expect(
+    page.getByText('Nháp tiếng Việt khi tải lỗi', { exact: true }),
+  ).toHaveCount(1);
+  const link = page.getByRole('link', {
+    name: /ảnh_img onerror_alert_1__.txt/,
+  });
+  await expect(link).toBeVisible();
+  const download = await page.request.get((await link.getAttribute('href'))!);
+  expect(download.status()).toBe(200);
+  expect(await download.text()).toBe('Binary tiếng Việt riêng biệt');
+  expect(download.headers()['content-disposition']).not.toMatch(/[\r\n]/);
+  await expect(page.locator('article img[onerror]')).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
+
+test('offline reconnect starts one bounded polling loop without overlapping requests', async ({
+  page,
+  context,
+}) => {
+  await login(page, 'guest');
+  await page.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+  let active = 0,
+    maximum = 0,
+    reads = 0;
+  let release!: () => void, entered!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const reached = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  await context.setOffline(true);
+  await page.route('**/project-chat/rooms/*/messages*', async (route) => {
+    active++;
+    maximum = Math.max(maximum, active);
+    try {
+      const response = await route.fetch();
+      reads++;
+      if (reads === 1) {
+        entered();
+        await held;
+      }
+      await route.fulfill({ response });
+    } finally {
+      active--;
+    }
+  });
+  try {
+    await context.setOffline(false);
+    await reached;
+    // Repeated real offline/online edges while a response is held must not fork loops.
+    await context.setOffline(true);
+    await context.setOffline(false);
+    release();
+    await expect.poll(() => reads).toBeGreaterThanOrEqual(3);
+    expect(maximum).toBe(1);
+    await expect(page.getByLabel('Tin nhắn', { exact: true })).toHaveValue('');
+  } finally {
+    release();
+    await page.unrouteAll({ behavior: 'wait' });
+  }
 });
 
 test('reload warns only for a dirty draft and never restores it from storage', async ({
@@ -455,6 +567,97 @@ test('reload warns only for a dirty draft and never restores it from storage', a
   });
   await page.reload();
   expect(cleanDialogs).toBe(0);
+});
+
+test('restores a real BFCache document and rechecks revoked room access before showing content', async ({
+  page,
+  browser,
+}) => {
+  await page.addInitScript(() => {
+    Reflect.set(window, 'm2PageShows', []);
+    addEventListener('pageshow', (event) =>
+      Reflect.get(window, 'm2PageShows').push({
+        persisted: event.persisted,
+        wall: Date.now(),
+        mono: performance.now(),
+        visibility: document.querySelector('article')
+          ? getComputedStyle(document.querySelector('article')!).visibility
+          : 'absent',
+      }),
+    );
+  });
+  const cdp = await page.context().newCDPSession(page);
+  const reasons: unknown[] = [];
+  await cdp.send('Page.enable');
+  cdp.on('Page.backForwardCacheNotUsed', (value) => reasons.push(value));
+  await login(page, 'viewer');
+  await page.getByRole('button', { name: /Nội bộ thử nghiệm/ }).click();
+  await expect(page.getByText('Bạn chỉ có quyền xem')).toBeVisible();
+  await page.evaluate(() => location.assign('/work'));
+  await expect(page).toHaveURL(`${process.env.APP_PUBLIC_ORIGIN}/work`);
+  await page.goBack();
+  const restored = await page.evaluate(() =>
+    Reflect.get(window, 'm2PageShows'),
+  );
+  console.log(
+    JSON.stringify({
+      evidence: 'BFCACHE_REAL',
+      browser: browser.version(),
+      restored,
+      reasons,
+    }),
+  );
+  expect(
+    restored.some((e: { persisted: boolean }) => e.persisted),
+    'Yêu cầu pageshow.persisted từ browser thật',
+  ).toBe(true);
+  expect(
+    restored
+      .filter((e: { persisted: boolean }) => e.persisted)
+      .every((e: { visibility: string }) =>
+        ['hidden', 'absent'].includes(e.visibility),
+      ),
+  ).toBe(true);
+  await expect(
+    page.getByRole('button', { name: /Nội bộ thử nghiệm/ }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: /Nội bộ thử nghiệm/ }).click();
+  await expect(page.getByText('Bạn chỉ có quyền xem')).toBeVisible();
+  await page.evaluate(() => location.assign('/work'));
+  await expect(page).toHaveURL(`${process.env.APP_PUBLIC_ORIGIN}/work`);
+  const management = await fetch(
+    `${process.env.INTERNAL_API_URL}/project-chat/projects/${fixture.projectId}/management`,
+    { headers: { Cookie: fixture.users.manager!.cookie } },
+  );
+  expect(management.status).toBe(200);
+  const room = (await management.json()).rooms.find(
+    (r: { id: string }) => r.id === fixture.roomId,
+  );
+  const grant = room.grants.find(
+    (g: { userId: string }) => g.userId === fixture.users.viewer!.id,
+  );
+  const revoked = await fetch(
+    `${process.env.INTERNAL_API_URL}/project-chat/rooms/${fixture.roomId}/grants/${grant.id}/revoke`,
+    {
+      method: 'POST',
+      headers: {
+        Cookie: fixture.users.manager!.cookie,
+        'X-Chat-Actor': fixture.users.manager!.id,
+      },
+    },
+  );
+  expect(revoked.status).toBe(201);
+  await page.goBack();
+  expect(
+    (await page.evaluate(() => Reflect.get(window, 'm2PageShows'))).some(
+      (e: { persisted: boolean }) => e.persisted,
+    ),
+  ).toBe(true);
+  await expect(
+    page.getByRole('button', { name: /Nội bộ thử nghiệm/ }),
+  ).toHaveCount(0);
+  await expect(page.getByLabel('Tin nhắn', { exact: true })).toHaveCount(0);
+  await cdp.detach();
 });
 
 test('delayed polling cannot restore a departed room and offline revoke clears the draft without sending it', async ({

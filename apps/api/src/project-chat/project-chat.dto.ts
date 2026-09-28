@@ -14,6 +14,8 @@ import {
   Length,
   Max,
   Min,
+  Matches,
+  ValidateIf,
 } from 'class-validator';
 
 export const roomActions = [
@@ -108,11 +110,39 @@ export class ChatUploadDto {
 }
 export class ChatReleaseDto {
   @IsOptional()
-  @IsIn(['PROPOSAL', 'QUOTATION', 'TECHNICAL', 'SAMPLE', 'HANDOVER'])
-  sourceType?: 'PROPOSAL' | 'QUOTATION' | 'TECHNICAL' | 'SAMPLE' | 'HANDOVER';
+  @IsIn([
+    'PROPOSAL',
+    'QUOTATION',
+    'TECHNICAL',
+    'SAMPLE',
+    'HANDOVER',
+    'CONTRACT',
+    'PAYMENT',
+    'DELIVERY_INSTALL',
+  ])
+  sourceType?:
+    | 'PROPOSAL'
+    | 'QUOTATION'
+    | 'TECHNICAL'
+    | 'SAMPLE'
+    | 'HANDOVER'
+    | 'CONTRACT'
+    | 'PAYMENT'
+    | 'DELIVERY_INSTALL';
   @IsUUID() sourceId!: string;
   @IsOptional() @IsUUID() fileId?: string;
-  @IsInt() @Min(1) version!: number;
+  @ValidateIf(
+    (o: ChatReleaseDto) =>
+      !['CONTRACT', 'PAYMENT', 'DELIVERY_INSTALL'].includes(
+        o.sourceType ?? '',
+      ) || o.version !== undefined,
+  )
+  @IsInt()
+  @Min(1)
+  version!: number;
+  @IsOptional() @IsUUID() appendixId?: string;
+  @IsOptional() @IsUUID() clientKey?: string;
+  @IsOptional() @Matches(/^[0-9a-f]{64}$/) sourceFingerprint?: string;
 }
 export class ChatPublishDto {
   @IsIn([true]) confirmed!: boolean;

@@ -33,3 +33,15 @@ describe('M2-A chat UI', () => {
     expect(html).not.toContain('Hỏi GPT');
   });
 });
+
+it('labels a draft contract snapshot as information without inferring business approval', async () => {
+  const { SourceReviewLabel } = await import('./chat-controls');
+  const html = renderToStaticMarkup(
+    createElement(SourceReviewLabel, {
+      source: { sourceType: 'CONTRACT', title: 'Hợp đồng dự thảo' },
+    }),
+  );
+  expect(html).toContain('Hợp đồng dự thảo');
+  expect(html).toContain('Bản thông tin từ hồ sơ');
+  expect(html).not.toContain('Nguồn đã duyệt');
+});

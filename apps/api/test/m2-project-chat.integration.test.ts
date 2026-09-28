@@ -20,6 +20,8 @@ import { FilesService } from '../src/files/files.service';
 import { FileStorage } from '../src/files/file-storage';
 import { ProjectProductsService } from '../src/projects/project-products.service';
 import { ProductionService } from '../src/production/production.service';
+import { ContractsService } from '../src/contracts/contracts.service';
+import { InstallationService } from '../src/installation/installation.service';
 import { AfterSalesService } from '../src/after-sales/after-sales.service';
 import { CommercialService } from '../src/commercial/commercial.service';
 import { QuotationDocumentsService } from '../src/commercial/quotation-documents.service';
@@ -2355,5 +2357,388 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       (await db.chatMessage.findUniqueOrThrow({ where: { id: accepted.id } }))
         .body,
     ).toBe('Đã commit trước khóa');
+  });
+  it('prepares customer contract, payment schedule and installation snapshots through real domain writers without business side effects', async () => {
+    const permissions = [
+      'contract.read',
+      'receivable.read',
+      'installation.read',
+      'file.read',
+      'file.download',
+      'quotation.update',
+      'quotation.approve',
+    ];
+    const role = await db.role.create({
+      data: {
+        organizationId: orgId,
+        code: `snapshot-${run}`,
+        name: 'Nguồn khách thử',
+        permissions: {
+          create: permissions.map((code) => ({
+            permission: { connect: { code } },
+          })),
+        },
+      },
+    });
+    for (const name of ['sender', 'publisher'])
+      await db.userRole.create({
+        data: {
+          organizationId: orgId,
+          userId: users[name]!.id,
+          roleId: role.id,
+          scopeType: 'ORGANIZATION',
+        },
+      });
+    const actor: CurrentActor = {
+      userId: users.sender!.id,
+      organizationId: orgId,
+      permissions,
+      administrationScope: 'ORGANIZATION',
+      managedDepartmentIds: [],
+      administrationTier: 0,
+      email: 'synthetic@example.test',
+      displayName: 'sender',
+      mustChangePassword: false,
+      organizationMembershipId: (
+        await db.organizationMembership.findUniqueOrThrow({
+          where: {
+            organizationId_userId: {
+              organizationId: orgId,
+              userId: users.sender!.id,
+            },
+          },
+        })
+      ).id,
+    };
+    const project = await db.project.findUniqueOrThrow({
+      where: { id: otherProjectId },
+    });
+    const quotation = await db.quotation.create({
+      data: {
+        organizationId: orgId,
+        projectId: otherProjectId,
+        customerId: project.customerId,
+        number: `CONTRACT-${run}`,
+        currency: 'VND',
+        grandTotal: '120000',
+        createdBy: actor.userId,
+        updatedBy: actor.userId,
+        versions: {
+          create: { version: 1, createdBy: actor.userId, grandTotal: '120000' },
+        },
+      },
+    });
+    const commercial = app.get(CommercialService);
+    for (const state of ['INTERNAL_REVIEW', 'APPROVED', 'SENT', 'ACCEPTED'])
+      await commercial.transitionQuotation(
+        state === 'APPROVED'
+          ? { ...actor, userId: users.publisher!.id }
+          : actor,
+        otherProjectId,
+        quotation.id,
+        state,
+      );
+    const contracts = app.get(ContractsService);
+    const contract = await contracts.create(actor, otherProjectId, {
+      quotationId: quotation.id,
+      contractNumber: `C-${run}`,
+      sellerLegalEntity: 'Galaxy giả lập',
+      buyerLegalEntity: 'Khách đúng hồ sơ',
+    });
+    const schedules = await contracts.schedules(
+      actor,
+      otherProjectId,
+      contract.id,
+      {
+        items: [
+          {
+            milestoneName: 'Đợt 1',
+            dueDate: new Date('2027-01-01Z'),
+            amount: '120000',
+            condition: 'Theo hợp đồng',
+          },
+        ],
+      },
+    );
+    const installation = app.get(InstallationService);
+    const plan = await installation.createPlan(actor, {
+      projectId: otherProjectId,
+      planNumber: `I-${run}`,
+      name: 'Lịch dự kiến',
+      siteReady: false,
+      customerCoordination: false,
+      plannedStartDate: new Date('2027-01-02Z'),
+    });
+    await installation.createWorkOrder(actor, plan.id, {
+      workOrderNumber: `W-${run}`,
+      title: 'Lắp hạng mục A',
+      requiredInventory: false,
+      approvedDrawing: false,
+      checklist: [{ title: 'Kiểm tra', required: true }],
+    });
+    const room = (
+      await post('manager', `/projects/${otherProjectId}/rooms`, {
+        title: 'Nguồn hợp đồng và kế hoạch',
+        group: 'COMMERCIAL',
+        audience: 'CUSTOMER',
+      }).expect(201)
+    ).body;
+    for (const name of ['sender', 'publisher', 'guest'])
+      await post('manager', `/rooms/${room.id}/grants`, {
+        userId: users[name]!.id,
+        actions: ['READ', 'UPLOAD', 'DOWNLOAD'],
+        ...(name === 'guest'
+          ? { expiresAt: new Date(Date.now() + 86400000).toISOString() }
+          : {}),
+      }).expect(201);
+    const sourceRows = (
+      await get('sender', `/rooms/${room.id}/release-sources`).expect(200)
+    ).body;
+    const completed: {
+      id: string;
+      bytes: Buffer;
+      input: {
+        sourceType: string;
+        sourceId: string;
+        sourceFingerprint: string;
+        clientKey: string;
+      };
+    }[] = [];
+    for (const [sourceType, sourceId, word] of [
+      ['CONTRACT', contract.id, 'Khách đúng hồ sơ'],
+      ['PAYMENT', schedules[0]!.id, '120000'],
+      ['DELIVERY_INSTALL', plan.id, 'Lắp hạng mục A'],
+    ] as const) {
+      const source = sourceRows.find(
+        (s: { sourceType: string; sourceId: string }) =>
+          s.sourceType === sourceType && s.sourceId === sourceId,
+      );
+      expect(
+        source,
+        `Nguồn ${sourceType} phải có đường chuẩn bị thật`,
+      ).toBeDefined();
+      const input = {
+        sourceType,
+        sourceId,
+        sourceFingerprint: source.sourceFingerprint,
+        clientKey: randomUUID(),
+      };
+      await post('sender', `/rooms/${room.id}/releases`, {
+        ...input,
+        sourceFingerprint: '0'.repeat(64),
+      }).expect(409);
+      const prepared = (
+        await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+      ).body;
+      expect(
+        (await post('sender', `/rooms/${room.id}/releases`, input).expect(201))
+          .body.id,
+      ).toBe(prepared.id);
+      await post('sender', `/rooms/${room.id}/releases`, {
+        ...input,
+        sourceFingerprint: 'f'.repeat(64),
+      }).expect(409);
+      const preview = (
+        await getBinary('publisher', `/releases/${prepared.id}/preview`).expect(
+          200,
+        )
+      ).body as Buffer;
+      expect(preview.toString()).toContain(word);
+      expect(preview.toString()).not.toMatch(
+        /bankReference|exchangeRate|internalNote|overrideReason/,
+      );
+      const review = (
+        await get('publisher', `/releases/${prepared.id}/review`).expect(200)
+      ).body;
+      await post('sender', `/releases/${prepared.id}/publish`, {
+        confirmed: true,
+        recipientHash: review.recipientHash,
+      }).expect(403);
+      await post('publisher', `/releases/${prepared.id}/publish`, {
+        confirmed: true,
+        recipientHash: review.recipientHash,
+      }).expect(201);
+      expect(
+        (
+          await getBinary('guest', `/releases/${prepared.id}/download`).expect(
+            200,
+          )
+        ).body,
+      ).toEqual(preview);
+      await get('tenantB', `/releases/${prepared.id}/download`).expect(404);
+      completed.push({ id: prepared.id, bytes: preview, input });
+    }
+    expect(
+      (await db.contract.findUniqueOrThrow({ where: { id: contract.id } }))
+        .status,
+    ).toBe('DRAFT');
+    const original = completed[0]!;
+    const pending = (
+      await post('sender', `/rooms/${room.id}/releases`, {
+        ...original.input,
+        clientKey: randomUUID(),
+      }).expect(201)
+    ).body;
+    const storage = app.get(FileStorage),
+      put = storage.putStream.bind(storage);
+    const change = vi
+      .spyOn(storage, 'putStream')
+      .mockImplementationOnce(async (...args) => {
+        await contracts.transition(actor, otherProjectId, contract.id, {
+          status: 'INTERNAL_REVIEW',
+        });
+        return put(...args);
+      });
+    try {
+      await post('sender', `/rooms/${room.id}/releases`, {
+        ...original.input,
+        clientKey: randomUUID(),
+      }).expect(409);
+    } finally {
+      change.mockRestore();
+    }
+    await get('publisher', `/releases/${pending.id}/preview`).expect(409);
+    expect(
+      (
+        await getBinary('guest', `/releases/${original.id}/download`).expect(
+          200,
+        )
+      ).body,
+    ).toEqual(original.bytes);
+    const fresh = (
+      await get('sender', `/rooms/${room.id}/release-sources`).expect(200)
+    ).body.find(
+      (r: { sourceType: string; sourceId: string }) =>
+        r.sourceType === 'CONTRACT' && r.sourceId === contract.id,
+    );
+    const input = {
+      sourceType: 'CONTRACT',
+      sourceId: contract.id,
+      sourceFingerprint: fresh.sourceFingerprint,
+      clientKey: randomUUID(),
+    };
+    const finalize = storage.publishPending.bind(storage);
+    let ownedKey = '';
+    const revoked = vi
+      .spyOn(storage, 'publishPending')
+      .mockImplementationOnce(async (key, claim) => {
+        ownedKey = key;
+        await finalize(key, claim);
+        const revokedRoles = await db.userRole.updateMany({
+          where: { roleId: role.id, userId: actor.userId },
+          data: { status: 'archived' },
+        });
+        expect(revokedRoles.count).toBe(1);
+      });
+    try {
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(404);
+    } finally {
+      revoked.mockRestore();
+      await db.userRole.updateMany({
+        where: { roleId: role.id, userId: actor.userId },
+        data: { status: 'active' },
+      });
+    }
+    expect(ownedKey).not.toBe('');
+    expect(await db.fileAsset.count({ where: { storageKey: ownedKey } })).toBe(
+      0,
+    );
+    expect(
+      await db.contractDocument.count({ where: { storageKey: ownedKey } }),
+    ).toBe(0);
+    expect(
+      await db.chatDocumentRelease.count({
+        where: { roomId: room.id, prepareKey: input.clientKey },
+      }),
+    ).toBe(0);
+    await expect(storage.read(ownedKey)).rejects.toThrow();
+    const parallel = await Promise.all([
+      post('sender', `/rooms/${room.id}/releases`, input),
+      post('sender', `/rooms/${room.id}/releases`, input),
+    ]);
+    expect(parallel.map((r) => r.status)).toEqual([201, 201]);
+    expect(parallel[0]!.body.id).toBe(parallel[1]!.body.id);
+    await contracts.transition(actor, otherProjectId, contract.id, {
+      status: 'SIGNED',
+    });
+    const appendix = await contracts.createAppendix(
+      actor,
+      otherProjectId,
+      contract.id,
+      {
+        appendixNumber: 'PL-1',
+        type: 'SCHEDULE_CHANGE',
+        title: 'Điều chỉnh lịch dự kiến',
+        valueChange: '0',
+        currency: 'VND',
+        idempotencyKey: randomUUID(),
+      },
+    );
+    const appendixSource = (
+      await get('sender', `/rooms/${room.id}/release-sources`).expect(200)
+    ).body.find((r: { appendixId?: string }) => r.appendixId === appendix.id);
+    expect(appendixSource).toBeDefined();
+    await post('sender', `/rooms/${room.id}/releases`, {
+      sourceType: 'CONTRACT',
+      sourceId: contract.id,
+      appendixId: randomUUID(),
+      sourceFingerprint: appendixSource.sourceFingerprint,
+      clientKey: randomUUID(),
+    }).expect(409);
+    const appendixRelease = (
+      await post('sender', `/rooms/${room.id}/releases`, {
+        sourceType: 'CONTRACT',
+        sourceId: contract.id,
+        appendixId: appendix.id,
+        sourceFingerprint: appendixSource.sourceFingerprint,
+        clientKey: randomUUID(),
+      }).expect(201)
+    ).body;
+    expect(
+      (
+        await getBinary(
+          'publisher',
+          `/releases/${appendixRelease.id}/preview`,
+        ).expect(200)
+      ).body.toString(),
+    ).toContain('Điều chỉnh lịch dự kiến');
+    const installInput = { ...completed[2]!.input, clientKey: randomUUID() };
+    const staleInstall = (
+      await post('sender', `/rooms/${room.id}/releases`, installInput).expect(
+        201,
+      )
+    ).body;
+    await installation.createWorkOrder(actor, plan.id, {
+      workOrderNumber: `W2-${run}`,
+      title: 'Hạng mục phát sinh',
+      requiredInventory: false,
+      approvedDrawing: false,
+      checklist: [{ title: 'Kiểm tra' }],
+    });
+    await get('publisher', `/releases/${staleInstall.id}/preview`).expect(409);
+    expect(
+      (
+        await getBinary(
+          'guest',
+          `/releases/${completed[2]!.id}/download`,
+        ).expect(200)
+      ).body,
+    ).toEqual(completed[2]!.bytes);
+    expect(
+      (await db.contract.findUniqueOrThrow({ where: { id: contract.id } }))
+        .status,
+    ).toBe('SIGNED');
+    expect(
+      await db.customerPayment.count({
+        where: { organizationId: orgId, projectId: otherProjectId },
+      }),
+    ).toBe(0);
+    expect(
+      (
+        await db.installationWorkOrder.findFirstOrThrow({
+          where: { planId: plan.id },
+        })
+      ).status,
+    ).toBe('DRAFT');
   });
 });

@@ -1089,6 +1089,11 @@ model ChatDocumentRelease {
   technicalRevisionId String? @db.Uuid
   sampleApprovalId String? @db.Uuid
   handoverDocumentId String? @db.Uuid
+  contractDocumentId String? @db.Uuid
+  paymentScheduleId String? @db.Uuid
+  installationPlanId String? @db.Uuid
+  prepareKey String? @db.Uuid
+  prepareHash String?
   sourceFingerprint String?
   sourceSnapshot Json?
   fileAssetId String @db.Uuid
@@ -1116,6 +1121,10 @@ model ChatDocumentRelease {
   sampleApproval SampleApproval? @relation(fields:[sampleApprovalId],references:[id],onDelete:Restrict)
   handoverDocument HandoverDocument? @relation(fields:[handoverDocumentId],references:[id],onDelete:Restrict)
   file FileAsset @relation(fields:[fileAssetId],references:[id])
+  contractDocument ContractDocument? @relation(fields:[contractDocumentId],references:[id],onDelete:Restrict)
+  paymentSchedule CustomerPaymentSchedule? @relation(fields:[paymentScheduleId],references:[id],onDelete:Restrict)
+  installationPlan InstallationPlan? @relation(fields:[installationPlanId],references:[id],onDelete:Restrict)
+  @@unique([roomId,preparedBy,prepareKey])
   @@index([roomId,publishedAt])
 }
 
@@ -1929,6 +1938,7 @@ model ContractVersion {
 }
 
 model ContractAppendix {
+  documents ContractDocument[]
   id             String                 @id @default(uuid()) @db.Uuid
   contractId     String                 @db.Uuid
   appendixNumber String
@@ -2020,6 +2030,13 @@ model ContractApproval {
 }
 
 model ContractDocument {
+  sourceSnapshot Json?
+  sourceFingerprint String?
+  fileAssetId String? @db.Uuid
+  appendixId String? @db.Uuid
+  file FileAsset? @relation(fields:[fileAssetId],references:[id],onDelete:Restrict)
+  appendix ContractAppendix? @relation(fields:[appendixId],references:[id],onDelete:Restrict)
+  chatReleases ChatDocumentRelease[]
   id          String   @id @default(uuid()) @db.Uuid
   contractId  String   @db.Uuid
   version     Int
@@ -2048,6 +2065,7 @@ model ContractStatusHistory {
 }
 
 model CustomerPaymentSchedule {
+  chatReleases ChatDocumentRelease[]
   id                   String              @id @default(uuid()) @db.Uuid
   organizationId       String              @db.Uuid
   projectId            String              @db.Uuid
@@ -3576,6 +3594,7 @@ model RequirementVersion {
 }
 
 model FileAsset {
+  contractDocuments ContractDocument[]
   chatReleases ChatDocumentRelease[]
   chatFiles ChatFile[]
   id                       String                           @id @default(uuid()) @db.Uuid
@@ -4466,6 +4485,7 @@ model CycleCountStatusHistory {
 }
 
 model InstallationPlan {
+  chatReleases ChatDocumentRelease[]
   id                    String                  @id @default(uuid()) @db.Uuid
   organizationId        String                  @db.Uuid
   projectId             String                  @db.Uuid
