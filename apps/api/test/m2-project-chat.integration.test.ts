@@ -2139,6 +2139,24 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
   });
 
   it('publishes handover documents with trusted bytes and explicit source signing state', async () => {
+    // This case must establish its own grants when run without the drawing test.
+    await post('authority', `/projects/${otherProjectId}/authorities`, {
+      userId: users.manager!.id,
+      actions: ['CREATE', 'ACCESS_ADMIN'],
+      roomCeiling: ['READ', 'UPLOAD', 'DOWNLOAD'],
+    }).expect(201);
+    await post('authority', `/projects/${otherProjectId}/authorities`, {
+      userId: users.publisher!.id,
+      actions: ['PUBLISH'],
+      roomCeiling: [],
+    }).expect(201);
+    await db.organizationMembership.updateMany({
+      where: { organizationId: orgId, userId: users.guest!.id },
+      data: { kind: 'EXTERNAL' },
+    });
+    await post('authority', `/projects/${otherProjectId}/participants`, {
+      userId: users.guest!.id,
+    }).expect(201);
     const rights = [
       'handover.read',
       'file.read',

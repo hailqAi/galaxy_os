@@ -39,10 +39,9 @@ import { InventoryModule } from './inventory/inventory.module';
 import { InstallationModule } from './installation/installation.module';
 import { AfterSalesModule } from './after-sales/after-sales.module';
 import { ProjectChatModule } from './project-chat/project-chat.module';
-import { assertG00Isolation } from '../scripts/g00-isolated-environment.mjs';
+import { projectChatEnabled } from './config/project-chat-runtime';
 
-const projectChatEnabled = process.env.FEATURE_PROJECT_CHAT === 'true';
-if (projectChatEnabled) assertG00Isolation();
+const chatEnabled = projectChatEnabled();
 
 @Module({
   imports: [
@@ -80,7 +79,7 @@ if (projectChatEnabled) assertG00Isolation();
     InventoryModule,
     InstallationModule,
     AfterSalesModule,
-    ...(projectChatEnabled ? [ProjectChatModule] : []),
+    ...(chatEnabled ? [ProjectChatModule] : []),
     ...(process.env.FEATURE_MARKETING === 'true' ? [MarketingModule] : []),
   ],
   controllers: [HealthController, MeController],

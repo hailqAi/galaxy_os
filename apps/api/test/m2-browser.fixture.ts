@@ -40,6 +40,7 @@ export async function createM2BrowserFixture() {
       'manager',
       'sender',
       'viewer',
+      'locker',
       'guest',
       'publisher',
     ]) {

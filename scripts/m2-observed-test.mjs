@@ -18,7 +18,12 @@ const env = {
   ),
   PATH: process.env.PATH,
   ...(mode === 'browser'
-    ? { APP_PUBLIC_ORIGIN: 'https://localhost:33003' }
+    ? {
+        APP_PUBLIC_ORIGIN: 'https://localhost:33003',
+        ...(process.env.M2_CHROME_CDP_ENDPOINT
+          ? { M2_CHROME_CDP_ENDPOINT: process.env.M2_CHROME_CDP_ENDPOINT }
+          : {}),
+      }
     : {}),
   M2_CLOCK_OBSERVE: 'true',
   M2_CLOCK_RUN_ID: runId,

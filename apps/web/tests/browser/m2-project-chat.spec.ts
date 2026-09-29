@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
+import { test } from './m2-chrome-fixture';
 import { createM2BrowserFixture } from '../../../api/test/m2-browser.fixture';
 
 let fixture: Awaited<ReturnType<typeof createM2BrowserFixture>>;
@@ -602,7 +603,7 @@ test('issued stock becomes a recorded site delivery, then a distinct publisher r
     await deliveryForm
       .getByRole('button', { name: 'Ghi nhận giao tại công trường' })
       .click();
-    await expect(a.getByRole('alert')).toContainText(
+    await expect(a.getByRole('main').getByRole('alert')).toContainText(
       'Sửa thông tin và thử lại',
     );
     await expect(deliveryForm.getByLabel('Số lượng giao')).toBeEnabled();
@@ -620,7 +621,7 @@ test('issued stock becomes a recorded site delivery, then a distinct publisher r
     await deliveryForm
       .getByRole('button', { name: 'Ghi nhận giao tại công trường' })
       .click();
-    await expect(a.getByRole('alert')).toContainText(
+    await expect(a.getByRole('main').getByRole('alert')).toContainText(
       'Có thể thử lại cùng yêu cầu',
     );
     const freshOptions = await a.request.get(
@@ -676,7 +677,10 @@ test('issued stock becomes a recorded site delivery, then a distinct publisher r
       })
       .click();
     await expect(
-      b.getByText('Nhân viên ghi nhận giao tại công trường', { exact: false }),
+      b.getByText(
+        `Loại nguồn: Nhân viên ghi nhận giao tại công trường · phiên bản file ${JSON.parse(fileValue)[1]}; không chứng minh khách đã ký hoặc nghiệm thu`,
+        { exact: true },
+      ),
     ).toBeVisible();
     await expect(
       b.getByText(caseFixture.deliveryFileText, { exact: true }),
@@ -718,13 +722,13 @@ test('room-only LOCK preserves draft; changing groups warns before discarding it
         'X-Chat-Actor': fixture.users.manager!.id,
       },
       body: JSON.stringify({
-        userId: fixture.users.viewer!.id,
+        userId: fixture.users.locker!.id,
         actions: ['READ', 'SEND', 'LOCK'],
       }),
     },
   );
   expect(response.status).toBe(201);
-  await login(page, 'viewer');
+  await login(page, 'locker');
   await page.getByRole('button', { name: /Nội bộ thử nghiệm/ }).click();
   const draft = page.getByLabel('Tin nhắn', { exact: true });
   await expect(draft).toBeEnabled();

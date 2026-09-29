@@ -6,7 +6,11 @@
     "node": ">=20.9.0"
   },
   "scripts": {
-    "dev": "pnpm --parallel --filter './apps/*' dev",
+    "dev": "python3 scripts/local-runtime.py up",
+    "local:status": "python3 scripts/local-runtime.py status",
+    "local:up": "python3 scripts/local-runtime.py up",
+    "local:stop": "python3 scripts/local-runtime.py stop",
+    "test:local-runtime": "python3 -m unittest discover -s scripts -p test_local_runtime.py",
     "lint": "pnpm -r --if-present lint && services/document-ai/.venv/bin/ruff check services/document-ai",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test && services/document-ai/.venv/bin/pytest services/document-ai",

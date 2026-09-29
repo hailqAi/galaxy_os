@@ -35,6 +35,11 @@ const headers = [
 ];
 
 const config: NextConfig = {
+  // Test builds must not replace the user's running development artifacts.
+  distDir:
+    process.env.GALAXY_TEST_ISOLATION === 'confirmed'
+      ? '.next/m2-build'
+      : '.next',
   poweredByHeader: false,
   allowedDevOrigins: developmentHosts(),
   experimental: {

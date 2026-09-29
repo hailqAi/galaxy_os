@@ -1,0 +1,454 @@
+"""Một runtime local; manifest riêng ngoài Git, không migrate hoặc seed."""
+
+from contextlib import contextmanager
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import subprocess
+import sys
+import time
+import urllib.request
+import uuid
+
+CONFIG_KEYS = {
+    "DATABASE_URL",
+    "API_PORT",
+    "NODE_ENV",
+    "FILE_STORAGE_PATH",
+    "LOCAL_UPLOAD_PATH",
+    "AVATAR_STORAGE_PATH",
+    "SESSION_COOKIE_NAME",
+    "FEATURE_PROJECT_CHAT",
+    "M2_DEPLOYMENT_TARGET",
+    "GALAXY_TEST_ISOLATION",
+    "FEATURE_MARKETING",
+    "ALLOW_DEV_AUTH",
+    "APP_PUBLIC_ORIGIN",
+    "INTERNAL_API_URL",
+    "REDIS_URL",
+    "TRUST_PROXY",
+}
+
+
+def digest(path):
+    path = Path(path)
+    h = hashlib.sha256()
+    files = (
+        sorted(p for p in path.rglob("*") if p.is_file()) if path.is_dir() else [path]
+    )
+    for file in files:
+        h.update(str(file.relative_to(path) if path.is_dir() else file.name).encode())
+        h.update(file.read_bytes())
+    return h.hexdigest()
+
+
+def identity(pid):
+    root = Path("/proc") / str(pid)
+    stat = (root / "stat").read_text()
+    fields = stat[stat.rindex(")") + 2 :].split()
+    return {
+        "pid": pid,
+        "ppid": int(fields[1]),
+        "pgid": int(fields[2]),
+        "startTicks": fields[19],
+        "uid": root.stat().st_uid,
+        "cwd": str((root / "cwd").resolve(strict=True)),
+        "exe": str((root / "exe").resolve(strict=True)),
+        "command": (root / "cmdline").read_bytes().decode().rstrip("\0").split("\0"),
+    }
+
+
+def process_environment(pid):
+    return dict(
+        part.split("=", 1)
+        for part in (Path("/proc") / str(pid) / "environ")
+        .read_bytes()
+        .decode()
+        .split("\0")
+        if "=" in part
+    )
+
+
+def listeners(port):
+    result = subprocess.run(
+        ["ss", "-H", "-ltnp", f"sport = :{port}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    if result.stderr.strip():
+        raise RuntimeError("Không đủ quyền kiểm listener: " + result.stderr.strip())
+    if not result.stdout.strip():
+        return []
+    pids = sorted(set(int(x) for x in re.findall(r"pid=(\d+)", result.stdout)))
+    # Socket occupied without an inspectable owner is never a free port.
+    if any("pid=" not in line for line in result.stdout.splitlines()):
+        raise RuntimeError(f"Cổng {port} có listener chưa xác minh được chủ")
+    return pids
+
+
+class Runtime:
+    def __init__(self, config, folder, timeout=40):
+        self.config, self.folder, self.timeout = config, Path(folder), timeout
+        self.children = {}
+        self.folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    @contextmanager
+    def lock(self):
+        with (self.folder / "lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            yield
+
+    def load(self):
+        path = self.folder / "processes.json"
+        return json.loads(path.read_text()) if path.exists() else {}
+
+    def save(self, records):
+        path = self.folder / "processes.tmp"
+        path.write_text(json.dumps(records, indent=2))
+        path.chmod(0o600)
+        path.replace(self.folder / "processes.json")
+
+    def check_files(self):
+        for name, spec in self.config["services"].items():
+            for path, expected in spec["fingerprints"].items():
+                if not Path(path).exists() or digest(path) != expected:
+                    raise RuntimeError(
+                        f"{name}: source/build/config đã đổi: {path}; cần kiểm tương thích và cập nhật manifest"
+                    )
+
+    def check_database(self):
+        if "schemaProbe" not in self.config:
+            return None
+        api = self.config["services"]["api"]
+        observed = json.loads(
+            subprocess.check_output(
+                self.config["schemaProbe"],
+                cwd=api["cwd"],
+                env={**self.environment(api), "PATH": os.environ["PATH"]},
+                text=True,
+                timeout=15,
+            )
+        )
+        if observed != self.config["expectedSchema"]:
+            raise RuntimeError(
+                "Database/schema/migration local khác manifest đã đối soát; không tự khởi chạy/migrate"
+            )
+        return {
+            "name": observed["name"],
+            "schema": observed["schema"],
+            "applied": len(observed.get("migrations", [])),
+            "verified": True,
+        }
+
+    def matches(self, pid, spec):
+        # Next uses a server child whose process title replaces argv; verify its
+        # actual launcher ancestor as well as the listener's cwd and executable.
+        current = identity(pid)
+        if (
+            current["cwd"] != str(Path(spec["cwd"]).resolve())
+            or current["uid"] != os.getuid()
+        ):
+            return False
+        if current["exe"] != str(Path(spec["command"][0]).resolve()):
+            return False
+        for _ in range(6):
+            if current["command"] == spec["command"] and current["cwd"] == spec["cwd"]:
+                env = process_environment(current["pid"])
+                expected = self.environment(spec)
+                # Node --env-file preserves inherited values. Check every inherited
+                # trust-boundary override, including keys absent from the env file.
+                keys = set(expected) | CONFIG_KEYS
+                return all(
+                    env.get(key) == expected.get(key) for key in spec["identityKeys"]
+                ) and all(
+                    env[key] == expected.get(key)
+                    for key in keys
+                    if key in env and key != "PATH"
+                )
+            if current["ppid"] < 2:
+                return False
+            current = identity(current["ppid"])
+        return False
+
+    def environment(self, spec):
+        values = {}
+        if spec.get("envFile"):
+            output = subprocess.check_output(
+                [
+                    "/usr/bin/node",
+                    "-e",
+                    "process.stdout.write(JSON.stringify(require('node:util').parseEnv(require('node:fs').readFileSync(process.argv[1],'utf8'))))",
+                    spec["envFile"],
+                ],
+                text=True,
+            )
+            values = json.loads(output)
+        return {**values, **spec["environment"]}
+
+    def healthy(self, spec):
+        try:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(
+                f"http://127.0.0.1:{spec['port']}{spec['health']}", timeout=2
+            ) as response:
+                body = json.load(response)
+                expected = spec.get(
+                    "readyBody", {"status": "ok", "service": spec["service"]}
+                )
+                return response.status == 200 and all(
+                    body.get(k) == v for k, v in expected.items()
+                )
+        except (OSError, ValueError):
+            return False
+
+    def inspect(self, name, spec):
+        pids = listeners(spec["port"])
+        result = {
+            "port": spec["port"],
+            "pid": None,
+            "cwd": spec["cwd"],
+            "state": "STOPPED",
+            "managed": False,
+        }
+        if not pids:
+            return result
+        if len(pids) != 1 or not self.matches(pids[0], spec):
+            raise RuntimeError(
+                f"{name}: cổng {spec['port']} thuộc PID {pids}; identity/config không khớp, không dừng hoặc spawn"
+            )
+        record = self.load().get(name, {})
+        current = identity(pids[0])
+        result.update(
+            pid=pids[0],
+            state="READY" if self.healthy(spec) else "NOT_READY",
+            managed=current["pgid"] == record.get("pgid")
+            and process_environment(pids[0]).get("GALAXY_LOCAL_RUNTIME_TOKEN")
+            == record.get("token")
+            and bool(record.get("token")),
+        )
+        return result
+
+    def status(self):
+        self.check_files()
+        services = {
+            name: self.inspect(name, spec)
+            for name, spec in self.config["services"].items()
+        }
+        return {
+            "runtimeRoot": self.config["runtimeRoot"],
+            "identity": self.config.get("identity", {}),
+            "databaseReadOnlyCheck": self.check_database(),
+            "state": "READY"
+            if all(s["state"] == "READY" for s in services.values())
+            else "PARTIAL",
+            "services": services,
+        }
+
+    def owned_members(self, record):
+        members = []
+        if not record.get("token"):
+            return members
+        for path in Path("/proc").iterdir():
+            if not path.name.isdigit():
+                continue
+            try:
+                current = identity(int(path.name))
+                if (
+                    current["pgid"] == record["pgid"]
+                    and current["uid"] == os.getuid()
+                    and int(current["startTicks"]) >= int(record["startTicks"])
+                    and process_environment(current["pid"]).get(
+                        "GALAXY_LOCAL_RUNTIME_TOKEN"
+                    )
+                    == record["token"]
+                ):
+                    members.append(current)
+            except (FileNotFoundError, ProcessLookupError, PermissionError):
+                continue
+        return members
+
+    def terminate(self, record):
+        # Token + process start time + pidfd, never a PID file alone.
+        deadline = time.monotonic() + min(8, self.timeout)
+        signaled = set()
+        while True:
+            for child in self.children.values():
+                child.poll()
+            members = self.owned_members(record)
+            if not members:
+                return
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"Nhóm PID {record['pid']} còn child sống; giữ metadata, không kill cưỡng bức"
+                )
+            for member in members:
+                key = (member["pid"], member["startTicks"])
+                if key in signaled:
+                    continue
+                try:
+                    fd = os.pidfd_open(member["pid"])
+                    try:
+                        if (
+                            identity(member["pid"])["startTicks"]
+                            == member["startTicks"]
+                        ):
+                            signal.pidfd_send_signal(fd, signal.SIGTERM)
+                            signaled.add(key)
+                    finally:
+                        os.close(fd)
+                except (FileNotFoundError, ProcessLookupError):
+                    pass
+            time.sleep(0.05)
+
+    def up(self):
+        with self.lock():
+            self.check_files()
+            # Inspect every required port before the first spawn, including partial stacks.
+            before = {
+                name: self.inspect(name, spec)
+                for name, spec in self.config["services"].items()
+            }
+            self.check_database()
+            if any(s["state"] == "NOT_READY" for s in before.values()):
+                raise RuntimeError("Runtime hiện hữu chưa ready; không spawn thêm")
+            records, created = self.load(), {}
+            for name, record in records.items():
+                if before.get(name, {}).get("state") != "READY" and self.owned_members(
+                    record
+                ):
+                    raise RuntimeError(
+                        f"{name}: child của lần chạy trước còn sống; dùng local:stop và kiểm lại, không ghi đè ownership"
+                    )
+            try:
+                for name, spec in self.config["services"].items():
+                    if before[name]["state"] == "READY":
+                        continue
+                    token = uuid.uuid4().hex
+                    start_floor = str(
+                        int(
+                            float(Path("/proc/uptime").read_text().split()[0])
+                            * os.sysconf("SC_CLK_TCK")
+                        )
+                    )
+                    log_path = self.folder / (name + ".log")
+                    with log_path.open("ab") as log:
+                        log_path.chmod(0o600)
+                        child = subprocess.Popen(
+                            spec["command"],
+                            cwd=spec["cwd"],
+                            env={
+                                **self.environment(spec),
+                                "PATH": os.environ["PATH"],
+                                "GALAXY_LOCAL_RUNTIME_TOKEN": token,
+                            },
+                            stdin=subprocess.DEVNULL,
+                            stdout=log,
+                            stderr=subprocess.STDOUT,
+                            start_new_session=True,
+                        )
+                    self.children[child.pid] = child
+                    # Register ownership before inspecting /proc: the launcher can
+                    # already have exited while its token-bearing child is alive.
+                    record = {
+                        "pid": child.pid,
+                        "pgid": child.pid,
+                        "startTicks": start_floor,
+                        "token": token,
+                    }
+                    created[name] = record
+                    records[name] = record
+                    self.save(records)
+                    try:
+                        record["startTicks"] = identity(child.pid)["startTicks"]
+                    except (FileNotFoundError, ProcessLookupError):
+                        pass
+                    self.save(records)
+                    deadline = time.monotonic() + self.timeout
+                    while time.monotonic() < deadline:
+                        if child.poll() is not None:
+                            raise RuntimeError(
+                                f"{name} khởi động lỗi; xem log local {log_path}"
+                            )
+                        if self.inspect(name, spec)["state"] == "READY":
+                            break
+                        time.sleep(0.1)
+                    else:
+                        raise RuntimeError(f"{name} hết thời gian chờ readiness")
+                return {
+                    **self.status(),
+                    "action": "STARTED_READY"
+                    if created
+                    else "ALREADY_RUNNING_VERIFIED",
+                }
+            except BaseException:
+                for name, record in reversed(list(created.items())):
+                    try:
+                        self.terminate(record)
+                        records.pop(name, None)
+                    except RuntimeError as cleanup_error:
+                        print(str(cleanup_error), file=sys.stderr)
+                self.save(records)
+                raise
+
+    def stop(self):
+        with self.lock():
+            records = self.load()
+            for name, record in reversed(list(records.items())):
+                self.terminate(record)
+                records.pop(name)
+                self.save(records)
+            return {
+                "state": "MANAGED_STOPPED",
+                "note": "Giữ nguyên dịch vụ được tái sử dụng từ trước",
+            }
+
+
+def main():
+    root = Path(__file__).resolve().parent.parent
+    common = subprocess.check_output(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        cwd=root,
+        text=True,
+    ).strip()
+    base = Path(common).parent
+    config_path = base / ".runtime/local-runtime.json"
+    if not config_path.exists():
+        raise RuntimeError(
+            f"Chưa cấu hình runtime local: {config_path}; không tự chạy stack khác"
+        )
+    config = json.loads(config_path.read_text())
+    if Path(config["runtimeRoot"]).resolve() != root:
+        raise RuntimeError(
+            f"Runtime chuẩn là {config['runtimeRoot']}; dùng pnpm --dir {config['runtimeRoot']} local:up"
+        )
+    ports = {name: service["port"] for name, service in config["services"].items()}
+    if ports != {"api": 3001, "web": 3000}:
+        raise RuntimeError(
+            "Manifest local phải dùng Web3000/API3001; test stack dùng runner riêng"
+        )
+    if config.get("identity", {}).get("database", {}).get("name") != "galaxy_os":
+        raise RuntimeError("Chưa xác minh database người dùng trong manifest")
+    if not config.get("schemaProbe") or not config.get("expectedSchema"):
+        raise RuntimeError("Thiếu preflight database read-only; không khởi chạy")
+    manager = Runtime(config, base / ".runtime/local-managed")
+    command = sys.argv[1] if len(sys.argv) == 2 else ""
+    if command not in ["status", "up", "stop"]:
+        raise RuntimeError("Dùng local:status, local:up hoặc local:stop")
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+    print(json.dumps(getattr(manager, command)(), ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as error:
+        print(str(error), file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("Đã hủy; chỉ thu dọn child của lần gọi này", file=sys.stderr)
+        sys.exit(130)
