@@ -24,7 +24,7 @@ ADD COLUMN     "location" TEXT,
 ADD COLUMN     "projectId" UUID,
 ADD COLUMN     "scheduledEnd" TIMESTAMP(3),
 ADD COLUMN     "technicianNotes" TEXT,
-ADD COLUMN     "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ADD COLUMN     "updatedAt" TIMESTAMP(3) NOT NULL,
 ADD COLUMN     "updatedBy" UUID,
 ADD COLUMN     "visitType" TEXT NOT NULL DEFAULT 'INSPECTION',
 ADD COLUMN     "workPerformed" TEXT;
@@ -50,44 +50,10 @@ ADD COLUMN     "status" TEXT NOT NULL DEFAULT 'DRAFT',
 ADD COLUMN     "submissionMode" TEXT NOT NULL DEFAULT 'MANUAL',
 ADD COLUMN     "submittedDate" TIMESTAMP(3),
 ADD COLUMN     "supplierReference" TEXT,
-ADD COLUMN     "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ADD COLUMN     "updatedAt" TIMESTAMP(3) NOT NULL,
 ADD COLUMN     "updatedBy" UUID,
 ADD COLUMN     "variantId" UUID,
 ADD COLUMN     "warrantyAssetId" UUID;
-
-UPDATE "HandoverDocument" AS document
-SET "organizationId" = handover."organizationId",
-    "projectId" = handover."projectId"
-FROM "Handover" AS handover
-WHERE document."handoverId" = handover."id"
-  AND (document."organizationId" IS NULL OR document."projectId" IS NULL);
-
-UPDATE "ServiceVisit" AS visit
-SET "organizationId" = ticket."organizationId",
-    "projectId" = ticket."projectId",
-    "customerId" = ticket."customerId"
-FROM "ServiceTicket" AS ticket
-WHERE visit."serviceTicketId" = ticket."id"
-  AND (
-    visit."organizationId" IS NULL
-    OR visit."projectId" IS NULL
-    OR visit."customerId" IS NULL
-  );
-
-UPDATE "WarrantyClaim" AS claim
-SET "organizationId" = ticket."organizationId",
-    "projectId" = ticket."projectId",
-    "customerId" = ticket."customerId"
-FROM "ServiceTicket" AS ticket
-WHERE claim."serviceTicketId" = ticket."id"
-  AND (
-    claim."organizationId" IS NULL
-    OR claim."projectId" IS NULL
-    OR claim."customerId" IS NULL
-  );
-
-ALTER TABLE "ServiceVisit" ALTER COLUMN "updatedAt" DROP DEFAULT;
-ALTER TABLE "WarrantyClaim" ALTER COLUMN "updatedAt" DROP DEFAULT;
 
 -- CreateTable
 CREATE TABLE "WarrantyReplacement" (
