@@ -117,6 +117,7 @@ describe('Host validation', () => {
 
   it('uses only APP_PUBLIC_ORIGIN in production', async () => {
     vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('TRUST_PROXY', 'false');
     vi.stubEnv('APP_PUBLIC_ORIGIN', 'https://galaxy.example');
     vi.stubEnv('DEV_ALLOWED_ORIGINS', 'development.example');
     expect((await request('galaxy.example')).status).not.toBe(400);

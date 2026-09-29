@@ -2,6 +2,11 @@ import { NextRequest } from 'next/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GET, POST } from './route';
 
+// Fix the mocked upstream before the route module captures its configuration.
+vi.hoisted(() =>
+  vi.stubEnv('INTERNAL_API_URL', 'http://127.0.0.1:33001/api/v1'),
+);
+
 const context = (path: string[]) => ({ params: Promise.resolve({ path }) });
 
 afterEach(() => {
@@ -25,7 +30,7 @@ describe('same-origin API forwarder', () => {
 
     expect(response.status).toBe(200);
     expect(fetch.mock.calls[0]?.[0].toString()).toBe(
-      'http://127.0.0.1:3001/api/v1/uploads/constraints',
+      'http://127.0.0.1:33001/api/v1/uploads/constraints',
     );
   });
 
@@ -68,7 +73,7 @@ describe('same-origin API forwarder', () => {
 
     expect(response.status).toBe(200);
     expect(fetch.mock.calls[0]?.[0].toString()).toBe(
-      `http://127.0.0.1:3001/api/v1/${root}`,
+      `http://127.0.0.1:33001/api/v1/${root}`,
     );
   });
 
@@ -102,7 +107,7 @@ describe('same-origin API forwarder', () => {
     const response = await POST(request, context(['uploads', 'initiate']));
 
     expect(fetch.mock.calls[0]?.[0].toString()).toBe(
-      'http://127.0.0.1:3001/api/v1/uploads/initiate',
+      'http://127.0.0.1:33001/api/v1/uploads/initiate',
     );
     expect(fetch.mock.calls[0]?.[1]).toMatchObject({
       method: 'POST',
@@ -217,7 +222,7 @@ describe('same-origin API forwarder', () => {
     const arrayBuffer = vi.spyOn(request, 'arrayBuffer');
     const response = await POST(request, context(['auth', 'login']));
     expect(fetch.mock.calls[0]?.[0].toString()).toBe(
-      'http://127.0.0.1:3001/api/v1/auth/login',
+      'http://127.0.0.1:33001/api/v1/auth/login',
     );
     expect(arrayBuffer).not.toHaveBeenCalled();
     expect(fetch.mock.calls[0]?.[1]).toMatchObject({
@@ -265,7 +270,7 @@ describe('same-origin API forwarder', () => {
 
     expect(response.status).toBe(200);
     expect(fetch.mock.calls[0]?.[0].toString()).toBe(
-      `http://127.0.0.1:3001/api/v1/me/avatar/${key}`,
+      `http://127.0.0.1:33001/api/v1/me/avatar/${key}`,
     );
 
     expect(

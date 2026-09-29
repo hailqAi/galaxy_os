@@ -121,6 +121,7 @@ describe('web CSP', () => {
 
   it('uses a unique nonce and no eval in production', async () => {
     vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('TRUST_PROXY', 'false');
     vi.stubEnv('APP_PUBLIC_ORIGIN', 'https://galaxy.example');
     vi.stubEnv('DEV_ALLOWED_ORIGINS', 'development.example');
     vi.stubGlobal(
