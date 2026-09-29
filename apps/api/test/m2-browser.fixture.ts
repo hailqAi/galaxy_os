@@ -11,7 +11,17 @@ export async function createM2BrowserFixture() {
       [resolve(__dirname, '../scripts/g00-isolated-environment.mjs')],
       { encoding: 'utf8' },
     ),
-  ) as { databaseName: string; databaseUser: string };
+  ) as { databaseName: string; databaseUser: string; apiPort: number };
+  const api = `http://127.0.0.1:${target.apiPort}/api/v1`;
+  if (process.env.INTERNAL_API_URL !== api)
+    throw new Error('Fixture API target mismatch');
+  const ready = await fetch(`${api}/ready`, {
+    redirect: 'error',
+    signal: AbortSignal.timeout(5000),
+  });
+  const health = ready.ok ? await ready.json() : null;
+  if (health?.status !== 'ok' || health?.database !== 'connected')
+    throw new Error('Fixture API not ready');
   const db = new PrismaClient();
   const run = randomUUID();
   const password = 'm2a-browser-fixture-only';
@@ -122,7 +132,6 @@ export async function createM2BrowserFixture() {
         createdBy: users.authority!.id,
       },
     });
-    const api = process.env.INTERNAL_API_URL!;
     for (const user of Object.values(users)) {
       const res = await fetch(`${api}/auth/login`, {
         method: 'POST',
