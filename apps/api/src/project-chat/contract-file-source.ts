@@ -23,10 +23,16 @@ export type CustomerFileInput = {
 
 export async function lockCustomerFileOwnership(tx: Prisma.TransactionClient) {
   // ponytail: Scalar legacy references have no FileAsset FK. Lock only the final
-  // decision after storage I/O; global table contention returns 409. Replace
+  // decision after storage I/O; lasting global table contention returns 409. Replace
   // these locks with typed FileAsset FKs if registration volume requires it.
   // ContractDocument/release are our own writes and must not take SHARE locks.
   // SiteDelivery now has a typed FileAsset FK; FOR UPDATE on the file serializes its links.
+  const [previous] = await tx.$queryRaw<{ setting: string }[]>`
+    SELECT setting FROM pg_settings WHERE name='lock_timeout'`;
+  // Brief autovacuum/ANALYZE locks should finish. Bound each lock wait, preserve
+  // any stricter caller limit, and leave the transaction's total timeout intact.
+  const timeout = Math.min(Number(previous!.setting) || 250, 250);
+  await tx.$queryRaw`SELECT set_config('lock_timeout', ${String(timeout)}, true)`;
   try {
     await tx.$executeRaw`LOCK TABLE
       "AcceptanceRecord", "CustomerConfirmation",
@@ -36,7 +42,7 @@ export async function lockCustomerFileOwnership(tx: Prisma.TransactionClient) {
       "PunchItem", "PurchaseOrderDocument", "QualityInspectionLine", "QualityReport",
       "QuotationDocument", "SampleApproval", "ServiceResolution", "ServiceVisit",
       "ShipmentDocument", "StockIssue", "SupplierQuotationDocument",
-      "SupplierRFQDocument", "TechnicalApprovalRevision" IN SHARE MODE NOWAIT`;
+      "SupplierRFQDocument", "TechnicalApprovalRevision" IN SHARE MODE`;
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -45,6 +51,8 @@ export async function lockCustomerFileOwnership(tx: Prisma.TransactionClient) {
       throw new ConflictException('Nguồn file đang được cập nhật; thử lại sau');
     throw error;
   }
+  // A failed lock aborts the transaction; only restore after success.
+  await tx.$queryRaw`SELECT set_config('lock_timeout', ${previous!.setting}, true)`;
 }
 
 export async function customerFileSource(

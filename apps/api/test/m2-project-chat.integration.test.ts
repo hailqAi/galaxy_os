@@ -5245,6 +5245,46 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       });
     }
   });
+  it('waits for brief maintenance before preview without publishing or retrying', async () => {
+    const { room, input } = await customerFileFixture(true);
+    const prepared = (
+      await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+    ).body;
+    let preview: Promise<request.Response> | undefined;
+    let settled = false;
+    let observedWaiting = false;
+    await db.$transaction(async (tx) => {
+      await tx.$executeRaw`LOCK TABLE "StockIssue" IN SHARE UPDATE EXCLUSIVE MODE`;
+      const [backend] = await tx.$queryRaw<
+        { pid: number }[]
+      >`SELECT pg_backend_pid() AS pid`;
+      preview = getBinary('publisher', `/releases/${prepared.id}/preview`).then(
+        (response) => {
+          settled = true;
+          return response;
+        },
+      );
+      await expect
+        .poll(
+          async () => {
+            const [row] = await db.$queryRaw<
+              { waiting: boolean }[]
+            >`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE ${backend!.pid}=ANY(pg_blocking_pids(pid))) AS waiting`;
+            observedWaiting ||= row!.waiting;
+            return observedWaiting || settled;
+          },
+          { interval: 5, timeout: 1000 },
+        )
+        .toBe(true);
+    });
+    expect((await preview!).status).toBe(200);
+    expect(observedWaiting).toBe(true);
+    const release = await db.chatDocumentRelease.findUniqueOrThrow({
+      where: { id: prepared.id },
+    });
+    expect(release.reviewedAt).not.toBeNull();
+    expect(release.publishedAt).toBeNull();
+  });
   it.each(
     (['registration', 'preview', 'publication'] as const).flatMap((stage) =>
       [false, true].map(
@@ -5268,10 +5308,13 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
               201,
             )
           ).body;
-    if (stage === 'publication')
-      await getBinary('publisher', `/releases/${prepared.id}/preview`).expect(
-        200,
+    if (stage === 'publication') {
+      const preview = await getBinary(
+        'publisher',
+        `/releases/${prepared.id}/preview`,
       );
+      expect(preview.status, preview.body.toString()).toBe(200);
+    }
     const review =
       stage === 'publication'
         ? (
