@@ -1,4 +1,5 @@
 'use client';
+import { createCommandKey } from '../../app/lib/create-command-key';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../../app/lib/api';
@@ -351,8 +352,8 @@ export function ProjectAi({
         requestKey.current.scope !== scope
       )
         requestKey.current = {
-          conversationKey: crypto.randomUUID(),
-          clientKey: crypto.randomUUID(),
+          conversationKey: createCommandKey(),
+          clientKey: createCommandKey(),
           question: text,
           scope,
           conversationId: selectedRef.current || undefined,

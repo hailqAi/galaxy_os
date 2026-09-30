@@ -96,20 +96,103 @@ export function validateProductionEnvironment() {
 }
 
 export function trustedRequestHost(headers: Headers, fallback = '') {
+  if (process.env.NODE_ENV === 'production') {
+    const origin = trustedRequestOrigin(
+      headers,
+      fallback ? `http://${fallback}` : '',
+    );
+    return origin ? new URL(origin).hostname : null;
+  }
   const trustProxy = process.env.TRUST_PROXY === 'true';
   const forwardedHost = trustProxy
     ? headers.get('x-forwarded-host')?.trim()
     : undefined;
-  const forwardedProto = trustProxy
-    ? headers.get('x-forwarded-proto')?.trim()
-    : undefined;
+  return normalizeHostHeader(forwardedHost || headers.get('host') || fallback);
+}
+
+export function internalHttpOrigins(
+  value = process.env.GALAXY_INTERNAL_HTTP_ORIGINS,
+) {
+  return (value?.split(',') ?? []).filter(Boolean).map((entry) => {
+    const url = new URL(entry.trim());
+    const parts = url.hostname.split('.').map(Number);
+    const privateIp =
+      /^\d+\.\d+\.\d+\.\d+$/.test(url.hostname) &&
+      parts.every((n) => n >= 0 && n <= 255) &&
+      (parts[0] === 10 ||
+        (parts[0] === 172 && parts[1]! >= 16 && parts[1]! <= 31) ||
+        (parts[0] === 192 && parts[1] === 168));
+    if (
+      url.protocol !== 'http:' ||
+      (!['localhost', '127.0.0.1'].includes(url.hostname) && !privateIp) ||
+      !url.port ||
+      url.username ||
+      url.password ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash
+    )
+      throw new Error(
+        'GALAXY_INTERNAL_HTTP_ORIGINS requires exact local HTTP origins',
+      );
+    return url.origin;
+  });
+}
+
+export function trustedRequestOrigin(
+  headers: Headers,
+  fallbackOrigin = '',
+): string | null {
+  const rawHost =
+    headers.get('host') ?? (fallbackOrigin ? new URL(fallbackOrigin).host : '');
+  if (!normalizeHostHeader(rawHost) || /[\s,\\]/.test(rawHost)) return null;
+  const forwardedHost = headers.get('x-forwarded-host')?.trim();
+  const forwardedProto = headers.get('x-forwarded-proto')?.trim();
+  if (process.env.NODE_ENV !== 'production') {
+    const host = trustedRequestHost(headers, rawHost);
+    if (!host || !developmentHosts().includes(host)) return null;
+    const protocol =
+      process.env.TRUST_PROXY === 'true' && forwardedProto
+        ? `${forwardedProto}:`
+        : fallbackOrigin
+          ? new URL(fallbackOrigin).protocol
+          : 'http:';
+    return new URL(
+      `${protocol}//${process.env.TRUST_PROXY === 'true' && forwardedHost ? forwardedHost : rawHost}`,
+    ).origin;
+  }
+  const local = new URL(`http://${rawHost}`).origin;
+  if (internalHttpOrigins().includes(local)) {
+    if (
+      (forwardedHost &&
+        forwardedHost.toLowerCase() !== rawHost.toLowerCase()) ||
+      (forwardedProto && forwardedProto !== 'http')
+    )
+      return null;
+    return local;
+  }
+  const expected = process.env.GALAXY_EDGE_PROOF;
+  const supplied = headers.get('x-galaxy-edge-proof');
   if (
-    trustProxy &&
-    process.env.NODE_ENV === 'production' &&
-    forwardedProto !== 'https'
+    process.env.GALAXY_PUBLIC_ACCESS !== 'true' ||
+    process.env.TRUST_PROXY !== 'true' ||
+    !expected ||
+    expected.length < 32 ||
+    !supplied ||
+    Buffer.byteLength(expected) !== Buffer.byteLength(supplied) ||
+    !timingSafeEqual(Buffer.from(expected), Buffer.from(supplied)) ||
+    forwardedProto !== 'https' ||
+    !forwardedHost ||
+    !normalizeHostHeader(forwardedHost)
   )
     return null;
-  return normalizeHostHeader(forwardedHost || headers.get('host') || fallback);
+  const url = new URL(`https://${forwardedHost}`);
+  return publicHosts().includes(url.hostname) &&
+    (url.origin === process.env.APP_PUBLIC_ORIGIN ||
+      !url.port ||
+      url.port === '443')
+    ? url.origin
+    : null;
 }
 
 export function developmentHosts(value = process.env.DEV_ALLOWED_ORIGINS) {
@@ -122,3 +205,4 @@ export function developmentHosts(value = process.env.DEV_ALLOWED_ORIGINS) {
   }
   return [...new Set(hosts)];
 }
+import { timingSafeEqual } from 'node:crypto';

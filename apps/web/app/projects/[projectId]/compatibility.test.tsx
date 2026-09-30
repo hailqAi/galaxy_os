@@ -29,6 +29,7 @@ vi.mock('next/navigation', () => ({
 describe('Project old-route compatibility', () => {
   beforeEach(() => {
     redirect.mockReset();
+    vi.stubEnv('FEATURE_PROJECT_CHAT', 'false');
     vi.stubGlobal('React', React);
   });
   it('redirects the bare Project route to the canonical Stage 1 workspace', async () => {

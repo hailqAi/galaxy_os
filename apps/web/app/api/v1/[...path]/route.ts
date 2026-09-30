@@ -1,11 +1,11 @@
 import { NextRequest } from 'next/server';
 import { isIP } from 'node:net';
 import {
-  developmentHosts,
   internalApiUrl,
-  publicHosts,
-  trustedRequestHost,
+  internalHttpOrigins,
+  trustedRequestOrigin,
 } from '../../../../host-config';
+import { observeResponse, runtimeIdentity } from '../../../../runtime-http';
 
 const apiBaseUrl =
   process.env.NODE_ENV === 'production'
@@ -96,37 +96,15 @@ async function forward(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
-  const requestHost = trustedRequestHost(
+  const requestOrigin = trustedRequestOrigin(
     request.headers,
-    request.nextUrl.hostname,
+    request.nextUrl.origin,
   );
-  const allowedHosts = new Set(
-    process.env.NODE_ENV === 'production' ? publicHosts() : developmentHosts(),
-  );
-  if (!requestHost || !allowedHosts.has(requestHost))
+  if (!requestOrigin)
     return Response.json({ message: 'Invalid Host' }, { status: 400 });
-  const requestOrigin = new URL(
-    `${request.nextUrl.protocol}//${
-      (process.env.TRUST_PROXY === 'true'
-        ? request.headers.get('x-forwarded-host')?.trim()
-        : undefined) ??
-      request.headers.get('host') ??
-      request.nextUrl.host
-    }`,
-  ).origin;
   const origin = request.headers.get('origin');
-  try {
-    if (
-      !['GET', 'HEAD'].includes(request.method) &&
-      (!origin ||
-        (process.env.NODE_ENV === 'production'
-          ? origin !== process.env.APP_PUBLIC_ORIGIN
-          : new URL(origin).origin !== requestOrigin))
-    )
-      return Response.json({ message: 'Forbidden' }, { status: 403 });
-  } catch {
+  if (!['GET', 'HEAD'].includes(request.method) && origin !== requestOrigin)
     return Response.json({ message: 'Forbidden' }, { status: 403 });
-  }
   const path = (await params).path;
   if (
     !path.length ||
@@ -150,11 +128,20 @@ async function forward(
   const upstream = new URL(`${apiBaseUrl}/${path.join('/')}`);
   upstream.search = request.nextUrl.search;
   const headers = new Headers();
+  const identity = runtimeIdentity(
+    request.headers,
+    process.env.NODE_ENV === 'production' &&
+      requestOrigin.startsWith('https://'),
+  );
+  headers.set('x-request-id', identity.requestId);
   for (const name of requestHeaders) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }
-  if (process.env.TRUST_PROXY === 'true') {
+  if (
+    process.env.TRUST_PROXY === 'true' &&
+    requestOrigin.startsWith('https://')
+  ) {
     const forwardedIp = request.headers
       .get('x-forwarded-for')
       ?.split(',')[0]
@@ -184,17 +171,35 @@ async function forward(
       const value = upstreamResponse.headers.get(name);
       if (value) outgoingHeaders.set(name, value);
     }
-    for (const cookie of upstreamResponse.headers.getSetCookie())
-      outgoingHeaders.append('set-cookie', cookie);
+    for (const cookie of upstreamResponse.headers.getSetCookie()) {
+      const name = cookie.slice(0, cookie.indexOf('='));
+      outgoingHeaders.append(
+        'set-cookie',
+        internalHttpOrigins().includes(requestOrigin) &&
+          name === (process.env.SESSION_COOKIE_NAME ?? 'galaxy_session')
+          ? cookie.replace(/;\s*Secure(?=;|$)/gi, '')
+          : cookie,
+      );
+    }
     outgoingHeaders.set('cache-control', 'no-store');
-    return new Response(upstreamResponse.body, {
-      status: upstreamResponse.status,
-      headers: outgoingHeaders,
-    });
+    return observeResponse(
+      new Response(upstreamResponse.body, {
+        status: upstreamResponse.status,
+        headers: outgoingHeaders,
+      }),
+      identity,
+      request.method,
+      request.nextUrl.pathname,
+    );
   } catch {
-    return Response.json(
-      { message: 'Service unavailable' },
-      { status: 502, headers: { 'cache-control': 'no-store' } },
+    return observeResponse(
+      Response.json(
+        { message: 'Service unavailable' },
+        { status: 502, headers: { 'cache-control': 'no-store' } },
+      ),
+      identity,
+      request.method,
+      request.nextUrl.pathname,
     );
   }
 }

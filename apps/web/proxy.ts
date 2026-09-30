@@ -7,7 +7,10 @@ import {
   internalApiUrl,
   publicHosts,
   trustedRequestHost,
+  internalHttpOrigins,
+  trustedRequestOrigin,
 } from './host-config';
+import { observeResponse, runtimeIdentity } from './runtime-http';
 
 const apiBaseUrl =
   process.env.NODE_ENV === 'production'
@@ -16,7 +19,12 @@ const apiBaseUrl =
 
 const allowedHosts = () => {
   return new Set(
-    process.env.NODE_ENV === 'production' ? publicHosts() : developmentHosts(),
+    process.env.NODE_ENV === 'production'
+      ? [
+          ...publicHosts(),
+          ...internalHttpOrigins().map((origin) => new URL(origin).hostname),
+        ]
+      : developmentHosts(),
   );
 };
 
@@ -39,12 +47,21 @@ const contentSecurityPolicy = (nonce: string, development: boolean) =>
   ].join('; ');
 
 export async function proxy(request: NextRequest) {
-  const requestHost = trustedRequestHost(
+  const identity = runtimeIdentity(
     request.headers,
-    request.nextUrl.hostname,
+    process.env.NODE_ENV === 'production' &&
+      trustedRequestOrigin(request.headers, request.nextUrl.origin)?.startsWith(
+        'https://',
+      ) === true,
   );
+  const requestHost = trustedRequestHost(request.headers, request.nextUrl.host);
   if (!requestHost || !allowedHosts().has(requestHost))
-    return new NextResponse('Invalid Host', { status: 400 });
+    return observeResponse(
+      new NextResponse('Invalid Host', { status: 400 }),
+      identity,
+      request.method,
+      request.nextUrl.pathname,
+    );
 
   const development = process.env.NODE_ENV === 'development';
   const nonce = randomBytes(16).toString('base64url');
@@ -52,6 +69,8 @@ export async function proxy(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('Content-Security-Policy', csp);
   requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('x-request-id', identity.requestId);
+  requestHeaders.delete('x-galaxy-edge-proof');
   let response = NextResponse.next({ request: { headers: requestHeaders } });
   const path = request.nextUrl.pathname;
   const returnTo = request.nextUrl.searchParams.get('returnTo');
@@ -72,11 +91,14 @@ export async function proxy(request: NextRequest) {
     response = NextResponse.redirect(login);
   } else if (path !== '/forgot-password' && path !== '/reset-password') {
     const actorResponse = await fetch(`${apiBaseUrl}/me`, {
-      headers: { cookie: request.headers.get('cookie') ?? '' },
+      headers: {
+        cookie: request.headers.get('cookie') ?? '',
+        'x-request-id': identity.requestId,
+      },
       cache: 'no-store',
     }).catch(() => null);
     const actor = actorResponse?.ok
-      ? ((await actorResponse.json()) as {
+      ? ((await actorResponse.json().catch(() => null)) as {
           mustChangePassword: boolean;
           membershipKind?: string;
           permissions: string[];
@@ -87,6 +109,32 @@ export async function proxy(request: NextRequest) {
             | 'ORGANIZATION';
         })
       : null;
+    if (
+      !actorResponse ||
+      (actorResponse.status !== 401 && !actorResponse.ok) ||
+      (actorResponse.ok &&
+        (!actor ||
+          !Array.isArray(actor.permissions) ||
+          !actor.permissions.every(
+            (permission) => typeof permission === 'string',
+          )))
+    ) {
+      return observeResponse(
+        new NextResponse(
+          'Tạm thời không kết nối được hệ thống. Vui lòng thử lại.',
+          {
+            status: 503,
+            headers: {
+              'cache-control': 'no-store',
+              'Content-Security-Policy': csp,
+            },
+          },
+        ),
+        identity,
+        request.method,
+        path,
+      );
+    }
     if (path === '/login') {
       if (actor)
         response = NextResponse.redirect(
@@ -139,7 +187,13 @@ export async function proxy(request: NextRequest) {
     }
   }
   response.headers.set('Content-Security-Policy', csp);
-  return response;
+  return observeResponse(
+    response,
+    identity,
+    request.method,
+    path,
+    response.headers.get('x-middleware-next') === '1',
+  );
 }
 
 export const config = {

@@ -1,4 +1,5 @@
 'use client';
+import { createCommandKey } from '../../../lib/create-command-key';
 import { FormEvent, use, useCallback, useEffect, useState } from 'react';
 import { api } from '../../../lib/api';
 
@@ -110,7 +111,7 @@ export default function ShipmentDetail({
           shipmentId,
           number: form.get('number'),
           baseCurrency: form.get('baseCurrency'),
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: createCommandKey(),
           lines: [
             {
               category: form.get('category'),

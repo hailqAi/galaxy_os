@@ -32,7 +32,18 @@ CONFIG_KEYS = {
     "INTERNAL_API_URL",
     "REDIS_URL",
     "TRUST_PROXY",
+    "TRUSTED_PUBLIC_HOSTS",
+    "GALAXY_INTERNAL_HTTP_ORIGINS",
+    "GALAXY_PUBLIC_ACCESS",
+    "GALAXY_EDGE_PROOF",
+    "GALAXY_RELEASE_ID",
 }
+
+def process_cgroup(pid):
+    for line in (Path('/proc') / str(pid) / 'cgroup').read_text().splitlines():
+        if line.startswith('0::'):
+            return line[3:]
+    raise RuntimeError('Không tìm thấy unified systemd cgroup')
 
 
 def digest(path):
@@ -98,6 +109,50 @@ class Runtime:
         self.children = {}
         self.folder.mkdir(parents=True, exist_ok=True, mode=0o700)
 
+    def unit(self, spec):
+        unit = spec['systemdUnit']
+        if not re.fullmatch(r'galaxy-os-(api|web)\.service', unit):
+            raise RuntimeError('Chỉ quản lý exact Galaxy Web/API units')
+        return unit
+
+    def unit_state(self, spec):
+        output = subprocess.check_output(['systemctl', '--user', 'show', self.unit(spec), '--property=ActiveState,MainPID,ControlGroup', '--no-pager'], text=True)
+        return dict(line.split('=', 1) for line in output.splitlines() if '=' in line)
+
+    def unit_owned(self, pid, spec, state):
+        main = int(state.get('MainPID', '0'))
+        group = state.get('ControlGroup', '')
+        return state.get('ActiveState') == 'active' and main > 0 and group.endswith('/' + self.unit(spec)) and self.matches(main, spec) and process_cgroup(main) == group and process_cgroup(pid) == group
+
+    def stop_unit(self, name, spec):
+        state = self.inspect(name, spec)
+        unit_state = self.unit_state(spec)
+        main_pid = int(unit_state.get('MainPID', '0'))
+        if main_pid and not self.unit_owned(main_pid, spec, unit_state):
+            raise RuntimeError(f'{name}: unit identity không khớp; không dừng')
+        if state['managed'] or state['pid'] is None:
+            subprocess.run(['systemctl', '--user', 'stop', self.unit(spec)], check=True)
+
+    def logs(self):
+        units = [self.unit(spec) for spec in self.config['services'].values() if spec.get('systemdUnit')]
+        if len(units) != len(self.config['services']):
+            raise RuntimeError('local:logs cần runtime systemd; log cũ nằm trong local-managed')
+        return subprocess.run(['journalctl', '--user', '--follow', '--no-pager', *[argument for unit in units for argument in ['--unit', unit]]], check=True).returncode
+
+    def serve(self, name):
+        if name not in self.config['services']:
+            raise RuntimeError('Service không có trong manifest')
+        spec = self.config['services'][name]
+        if not process_cgroup(os.getpid()).endswith('/' + self.unit(spec)):
+            raise RuntimeError('serve chỉ chạy trong exact systemd service cgroup')
+        self.check_files()
+        self.check_database()
+        env = self.environment(spec)
+        if not env.get('GALAXY_LOCAL_RUNTIME_TOKEN'):
+            raise RuntimeError('Thiếu runtime token trong private environment')
+        os.chdir(spec['cwd'])
+        os.execve(spec['command'][0], spec['command'], {**env, 'PATH': os.environ['PATH']})
+
     @contextmanager
     def lock(self):
         with (self.folder / "lock").open("a") as lock:
@@ -146,10 +201,20 @@ class Runtime:
             "verified": True,
         }
 
+    def environment_matches(self, pid, spec):
+        env, expected = process_environment(pid), self.environment(spec)
+        keys = set(expected) | CONFIG_KEYS
+        return all(env.get(key) == expected.get(key) for key in spec['identityKeys']) and all(env[key] == expected.get(key) for key in keys if key in env and key != 'PATH')
+
     def matches(self, pid, spec):
         # Next uses a server child whose process title replaces argv; verify its
         # actual launcher ancestor as well as the listener's cwd and executable.
         current = identity(pid)
+        if spec.get('systemdUnit') and current['uid'] == os.getuid() and process_cgroup(pid).endswith('/' + self.unit(spec)):
+            name = self.unit(spec).removeprefix('galaxy-os-').removesuffix('.service')
+            wrapper = ['/usr/bin/python3', spec.get('controllerPath', str(Path(__file__).resolve())), 'serve', name]
+            if current['command'] == wrapper and current['cwd'] == self.config.get('runtimeRoot') and current['exe'] == str(Path('/usr/bin/python3').resolve()):
+                return self.environment_matches(pid, spec)
         if (
             current["cwd"] != str(Path(spec["cwd"]).resolve())
             or current["uid"] != os.getuid()
@@ -157,20 +222,14 @@ class Runtime:
             return False
         if current["exe"] != str(Path(spec["command"][0]).resolve()):
             return False
+        if spec.get('systemdUnit') and spec.get('processTitle') and current['command'] == [spec['processTitle']] and process_cgroup(pid).endswith('/' + self.unit(spec)):
+            expected = self.environment(spec)
+            return bool(expected.get('GALAXY_LOCAL_RUNTIME_TOKEN')) and self.environment_matches(pid, spec)
         for _ in range(6):
             if current["command"] == spec["command"] and current["cwd"] == spec["cwd"]:
-                env = process_environment(current["pid"])
-                expected = self.environment(spec)
                 # Node --env-file preserves inherited values. Check every inherited
                 # trust-boundary override, including keys absent from the env file.
-                keys = set(expected) | CONFIG_KEYS
-                return all(
-                    env.get(key) == expected.get(key) for key in spec["identityKeys"]
-                ) and all(
-                    env[key] == expected.get(key)
-                    for key in keys
-                    if key in env and key != "PATH"
-                )
+                return self.environment_matches(current['pid'], spec)
             if current["ppid"] < 2:
                 return False
             current = identity(current["ppid"])
@@ -209,6 +268,7 @@ class Runtime:
 
     def inspect(self, name, spec):
         pids = listeners(spec["port"])
+        unit_state = self.unit_state(spec) if spec.get('systemdUnit') else None
         result = {
             "port": spec["port"],
             "pid": None,
@@ -217,6 +277,8 @@ class Runtime:
             "managed": False,
         }
         if not pids:
+            if unit_state and unit_state.get('ActiveState') in ['active', 'activating', 'deactivating']:
+                result['state'] = 'NOT_READY'
             return result
         if len(pids) != 1 or not self.matches(pids[0], spec):
             raise RuntimeError(
@@ -224,6 +286,11 @@ class Runtime:
             )
         record = self.load().get(name, {})
         current = identity(pids[0])
+        if unit_state is not None:
+            if not self.unit_owned(pids[0], spec, unit_state):
+                raise RuntimeError(f'{name}: listener không thuộc exact active systemd unit; không signal hoặc spawn')
+            result.update(pid=pids[0], state='READY' if self.healthy(spec) else 'NOT_READY', managed=True, systemdUnit=self.unit(spec))
+            return result
         result.update(
             pid=pids[0],
             state="READY" if self.healthy(spec) else "NOT_READY",
@@ -329,6 +396,17 @@ class Runtime:
                 for name, spec in self.config["services"].items():
                     if before[name]["state"] == "READY":
                         continue
+                    if spec.get('systemdUnit'):
+                        subprocess.run(['systemctl', '--user', 'start', self.unit(spec)], check=True)
+                        created[name] = {'systemdUnit': self.unit(spec)}
+                        deadline = time.monotonic() + self.timeout
+                        while time.monotonic() < deadline:
+                            if self.inspect(name, spec)['state'] == 'READY':
+                                break
+                            time.sleep(0.1)
+                        else:
+                            raise RuntimeError(f'{name} hết thời gian chờ systemd readiness')
+                        continue
                     token = uuid.uuid4().hex
                     start_floor = str(
                         int(
@@ -389,7 +467,11 @@ class Runtime:
             except BaseException:
                 for name, record in reversed(list(created.items())):
                     try:
-                        self.terminate(record)
+                        if record.get('systemdUnit'):
+                            spec = self.config['services'][name]
+                            self.stop_unit(name, spec)
+                        else:
+                            self.terminate(record)
                         records.pop(name, None)
                     except RuntimeError as cleanup_error:
                         print(str(cleanup_error), file=sys.stderr)
@@ -398,6 +480,9 @@ class Runtime:
 
     def stop(self):
         with self.lock():
+            for name, spec in reversed(list(self.config['services'].items())):
+                if spec.get('systemdUnit'):
+                    self.stop_unit(name, spec)
             records = self.load()
             for name, record in reversed(list(records.items())):
                 self.terminate(record)
@@ -411,19 +496,26 @@ class Runtime:
 
 def main():
     root = Path(__file__).resolve().parent.parent
-    common = subprocess.check_output(
-        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        cwd=root,
-        text=True,
-    ).strip()
-    base = Path(common).parent
-    config_path = base / ".runtime/local-runtime.json"
+    explicit = os.environ.get('GALAXY_LOCAL_RUNTIME_MANIFEST')
+    if explicit:
+        config_path = Path(explicit)
+        if not config_path.is_absolute(): raise RuntimeError('Manifest path phải absolute')
+        base = config_path.parent.parent
+    else:
+        common = subprocess.check_output(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=root,
+            text=True,
+        ).strip()
+        base = Path(common).parent
+        config_path = base / ".runtime/local-runtime.json"
     if not config_path.exists():
         raise RuntimeError(
             f"Chưa cấu hình runtime local: {config_path}; không tự chạy stack khác"
         )
     config = json.loads(config_path.read_text())
-    if Path(config["runtimeRoot"]).resolve() != root:
+    serving = len(sys.argv) == 3 and sys.argv[1] == 'serve'
+    if Path(config["runtimeRoot"]).resolve() != root and not (explicit and serving):
         raise RuntimeError(
             f"Runtime chuẩn là {config['runtimeRoot']}; dùng pnpm --dir {config['runtimeRoot']} local:up"
         )
@@ -438,10 +530,15 @@ def main():
         raise RuntimeError("Thiếu preflight database read-only; không khởi chạy")
     manager = Runtime(config, base / ".runtime/local-managed")
     command = sys.argv[1] if len(sys.argv) == 2 else ""
-    if command not in ["status", "up", "stop"]:
+    if len(sys.argv) == 3 and sys.argv[1] == 'serve':
+        manager.serve(sys.argv[2])
+        return
+    if command not in ["status", "up", "stop", "logs"]:
         raise RuntimeError("Dùng local:status, local:up hoặc local:stop")
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
-    print(json.dumps(getattr(manager, command)(), ensure_ascii=False, indent=2))
+    result = getattr(manager, command)()
+    if command != 'logs':
+        print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

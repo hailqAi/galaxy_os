@@ -45,6 +45,8 @@ const edge = createEdge({
   tlsCert: `${tls}/cert.pem`,
   tlsKey: `${tls}/key.pem`,
   trustProxy: false,
+  proof: 'm2-isolated-fixture-edge-proof-not-for-main-20260930',
+  publicAccess: true,
 });
 if (!edge.https) throw new Error('Thiếu TLS server');
 edge.https.listen(33003, '127.0.0.1', () =>

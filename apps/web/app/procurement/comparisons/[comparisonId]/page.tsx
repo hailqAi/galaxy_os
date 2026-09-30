@@ -1,4 +1,5 @@
 'use client';
+import { createCommandKey } from '../../../lib/create-command-key';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
@@ -59,7 +60,7 @@ export default function ComparisonDetailPage() {
         body: JSON.stringify({
           supplierQuotationId: quoteId,
           selectionReason: form.get('reason'),
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: createCommandKey(),
           selectedLines: lines
             .map((line) => ({
               supplierQuotationLineId: line.supplierQuotationLineId,

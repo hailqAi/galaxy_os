@@ -1,16 +1,22 @@
 [Unit]
 Description=Galaxy OS web
 After=galaxy-os-api.service
-Requires=galaxy-os-api.service
+Wants=galaxy-os-api.service
+PartOf=galaxy-os.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
-WorkingDirectory=<REPOSITORY_PATH>
-EnvironmentFile=<REPOSITORY_PATH>/.env.production
-ExecStart=<PNPM_PATH> --filter @galaxy/web start
+WorkingDirectory=<RUNTIME_ROOT>
+EnvironmentFile=<PRIVATE_WEB_ENV_FILE>
+Environment=GALAXY_LOCAL_RUNTIME_MANIFEST=<PRIVATE_MANIFEST_PATH>
+ExecStart=/usr/bin/python3 <CONTROLLER_PATH> serve web
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
+KillMode=control-group
+NoNewPrivileges=true
 
 [Install]
 WantedBy=galaxy-os.target

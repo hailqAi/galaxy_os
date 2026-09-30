@@ -51,6 +51,12 @@ test('sender persists text/file across reload; viewer cannot send; revoke clears
 }) => {
   const sender = await browser.newContext(),
     viewer = await browser.newContext();
+  await sender.addInitScript(() =>
+    Object.defineProperty(globalThis.crypto, 'randomUUID', {
+      value: undefined,
+      configurable: true,
+    }),
+  );
   const page = await sender.newPage(),
     readOnly = await viewer.newPage();
   try {
@@ -983,6 +989,10 @@ test('offline reconnect starts one bounded polling loop without overlapping requ
     entered = resolve;
   });
   await context.setOffline(true);
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Mất kết nối' }),
+  ).toBeVisible();
+  await expect(page.getByText(/Xác minh lần cuối:/)).toBeVisible();
   await page.route('**/project-chat/rooms/*/messages*', async (route) => {
     active++;
     maximum = Math.max(maximum, active);
@@ -1001,11 +1011,17 @@ test('offline reconnect starts one bounded polling loop without overlapping requ
   try {
     await context.setOffline(false);
     await reached;
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Mất kết nối' }),
+    ).toBeVisible();
     // Repeated real offline/online edges while a response is held must not fork loops.
     await context.setOffline(true);
     await context.setOffline(false);
     release();
     await expect.poll(() => reads).toBeGreaterThanOrEqual(3);
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Mất kết nối' }),
+    ).toHaveCount(0);
     expect(maximum).toBe(1);
     await expect(page.getByLabel('Tin nhắn', { exact: true })).toHaveValue('');
   } finally {

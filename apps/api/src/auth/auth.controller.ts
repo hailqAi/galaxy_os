@@ -46,7 +46,9 @@ export class AuthController {
     response.cookie(env.SESSION_COOKIE_NAME, result.token, {
       httpOnly: true,
       sameSite: 'lax',
-      secure: env.NODE_ENV === 'production',
+      secure:
+        env.NODE_ENV === 'production' ||
+        new URL(env.APP_PUBLIC_ORIGIN).protocol === 'https:',
       path: '/',
       expires: result.expiresAt,
     });
@@ -62,7 +64,9 @@ export class AuthController {
     response.clearCookie(env.SESSION_COOKIE_NAME, {
       httpOnly: true,
       sameSite: 'lax',
-      secure: env.NODE_ENV === 'production',
+      secure:
+        env.NODE_ENV === 'production' ||
+        new URL(env.APP_PUBLIC_ORIGIN).protocol === 'https:',
       path: '/',
     });
     return { authenticated: false };
@@ -86,7 +90,9 @@ export class AuthController {
     response.clearCookie(env.SESSION_COOKIE_NAME, {
       httpOnly: true,
       sameSite: 'lax',
-      secure: env.NODE_ENV === 'production',
+      secure:
+        env.NODE_ENV === 'production' ||
+        new URL(env.APP_PUBLIC_ORIGIN).protocol === 'https:',
       path: '/',
     });
     return { changed: true, loginRequired: true };

@@ -227,7 +227,7 @@ function ProjectTable({
               <td>
                 <Link
                   className="block truncate font-semibold text-slate-900 hover:text-blue-700"
-                  href={`/projects/${item.id}/stage-1`}
+                  href={`/projects/${item.id}`}
                   title={item.name}
                 >
                   {item.name}
@@ -272,7 +272,7 @@ function ProjectTable({
                 <div className="flex items-center gap-2">
                   <Link
                     className="primary inline-flex whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold"
-                    href={`/projects/${item.id}/stage-1`}
+                    href={`/projects/${item.id}`}
                   >
                     MỞ DỰ ÁN
                   </Link>
@@ -708,7 +708,7 @@ export function ProjectsPage({
                         <td>
                           <Link
                             className="underline"
-                            href={`/projects/${row.project.id}/stage-1`}
+                            href={`/projects/${row.project.id}`}
                           >
                             {row.project.name}
                           </Link>
@@ -748,7 +748,7 @@ export function ProjectsPage({
                         <td>
                           <Link
                             className="underline"
-                            href={`/projects/${row.project.id}/stage-1`}
+                            href={`/projects/${row.project.id}`}
                           >
                             {row.project.name}
                           </Link>

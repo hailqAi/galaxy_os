@@ -1,4 +1,5 @@
 'use client';
+import { createCommandKey } from '../../app/lib/create-command-key';
 import React, { useEffect, useRef, useState } from 'react';
 import { Actor, api, apiUrl, ApiError } from '../../app/lib/api';
 
@@ -943,7 +944,7 @@ export function ReleasePanel({
               if (prepareRequest.current?.identity !== identity)
                 prepareRequest.current = {
                   identity,
-                  clientKey: crypto.randomUUID(),
+                  clientKey: createCommandKey(),
                 };
               void action(
                 `/project-chat/rooms/${roomId}/releases`,

@@ -161,7 +161,7 @@ describe('Project Stage 1 page loading', () => {
     expect(denied).not.toContain('Xóa dự án');
   });
 
-  it('links both Project list actions directly to Stage 1', () => {
+  it('links both Project list actions to the current workspace entry', () => {
     const markup = renderToStaticMarkup(
       React.createElement(DashboardView, {
         data: page('project-root'),
@@ -175,10 +175,10 @@ describe('Project Stage 1 page loading', () => {
       }),
     );
 
-    expect(
-      markup.match(/href="\/projects\/project-root\/stage-1"/g) ?? [],
-    ).toHaveLength(2);
-    expect(markup).not.toContain('href="/projects/project-root"');
+    expect(markup.match(/href="\/projects\/project-root"/g) ?? []).toHaveLength(
+      2,
+    );
+    expect(markup).not.toContain('href="/projects/project-root/stage-1"');
   });
 
   it('requests an actor-scoped current-stage page instead of client filtering', () => {

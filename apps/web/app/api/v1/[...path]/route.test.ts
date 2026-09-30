@@ -15,6 +15,71 @@ afterEach(() => {
 });
 
 describe('same-origin API forwarder', () => {
+  it.each([
+    'http://192.168.1.80:3000/path',
+    'http://192.168.1.80:3000?query=1',
+    'http://user:password@192.168.1.80:3000',
+  ])('rejects a malformed browser Origin %s', async (origin) => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('GALAXY_INTERNAL_HTTP_ORIGINS', 'http://192.168.1.80:3000');
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(Response.json({ authenticated: true }));
+    vi.stubGlobal('fetch', fetch);
+    const response = await POST(
+      new NextRequest('http://192.168.1.80:3000/api/v1/auth/login', {
+        method: 'POST',
+        headers: { host: '192.168.1.80:3000', origin },
+        body: '{}',
+      }),
+      context(['auth', 'login']),
+    );
+    expect(response.status).toBe(403);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it.each(['login', 'logout'])(
+    'handles LAN HTTP session cookie for %s without trusting forwarded client IP',
+    async (action) => {
+      vi.stubEnv('NODE_ENV', 'production');
+      vi.stubEnv(
+        'GALAXY_INTERNAL_HTTP_ORIGINS',
+        'http://localhost:3000,http://192.168.1.80:3000',
+      );
+      vi.stubEnv('SESSION_COOKIE_NAME', 'galaxy_session');
+      vi.stubEnv('TRUST_PROXY', 'true');
+      const fetch = vi.fn().mockResolvedValue(
+        Response.json(
+          { authenticated: action === 'login' },
+          {
+            headers: {
+              'set-cookie': `galaxy_session=opaque; Path=/; Secure; HttpOnly; SameSite=Lax; Expires=Wed, 30 Sep 2026 01:00:00 GMT`,
+            },
+          },
+        ),
+      );
+      vi.stubGlobal('fetch', fetch);
+      const response = await POST(
+        new NextRequest(`http://192.168.1.80:3000/api/v1/auth/${action}`, {
+          method: 'POST',
+          headers: {
+            host: '192.168.1.80:3000',
+            origin: 'http://192.168.1.80:3000',
+            'x-forwarded-for': '203.0.113.8',
+          },
+          body: '{}',
+        }),
+        context(['auth', action]),
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get('set-cookie')).toContain(
+        'HttpOnly; SameSite=Lax; Expires=',
+      );
+      expect(response.headers.get('set-cookie')).not.toMatch(/;\s*Secure/i);
+      expect(fetch.mock.calls[0]?.[1]?.headers.has('x-forwarded-for')).toBe(
+        false,
+      );
+    },
+  );
   it('forwards the upload constraints contract to the fixed internal API', async () => {
     const fetch = vi
       .fn()
@@ -368,6 +433,11 @@ describe('same-origin API forwarder', () => {
   });
 
   it('supports same-origin Login behind a trusted loopback proxy', async () => {
+    vi.stubEnv('GALAXY_PUBLIC_ACCESS', 'true');
+    vi.stubEnv(
+      'GALAXY_EDGE_PROOF',
+      'synthetic-test-proof-with-at-least-32-bytes',
+    );
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('APP_PUBLIC_ORIGIN', 'https://os.example.com');
     vi.stubEnv('TRUST_PROXY', 'true');
@@ -384,6 +454,7 @@ describe('same-origin API forwarder', () => {
           'x-forwarded-host': 'os.example.com',
           'x-forwarded-proto': 'https',
           'x-forwarded-for': '203.0.113.8',
+          'x-galaxy-edge-proof': process.env.GALAXY_EDGE_PROOF!,
         },
         body: '{}',
       }),

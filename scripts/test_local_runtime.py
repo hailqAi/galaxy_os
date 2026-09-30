@@ -10,12 +10,60 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location(
     "runtime", Path(__file__).with_name("local-runtime.py")
 )
 runtime = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runtime)
+
+class SystemdTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='galaxy-unit-test-')
+        self.spec = {'systemdUnit': 'galaxy-os-api.service', 'port': 3001, 'cwd': self.temp.name}
+        self.manager = runtime.Runtime({'services': {'api': self.spec}}, self.temp.name)
+    def tearDown(self):
+        self.temp.cleanup()
+    def test_active_unit_without_listener_is_not_ready(self):
+        with patch.object(runtime, 'listeners', return_value=[]), patch.object(runtime.subprocess, 'check_output', return_value='ActiveState=active\nMainPID=123\nControlGroup=/user.slice/galaxy-os-api.service\n'):
+            self.assertEqual('NOT_READY', self.manager.inspect('api', self.spec)['state'])
+    def test_listener_requires_main_pid_and_matching_cgroup(self):
+        with patch.object(runtime, 'listeners', return_value=[124]), patch.object(self.manager, 'matches', return_value=True), patch.object(runtime, 'identity', return_value={'pid': 124}), patch.object(runtime.subprocess, 'check_output', return_value='ActiveState=active\nMainPID=123\nControlGroup=/user.slice/galaxy-os-api.service\n'), patch.object(runtime, 'process_cgroup', return_value='/unrelated.slice'):
+            with self.assertRaises(RuntimeError): self.manager.inspect('api', self.spec)
+    def test_ready_requires_exact_unit_owner_and_health(self):
+        with patch.object(runtime, 'listeners', return_value=[124]), patch.object(self.manager, 'matches', return_value=True), patch.object(runtime, 'identity', return_value={'pid': 124}), patch.object(runtime.subprocess, 'check_output', return_value='ActiveState=active\nMainPID=123\nControlGroup=/user.slice/galaxy-os-api.service\n'), patch.object(runtime, 'process_cgroup', return_value='/user.slice/galaxy-os-api.service'), patch.object(self.manager, 'healthy', return_value=False):
+            result = self.manager.inspect('api', self.spec)
+            self.assertTrue(result['managed'])
+            self.assertEqual('NOT_READY', result['state'])
+    def test_logs_follow_has_no_start_or_stop_side_effect(self):
+        with patch.object(runtime.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as run:
+            self.manager.logs()
+            self.assertEqual(['journalctl', '--user', '--follow', '--no-pager', '--unit', 'galaxy-os-api.service'], run.call_args.args[0])
+    def test_next_title_change_requires_matching_unit_token_and_environment(self):
+        spec = {**self.spec, 'systemdUnit': 'galaxy-os-web.service', 'command': ['/usr/bin/node', '/release/web/server.js'], 'processTitle': 'next-server (v16.2.10)', 'environment': {'GALAXY_LOCAL_RUNTIME_TOKEN': 'synthetic-token'}, 'identityKeys': ['GALAXY_LOCAL_RUNTIME_TOKEN']}
+        current = {'pid': 123, 'ppid': 1, 'cwd': self.temp.name, 'uid': os.getuid(), 'exe': str(Path('/usr/bin/node').resolve()), 'command': ['next-server (v16.2.10)']}
+        with patch.object(runtime, 'identity', return_value=current), patch.object(runtime, 'process_cgroup', return_value='/user.slice/galaxy-os-web.service'), patch.object(runtime, 'process_environment', return_value={'GALAXY_LOCAL_RUNTIME_TOKEN': 'synthetic-token'}):
+            self.assertTrue(self.manager.matches(123, spec))
+        with patch.object(runtime, 'identity', return_value=current), patch.object(runtime, 'process_cgroup', return_value='/user.slice/galaxy-os-web.service'), patch.object(runtime, 'process_environment', return_value={'GALAXY_LOCAL_RUNTIME_TOKEN': 'forged'}):
+            self.assertFalse(self.manager.matches(123, spec))
+    def test_foreground_serve_refuses_direct_execution_outside_unit(self):
+        with patch.object(runtime, 'process_cgroup', return_value='/'), patch.object(self.manager, 'check_files'), patch.object(self.manager, 'check_database'), patch.object(runtime.os, 'execve') as execute:
+            with self.assertRaises(RuntimeError): self.manager.serve('api')
+            execute.assert_not_called()
+    def test_stop_can_identify_the_frozen_controller_during_preflight(self):
+        self.manager.config['runtimeRoot'] = self.temp.name
+        spec = {**self.spec, 'cwd': '/artifact/apps/api', 'controllerPath': '/artifact/scripts/local-runtime.py', 'command': ['/usr/bin/node', '/artifact/apps/api/dist/main.js'], 'environment': {'GALAXY_LOCAL_RUNTIME_TOKEN': 'synthetic-token'}, 'identityKeys': ['GALAXY_LOCAL_RUNTIME_TOKEN']}
+        current = {'pid': 123, 'ppid': 1, 'cwd': self.temp.name, 'uid': os.getuid(), 'exe': str(Path('/usr/bin/python3').resolve()), 'command': ['/usr/bin/python3', '/artifact/scripts/local-runtime.py', 'serve', 'api']}
+        with patch.object(runtime, 'identity', return_value=current), patch.object(runtime, 'process_cgroup', return_value='/user.slice/galaxy-os-api.service'), patch.object(runtime, 'process_environment', return_value={'GALAXY_LOCAL_RUNTIME_TOKEN': 'synthetic-token'}):
+            self.assertTrue(self.manager.matches(123, spec))
+    def test_failed_start_does_not_stop_unrelated_main_pid_without_listener(self):
+        self.manager.timeout = 0
+        stopped = {'state': 'STOPPED', 'pid': None, 'managed': False}
+        not_ready = {**stopped, 'state': 'NOT_READY'}
+        with patch.object(self.manager, 'check_files'), patch.object(self.manager, 'check_database'), patch.object(self.manager, 'inspect', side_effect=[stopped, not_ready, not_ready]), patch.object(self.manager, 'unit_state', return_value={'ActiveState': 'active', 'MainPID': '123', 'ControlGroup': '/user.slice/galaxy-os-api.service'}), patch.object(self.manager, 'matches', return_value=False), patch.object(runtime.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as run:
+            with self.assertRaises(RuntimeError): self.manager.up()
+            self.assertEqual([['systemctl', '--user', 'start', 'galaxy-os-api.service']], [call.args[0] for call in run.call_args_list])
 
 SERVER = """import http.server,json,os
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -99,6 +147,38 @@ class RuntimeTests(unittest.TestCase):
             first, [x["pid"] for x in self.manager.status()["services"].values()]
         )
         self.assertEqual("READY", self.manager.status()["state"])
+
+    def test_systemd_start_reuses_owner_and_stop_only_managed_units(self):
+        units = {}
+        calls = []
+        original_run = runtime.subprocess.run
+        for name, spec in self.config['services'].items():
+            spec['systemdUnit'] = f'galaxy-os-{name}.service'
+        def invoke(args, **kwargs):
+            if args[0] != 'systemctl': return original_run(args, **kwargs)
+            action, unit = args[2:4]
+            calls.append((action, unit))
+            name = unit.removeprefix('galaxy-os-').removesuffix('.service')
+            if action == 'start': units[unit] = self.external_service(name)
+            elif action == 'stop' and unit in units:
+                units[unit].terminate()
+                units[unit].wait(3)
+            return subprocess.CompletedProcess(args, 0)
+        def state(spec):
+            child = units.get(spec['systemdUnit'])
+            active = child and child.poll() is None
+            return {'ActiveState': 'active' if active else 'inactive', 'MainPID': str(child.pid if active else 0), 'ControlGroup': '/user.slice/' + spec['systemdUnit'] if active else ''}
+        def group(pid):
+            return '/user.slice/' + next(unit for unit, child in units.items() if child.pid == pid)
+        with patch.object(runtime.subprocess, 'run', side_effect=invoke), patch.object(self.manager, 'unit_state', side_effect=state), patch.object(runtime, 'process_cgroup', side_effect=group):
+            self.assertEqual('STARTED_READY', self.manager.up()['action'])
+            first = {unit: child.pid for unit, child in units.items()}
+            self.assertEqual('ALREADY_RUNNING_VERIFIED', self.manager.up()['action'])
+            self.assertEqual(first, {unit: child.pid for unit, child in units.items()})
+            self.manager.stop()
+            self.assertTrue(all(child.poll() is not None for child in units.values()))
+            self.assertEqual([('start', 'galaxy-os-api.service'), ('start', 'galaxy-os-web.service'), ('stop', 'galaxy-os-web.service'), ('stop', 'galaxy-os-api.service')], calls)
+        for spec in self.config['services'].values(): del spec['systemdUnit']
 
     def test_concurrent_up_creates_one_stack(self):
         release = multiprocessing.Event()

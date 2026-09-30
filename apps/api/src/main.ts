@@ -5,6 +5,7 @@ import { AppModule } from './app.module';
 import { readEnvironment } from './config/env';
 import { HttpExceptionFilter } from './http-exception.filter';
 import { SecurityLogger } from './security-redaction';
+import { observeHttp } from './runtime-http';
 
 async function bootstrap() {
   const environment = readEnvironment();
@@ -28,6 +29,7 @@ async function bootstrap() {
     }),
   );
   app.enableShutdownHooks();
+  app.use(observeHttp);
   app.use(
     (
       _request: unknown,

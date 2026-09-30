@@ -1,4 +1,5 @@
 'use client';
+import { createCommandKey } from '../../lib/create-command-key';
 import { FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { Operation, OperationList } from '../operation-list';
@@ -38,7 +39,7 @@ export default function TransfersPage() {
     const body =
       command === 'receive'
         ? JSON.stringify({
-            idempotencyKey: crypto.randomUUID(),
+            idempotencyKey: createCommandKey(),
             lines: item.lines.map((line) => ({
               stockTransferLineId: line.id,
               quantity: String(

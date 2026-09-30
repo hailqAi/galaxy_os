@@ -1,4 +1,5 @@
 'use client';
+import { createCommandKey } from '../../app/lib/create-command-key';
 
 import React, {
   FormEvent,
@@ -344,6 +345,8 @@ function ChatRoomView({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
+  const [disconnected, setDisconnected] = useState(false);
+  const [lastVerifiedAt, setLastVerifiedAt] = useState<Date>();
   const [more, setMore] = useState(false);
   const [attachment, setAttachment] = useState<Attachment>();
   const [failed, setFailed] = useState(false);
@@ -419,6 +422,8 @@ function ChatRoomView({
               },
             );
             if (!accept(result)) return;
+            setLastVerifiedAt(new Date());
+            setDisconnected(!navigator.onLine);
             const bottom =
               first ||
               Boolean(
@@ -463,9 +468,10 @@ function ChatRoomView({
             setError((old) =>
               old === 'Không tải được tin mới. Đang thử lại…' ? '' : old,
             );
-        }
+        } else if (!navigator.onLine) setDisconnected(true);
       } catch (e) {
         if (controller.signal.aborted) return;
+        setDisconnected(true);
         if (denied(e)) {
           clear();
           return;
@@ -477,18 +483,21 @@ function ChatRoomView({
     }
     void poll();
     const auth = () => clear();
+    const offline = () => setDisconnected(true);
     const channel =
       typeof BroadcastChannel === 'undefined'
         ? undefined
         : new BroadcastChannel('galaxy-auth');
     if (channel) channel.onmessage = auth;
     window.addEventListener('galaxy-auth-changed', auth);
+    window.addEventListener('offline', offline);
     return () => {
       alive.current = false;
       clearTimeout(timer);
       for (const a of activeAborts) a.abort();
       activeAborts.clear();
       window.removeEventListener('galaxy-auth-changed', auth);
+      window.removeEventListener('offline', offline);
       channel?.close();
     };
     // Scope changes remount this component using actor/room/grant identity.
@@ -665,7 +674,7 @@ function ChatRoomView({
   async function send() {
     if (busy || !ready || locked || !room.actions.includes('SEND')) return;
     pending.current ??= {
-      clientKey: crypto.randomUUID(),
+      clientKey: createCommandKey(),
       body: draft,
       attachmentIds: attachment ? [attachment.id] : [],
     };
@@ -818,6 +827,19 @@ function ChatRoomView({
           : 'Nội bộ Galaxy'}
       </p>
       {error && <p role="alert">{error}</p>}
+      {disconnected && (
+        <p role="status">Mất kết nối. Đang chờ xác minh lại tin nhắn.</p>
+      )}
+      <p>
+        Xác minh lần cuối:{' '}
+        {lastVerifiedAt ? (
+          <time dateTime={lastVerifiedAt.toISOString()}>
+            {lastVerifiedAt.toLocaleString('vi-VN')}
+          </time>
+        ) : (
+          'Chưa xác minh'
+        )}
+      </p>
       {room.audience === 'CUSTOMER' && (
         <ReleasePanel
           roomId={room.id}
@@ -888,7 +910,7 @@ function ChatRoomView({
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 upload.current = file
-                  ? { file, clientKey: crypto.randomUUID() }
+                  ? { file, clientKey: createCommandKey() }
                   : undefined;
                 setHasUpload(Boolean(file));
                 setAttachment(undefined);

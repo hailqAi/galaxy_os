@@ -79,10 +79,8 @@ describe('Project dashboard view', () => {
     expect(markup).toContain('MỞ DỰ ÁN');
     expect(markup).not.toContain('CHI TIẾT');
     expect(markup).toContain('sticky right-0');
-    expect(
-      markup.match(/href="\/projects\/project-1\/stage-1"/g) ?? [],
-    ).toHaveLength(2);
-    expect(markup).not.toContain('href="/projects/project-1"');
+    expect(markup.match(/href="\/projects\/project-1"/g) ?? []).toHaveLength(2);
+    expect(markup).not.toContain('href="/projects/project-1/stage-1"');
     expect(markup).toContain('TẠO DỰ ÁN');
     expect(markup).not.toContain('<svg');
   });

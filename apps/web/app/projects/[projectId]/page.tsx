@@ -6,5 +6,7 @@ export default async function ProjectPage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
-  redirect(`/projects/${projectId}/stage-1`);
+  redirect(
+    `/projects/${projectId}/${process.env.FEATURE_PROJECT_CHAT === 'true' ? 'work' : 'stage-1'}`,
+  );
 }

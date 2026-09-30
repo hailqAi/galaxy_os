@@ -53,6 +53,8 @@ function config(upstreamPort: number, tls = true): EdgeConfig {
     tlsCert: tls ? cert : join(temporary, 'missing-cert'),
     tlsKey: tls ? key : join(temporary, 'missing-key'),
     trustProxy: true,
+    proof: 'synthetic-test-proof-with-at-least-32-bytes',
+    publicAccess: true,
   };
 }
 
@@ -89,7 +91,12 @@ function get(port: number, path: string, host = 'os.galaxycentre.vn') {
 
 function secure(
   port: number,
-  options: { path?: string; method?: string; body?: string } = {},
+  options: {
+    path?: string;
+    method?: string;
+    body?: string;
+    headers?: Record<string, string>;
+  } = {},
 ) {
   return new Promise<{
     status: number;
@@ -105,6 +112,7 @@ function secure(
         headers: {
           host: 'os.galaxycentre.vn',
           'content-type': 'application/json',
+          ...options.headers,
         },
       },
       (response) => {
@@ -130,6 +138,38 @@ async function listen(server: Server) {
 }
 
 describe('Galaxy edge', () => {
+  it('keeps public access closed for normal and prefetch requests until enabled', async () => {
+    let reads = 0;
+    const upstream = await listen(
+      createServer((_request, response) => {
+        reads++;
+        response.end('private');
+      }),
+    );
+    running.push({
+      stop: () =>
+        new Promise<void>((resolve) => upstream.close(() => resolve())),
+    });
+    const edge = createEdge(
+      { ...config(address(upstream)), publicAccess: false },
+      (entry) => logs.push(entry),
+    );
+    running.push(edge);
+    await edge.start();
+    const variants: Record<string, string>[] = [
+      {},
+      { 'next-router-prefetch': '1' },
+    ];
+    for (const headers of variants) {
+      const response = await secure(address(edge.https!), {
+        path: '/projects',
+        headers,
+      });
+      expect(response.status).toBe(503);
+      expect(response.headers['cache-control']).toBe('no-store');
+    }
+    expect(reads).toBe(0);
+  });
   it('serves ACME, rejects traversal and arbitrary hosts, and redirects normal HTTP', async () => {
     writeFileSync(join(acme, 'challenge_token'), 'challenge-value\n');
     const edge = createEdge(config(1, false), (entry) => logs.push(entry));
@@ -166,6 +206,7 @@ describe('Galaxy edge', () => {
       forwardedFor: '',
       forwardedHost: '',
       forwardedProto: '',
+      proof: '',
     };
     const upstream = await listen(
       createServer((request, response) => {
@@ -178,6 +219,7 @@ describe('Galaxy edge', () => {
             forwardedFor: String(request.headers['x-forwarded-for']),
             forwardedHost: String(request.headers['x-forwarded-host']),
             forwardedProto: String(request.headers['x-forwarded-proto']),
+            proof: String(request.headers['x-galaxy-edge-proof']),
           };
           response.setHeader('set-cookie', [
             'galaxy_session=opaque; Path=/; Secure; HttpOnly; SameSite=Lax',
@@ -208,6 +250,7 @@ describe('Galaxy edge', () => {
       host: 'os.galaxycentre.vn',
       forwardedHost: 'os.galaxycentre.vn',
       forwardedProto: 'https',
+      proof: 'synthetic-test-proof-with-at-least-32-bytes',
     });
     expect(received.forwardedFor).toMatch(/127\.0\.0\.1/);
     expect(JSON.stringify(logs)).not.toContain('never-log-this');

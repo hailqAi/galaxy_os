@@ -1,4 +1,5 @@
 'use client';
+import { createCommandKey } from '../../../lib/create-command-key';
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../../lib/api';
 import { deliveryFailureKind, deliveryRequestBody } from './delivery-request';
@@ -176,7 +177,7 @@ export default function WorkOrderClient({
         recipient,
         fileId: file!.id,
         fileVersion: file!.version,
-        clientKey: crypto.randomUUID(),
+        clientKey: createCommandKey(),
       });
     const epoch = scope.current;
     setPending(body);

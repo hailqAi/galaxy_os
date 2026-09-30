@@ -1,4 +1,4 @@
-import { constants } from 'node:crypto';
+import { constants, randomUUID } from 'node:crypto';
 import { constants as fsConstants, existsSync, readFileSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import {
@@ -21,6 +21,8 @@ export type EdgeConfig = {
   tlsCert: string;
   tlsKey: string;
   trustProxy: boolean;
+  proof?: string;
+  publicAccess?: boolean;
 };
 
 type Log = (entry: Record<string, unknown>) => void;
@@ -36,6 +38,8 @@ function port(value: string | undefined, fallback: number) {
 }
 
 export function readConfig(env: NodeJS.ProcessEnv = process.env): EdgeConfig {
+  if (env.GALAXY_EDGE_PROOF && env.GALAXY_EDGE_PROOF.length < 32)
+    throw new Error('GALAXY_EDGE_PROOF must contain at least 32 characters');
   const publicHost = (
     env.EDGE_PUBLIC_HOST ?? 'os.galaxycentre.vn'
   ).toLowerCase();
@@ -60,6 +64,8 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): EdgeConfig {
     tlsCert: env.EDGE_TLS_CERT ?? '/home/galaxy_os/.runtime/tls/fullchain.pem',
     tlsKey: env.EDGE_TLS_KEY ?? '/home/galaxy_os/.runtime/tls/privkey.pem',
     trustProxy: env.EDGE_TRUST_PROXY === 'true',
+    proof: env.GALAXY_EDGE_PROOF,
+    publicAccess: env.GALAXY_PUBLIC_ACCESS === 'true',
   };
 }
 
@@ -141,6 +147,27 @@ export function createEdge(
   config: EdgeConfig,
   log: Log = (entry) => console.log(JSON.stringify(entry)),
 ) {
+  const instanceId = randomUUID();
+  const releaseId = process.env.GALAXY_RELEASE_ID ?? 'development';
+  const observe = (req: IncomingMessage, res: ServerResponse) => {
+    const requestId = randomUUID();
+    req.headers['x-request-id'] = requestId;
+    res.setHeader('x-request-id', requestId);
+    res.setHeader('x-galaxy-edge-instance', instanceId);
+    res.setHeader('x-galaxy-edge-release', releaseId);
+    res.on('finish', () =>
+      log({
+        event: 'http_response',
+        service: 'edge',
+        requestId,
+        instanceId,
+        releaseId,
+        method: req.method,
+        pathname: new URL(req.url ?? '/', 'http://edge.invalid').pathname,
+        status: res.statusCode,
+      }),
+    );
+  };
   const proxy = httpProxy.createProxyServer({
     target: config.upstream.origin,
     changeOrigin: false,
@@ -148,9 +175,15 @@ export function createEdge(
     ws: true,
   });
   proxy.on('proxyReq', (proxyReq, req) => {
+    proxyReq.setHeader('x-request-id', req.headers['x-request-id']!);
+    if (config.proof) proxyReq.setHeader('x-galaxy-edge-proof', config.proof);
+    else proxyReq.removeHeader('x-galaxy-edge-proof');
     proxyReq.setHeader('host', req.headers.host ?? config.publicHost);
     proxyReq.setHeader('x-forwarded-proto', 'https');
-    proxyReq.setHeader('x-forwarded-host', config.publicHost);
+    proxyReq.setHeader(
+      'x-forwarded-host',
+      req.headers.host ?? config.publicHost,
+    );
     proxyReq.setHeader(
       'x-forwarded-for',
       req.socket.remoteAddress ?? 'unknown',
@@ -164,6 +197,7 @@ export function createEdge(
   });
 
   const http = createHttpServer(async (req, res) => {
+    observe(req, res);
     const requestHost = host(req);
     const url = new URL(req.url ?? '/', 'http://edge.invalid');
     if (
@@ -209,6 +243,7 @@ export function createEdge(
         secureOptions: constants.SSL_OP_NO_COMPRESSION,
       },
       async (req, res) => {
+        observe(req, res);
         const requestHost = host(req);
         const url = new URL(req.url ?? '/', 'https://edge.invalid');
         if (
@@ -218,15 +253,22 @@ export function createEdge(
           return health(res, config, true);
         if (!publicHostAllowed(requestHost, config, config.httpsPort))
           return send(res, 400, 'Invalid Host');
+        if (!config.publicAccess)
+          return send(res, 503, 'Public access is disabled');
         proxy.web(req, res);
       },
     );
     https.on('upgrade', (req, socket, head) => {
-      if (!publicHostAllowed(host(req), config, config.httpsPort))
+      if (
+        !config.publicAccess ||
+        !publicHostAllowed(host(req), config, config.httpsPort)
+      )
         return socket.destroy();
       req.headers['x-forwarded-proto'] = 'https';
-      req.headers['x-forwarded-host'] = config.publicHost;
+      req.headers['x-forwarded-host'] = req.headers.host ?? config.publicHost;
       req.headers['x-forwarded-for'] = req.socket.remoteAddress ?? 'unknown';
+      if (config.proof) req.headers['x-galaxy-edge-proof'] = config.proof;
+      else delete req.headers['x-galaxy-edge-proof'];
       proxy.ws(req, socket, head);
     });
   }

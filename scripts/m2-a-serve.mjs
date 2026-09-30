@@ -63,7 +63,12 @@ const child = spawn(
             ...env,
             NODE_ENV: productionWeb ? 'production' : 'development',
             ...(productionWeb
-              ? { APP_PUBLIC_ORIGIN: 'https://localhost:33003' }
+              ? {
+                  APP_PUBLIC_ORIGIN: 'https://localhost:33003',
+                  GALAXY_PUBLIC_ACCESS: 'true',
+                  GALAXY_EDGE_PROOF:
+                    'm2-isolated-fixture-edge-proof-not-for-main-20260930',
+                }
               : {}),
           }
         : {
