@@ -1,5 +1,88 @@
 # M2 — Bằng chứng triển khai và kiểm chứng
 
+## Nghiệm thu M2 + nền M3 và cutover local — 2026-09-30
+
+CODE_SHA=TESTED_SHA `fde08f8f1cf16443049d96a5601609a7cdac8db3`;
+TESTED_TREE `0209392f76536a609b409e6c3c8457a065be56f2`. Commit docs sau không đổi
+source/test/config. `/tmp/galaxy-m3-acceptance.json` đủ15bước exit0;14run quan sát
+PASS/CLEAN, build tách riêng. Không skip/xfail hoặc retry full suite để săn xanh.
+
+| Phạm vi                        | Kết quả                                                                     | Bằng chứng local                                                                                              |
+| ------------------------------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Build                          | PASS                                                                        | `/tmp/galaxy-m3-acceptance-build.log`                                                                         |
+| Chrome154 thật, fixture riêng  | 24/24 PASS/CLEAN;21M2+3M3                                                   | `/tmp/galaxy-m3-acceptance-browser.log`, run `3d91f877-9a43-480a-8b1a-56790077c547`                           |
+| Web                            | 529/529 PASS/CLEAN                                                          | `/tmp/galaxy-m3-acceptance-web.log`, run `e58c954a-546f-4415-b63a-958897641a3c`                               |
+| Repeat10 nhóm6ca từng flake    | 10/10 PASS/CLEAN                                                            | `/tmp/galaxy-m3-acceptance-repeat-01.log` tới `repeat-10.log`                                                 |
+| FullAPI1                       | 1222/1222,66files PASS/CLEAN                                                | `/tmp/galaxy-m3-acceptance-full-api-1.log`, run `e2b25f77-a8b8-43b5-8549-9166b26aa832`                        |
+| FullAPI2 liên tiếp cùng cây    | 1222/1222,66files PASS/CLEAN                                                | `/tmp/galaxy-m3-acceptance-full-api-2.log`, run `c1f4b389-5c50-4dcf-8f4d-406edfc2bc48`                        |
+| M3 targeted                    | 30 PASS/CLEAN                                                               | `/tmp/galaxy-m3-publication-targeted.log`                                                                     |
+| UI static / launcher           | 15 / 13 PASS                                                                | `/tmp/galaxy-m3-ui-static-final.log`, `/tmp/galaxy-m3-launcher-green.log`                                     |
+| Root lint/typecheck/schema6.19 | PASS                                                                        | `/tmp/galaxy-m3-root-lint-v2.log`, `/tmp/galaxy-m3-root-typecheck.log`, `/tmp/galaxy-m3-schema-v2.log`        |
+| Format / edge / Python         | PASS / 4 / 1                                                                | `/tmp/galaxy-m3-format.log`, `/tmp/galaxy-m3-edge.log`, `/tmp/galaxy-m3-python.log`; docs cuối kiểm lại riêng |
+| Main launcher                  | concurrent up2 + rootdev giữPID, READY                                      | `/tmp/galaxy-m3-start-twice.json`                                                                             |
+| Main auth/data                 | /me,Project,file,download200;9chatProjects                                  | `/tmp/galaxy-main-smoke-after-m3.json`                                                                        |
+| Main quyền                     | SYSTEM100/300permissions; role riêng12/1, shared289/5                       | `/tmp/galaxy-current-actor-rights-after-m3.json`                                                              |
+| Main UI                        | Chrome visible/HỏiAI/chatmới/scope/history/NOT_CONFIGURED,0alert/0link33003 | `/tmp/galaxy-main-ai-dom-final.json`                                                                          |
+| Live provider                  | NOT_RUN, không key/model/allowlist/budget                                   | Không mock answer trong main; không gửi context thật                                                          |
+
+Các lỗi trung gian được giữ: ranking REDv3 bốn lỗi recall→GREEN18; UI slow-poll
+RED `b2b9f14e` và URL riêng khi đổi hai actor INVOKE RED `d85c660a`→Chrome3GREEN
+`d8a66654`; inherited AI flag launcher RED1→GREEN13. Sửa gốc: relevance/exact-code
+trước limit, coalesced polling và invalidation actor/epoch/URL, identity flag.
+Run clock `685534a4` +112.646ms là BASELINE_CONTAMINATED/testsNOT_RUN, không tính xanh.
+Prisma validate lần đầu thiếu DATABASE_URL tạiworktree và sandboxbuildEPERM là lỗi
+cấu hình thực thi; dùng explicit isolated env/quyền socket hợp lệ rồi PASS, không
+copy env thật hoặc nới assertion. FullAPI có log TypeError từ health test mock
+Prisma đã tồn tại ở5d; integration thật đạt, không quy thành lỗi API đang chạy.
+Main AI smoke ban đầu hết deadline DOM và một MCPevaluate lỗi, chưa đủ bằng chứng;
+đọc DOM hiện tại sau đó đã xác nhận panel thật. Không gọi đó là full browser main.
+Bộ đọc status ban đầu chỉ nhận JSON một dòng nên lỗi trước bước up; đã sửa parser
+cho JSON nhiều dòng, hai up đồng thời và rootdev mới thực sự chạy/đạt.
+
+Clock cuối: Windows W32Time đã sửa theo cơ chế OS, không đổi hostname source;
+WSL synchronized. Probe sudo do user chạy450samples/45s/0>100ms, timesyncd được
+khôi phục active/enabled; correction khoảng3ms còn xảy ra lúc daemon dừng. Chưa
+biết writer112ms lịch sử. Cả14run cuối vẫn giữ ngưỡng100ms/CLEAN xuyên regression.
+BFCache Chrome trả NOT_ELIGIBLE_CONFIRMED vì no-store; back/reload kiểm lại quyền,
+không bỏ no-store hoặc đổi UNKNOWN thành PASS.
+
+Cutover M3 `/tmp/galaxy-m3-controlled-cutover.log` exit0. Thư mục private
+`.runtime/local3000/m3-cutover-20260930/` mode700, backup600 ngoàiGit. Giữ cùng khóa
+launcher, dừng đúng managedwriters, DB0otherclients, backup mới226bảng/DB+storage;
+restore vào DB/storage55436 riêng và đối soát mọi hàng/hash/ID/currency/binary.
+Fresh canonical83 đã tạo được; clone áp đúng1migration,6indexname drift lịch sử
+khớp allowlist. NewAPI fde08f8 và oldAPI5d readiness trên clone83 rồi dừng đúng PID;
+không email/job/AI ra ngoài. Sau rehearsal mới áp
+`20260930034017_m3_project_ai` vào main;83successful/0pending. Hai historicalSQL
+checksum đúng ledger; không UPDATE/DELETE migration history hoặc dbpush/reset.
+
+Receipts: `BACKUP_COMPLETE`, `CANONICAL_COMPLETE`, `RESTORE_REHEARSAL_COMPLETE`,
+`CLONE_API_READY`, `ROLLBACK_API_READY`, `OWNER_ACCESS_REHEARSED`,
+`MAIN_DEPLOY_COMPLETE`, `RUNTIME_READY` (các file `.json` trong thư mục private).
+Backupdump SHA256 `738ac161b4c2085632af0d37da9fa8c425a6d22cd1fb4a7c3f425a1b7fb16cc6`;
+files.tar `4367665d63f8299a5c5898388cc955a319c877aceba13c78df6570aec9b84228`.
+Mọi bản ghi và binary có sẵn giữ nguyên;1active8byte và1deletedbinary đã thiếu từ
+baseline vẫn ghi là thiếu, không bịa restore. Quyền owner thêm đúng RolePermission1,
+ChatProjectGrant9/AuditLog1 đã diễn tập và main replayALREADY_APPLIED; audit
+`1a198d50-a447-4f0b-9db6-c93dc2e566c0`, actorNULL/operator thật, không approval giả.
+Role dùng chung và các grant/history cũ không đổi. Rollback feature-off/code về5d
+vẫn giữ schema83; không restore backup đè lên dữ liệu có ghi mới.
+
+Web3000 PID255359/API3001 PID255277 ownerhailq_glx, sourcefde08f8; API artifact
+`api-fde08f8`, digest dist `e3c6f09e962dc5e5f56f6c98a549e1f1f5c9e16f90f2017ae190d3dafc62cd50`.
+Main giữ `.env.local` ởroot, cookiegalaxy_session/storage/DBgalaxy_os hiện hữu;
+UI/AI/link cùngorigin3000. TestDB55435/Redis56382/cookie/profile khác; clone55436/56383
+riêng. Nguyên nhân lỗi login33003 người dùng báo trước UNKNOWN; không dùng số cổng
+hoặc clock làm lời giải không chứng cứ. Không fixtureuser/cookie trên Chrome main.
+
+M2_A VERIFIED/M2_ENABLED_AT_3000; M3_IMPLEMENTED/UI_MAIN_SMOKE_PASS;
+M3_LIVE_VERIFIED NOT_VERIFIED. Nền lexical/chat/plaintext/publishedsource, chưa
+semantic/embeddings/OCR/PDF/Task/allFileAsset adapters hoặc full-domain aggregate.
+Requested Sol medium/high, Astra high review đã dispatch; actual model UNVERIFIED.
+Review source/cutover/evidence không còn blocker an toàn đã biết; live/provider và
+baselinebinary/clockwriter là các giới hạn còn giữ. Không push/merge/remote deploy.
+Các mục dưới là bằng chứng lịch sử theo source riêng.
+
 ## Resume gate 2026-09-30 — cây5d626f2
 
 `/tmp/galaxy-lockfix-acceptance.json`:14bước exit0, cùng SHA5d626f2/treeffabd5c.
@@ -691,3 +774,9 @@ Chỉ stage từng file docs đã review, không add cả cây. DOCS_COMMIT_SHA 
 ### Bổ sung kiểm chứng độc lập closeout
 
 Edge4/4 (`closeout-edge-authorized.log`) và Pythonhealth1/1 (`closeout-python-authorized.log`) PASS qua executor được phép. Lượt restricted edge trước có listenEPERM/timeout (`closeout-edge-test.log`), Python treo đã SIGINT/SIGTERM đúng PID104029/cwd; không coi lỗi này là app. Không thay test hoặc tắt sandbox. Root lint không còn dựa vào venv worktree khác. Chứng cứ source manifest22file khớp code commit và working tree; docs-only không sửa source/test/config/migration. Ngưỡng fullAPI và BFCache vẫn chưa đạt.
+
+Resume auth main: `/tmp/galaxy-auth-resume-followup.json` /me200/projects200;
+`/tmp/galaxy-main-smoke-after-cutover-v2.json` Project/file/download200,440872bytes,
+Chrome154 hiện hữu tại3000. Lượt smoke đầu dùng nhầm querylimit nên400; sửa đúng
+pageSize từ contract, không sửa ứng dụng. Routeproject-chat200 trả0Projects, tài khoản
+không có chatcapability. Chưa grant/seed/pilot; đã hỏi người dùng phạm vi cụ thể.

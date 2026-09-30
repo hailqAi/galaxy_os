@@ -1,11 +1,47 @@
 # M2 — Bàn giao triển khai
 
-## Checkpoint resume 2026-09-30 — cutover đã hoàn tất
+## Checkpoint hiện tại — M3 đã triển khai local, 2026-09-30
+
+- WORKTREE `/home/galaxy_os/.worktrees/m2-a-20260928`; BRANCH `m2/project-chat-20260928`.
+- CODE_SHA=TESTED_SHA `fde08f8f1cf16443049d96a5601609a7cdac8db3`; TESTED_TREE `0209392f76536a609b409e6c3c8457a065be56f2`.
+- Source23file đã commit; commit checkpoint này chỉ docs. DOCS_COMMIT_SHA lấy bằng `git log -1 --format=%H -- docs/galaxy-os/milestones/M2/HANDOFF.md`, không amend tự tham chiếu.
+- RESUME_STATUS SAFE_COMPLETED; không migration/restore/cutover/test acceptance còn chạy. Không chạy lại lệnh ghi.
+- Web3000PID255359 (`apps/web`), API3001PID255277 (`.runtime/local3000/api-fde08f8`), ownerhailq_glx/managed/READY/sourcefde08f8.
+- Main `localhost:5432/galaxy_os/public`:83successful/0pending; M2ON/M3ON, providerNOT_CONFIGURED.
+- CANONICAL_START_COMMAND `pnpm --dir /home/galaxy_os/.worktrees/m2-a-20260928 local:up`.
+- Status/stop cùng prefix; root `pnpm dev` dùng cùng manifest. Hai up đồng thời và rootdev giữPID: `/tmp/galaxy-m3-start-twice.json` PASS.
+- AUTH_3000 VERIFIED: `/tmp/galaxy-main-smoke-after-m3.json`, /me/Project/file/download200,440872bytes,9chatProjects.
+- Full quyền hiện tại SYSTEM100/300permissions; role riêng12bindings/1actor, sharedrole289/5 không đổi: `/tmp/galaxy-current-actor-rights-after-m3.json`.
+- Quyền M3 thêm1binding ai.invoke/9INVOKEgrant từ DBNOW và1audit; replay ALREADY_APPLIED, không sửa history/grant cũ.
+- M2_A VERIFIED; M2_LOCAL_3000 ENABLED. Lead-only/lifecycle vẫn deferred.
+- M3_IMPLEMENTATION IMPLEMENTED; UI_STATUS MAIN_CHROME_SMOKE_PASS tại Project → Làm việc → Hỏi AI.
+- `/tmp/galaxy-main-ai-dom-final.json`: visible/ready/notConfigured/newChat/scope/history=true, alert0/link33003=0, Chrome154.
+- Main UI chỉ smoke; full hỏi–đáp/citation/reload dùng provider mô phỏng trong fixture riêng. Không đổi thành LIVE_VERIFIED.
+- LIVE_PROVIDER NOT_RUN: thiếu key/model/allowlist/hạn mức; allowProjectData=false/maxRequests0. Không dữ liệu main/clone ra AI.
+- Final acceptance `/tmp/galaxy-m3-acceptance.json`:15steps exit0, cùng source/tree; build/Chrome24/Web529/repeat10/fullAPI1222×2.
+- API runs `e2b25f77-a8b8-43b5-8549-9166b26aa832`, `c1f4b389-5c50-4dcf-8f4d-406edfc2bc48`; cả hai CLEAN, không đổi source giữa lượt.
+- Browser run `3d91f877-9a43-480a-8b1a-56790077c547` CLEAN; BFCache NOT_ELIGIBLE_CONFIRMED/no-store, reload kiểm quyền.
+- Targeted30/UI15/launcher13/rootlint/typecheck/schema6.19/format/edge4/Python1 PASS; chi tiết [VERIFICATION](VERIFICATION.md).
+- CLOCK_STATUS STABLE_DURING_FINAL_REGRESSION. Sudo probe450mẫu/0breach, restored timesyncd; tác nhân112ms cũ UNKNOWN.
+- Cutover exit0: `/tmp/galaxy-m3-controlled-cutover.log`; receipts `.runtime/local3000/m3-cutover-20260930/` private700/backup600, ngoài Git.
+- BACKUP_RESTORE PASS: backup mới226bảng/DB+storage, restore clone riêng, upgrade1 và fresh canonical83 đạt.
+- DATA_RECONCILIATION PASS: mọi hàng/ID/quan hệ/currency sums/binary có sẵn giữ nguyên; hai binary thiếu baseline không được gọi đã phục hồi.
+- MAIN_DEPLOY_COMPLETE chỉ `20260930034017_m3_project_ai`; hai SQL lịch sử đúng ledger,6indexname drift cũ đã ghi, không sửa history/reset.
+- NewAPI và oldAPI5d đều readiness trên clone83; rollback manifest feature-off/code-rollback giữ schema83, không restore đè ghi mới.
+- Test API33001/Web33002/TLS33003/DB55435/Redis56382 tách main; clone55436/56383. Lỗi login33003 cũ UNKNOWN, fixture auth PASS.
+- Model/effort requested Sol medium/high + Astra high; review dispatch có chạy, actual runtime model UNVERIFIED. Một sourcewriter, một reviewer; không thêm Luna task.
+- CURRENT_TASK: code/test/cutover/docs đã đóng; phần còn lại là live provider smoke dữ liệu giả khi có cấu hình và ngân sách hợp lệ.
+- NEXT_EXACT_ACTION: cấu hình key/model/allowlist/hạn mức trực tiếp trong backend; kiểm live bằng synthetic test trước khi cho phép context Project thật. Không gửi secret trong chat.
+- Giới hạn nền: lexical (chưa semantic/embeddings), UTF-8/plaintext + chat/publication; chưa OCR/PDF hoặc domain report tổng toàn tập.
+- LOCAL_WEB_API_DB_CHANGED YES; REMOTE_DEPLOY NOT_PERFORMED; GIT_PUSH_MERGE NOT_PERFORMED.
+- Các mục dưới là checkpoint lịch sử theo SHA riêng, không thay trạng thái hiện tại này.
+
+## Lịch sử — cutover M2 2026-09-30 đã hoàn tất
 
 - WORKTREE `/home/galaxy_os/.worktrees/m2-a-20260928`; branch `m2/project-chat-20260928`.
 - CODE_SHA/TESTED_SHA `5d626f257b7e73e91f5195d27d89dfb592db2c03`.
 - TESTED_TREE `ffabd5c003967b6b755ab2d2dc8bd63de1f0c30b`; docs đang sửa, chưa commit.
-- Source sạch; diff chưa commit chỉ docs M2/M3 và status. Không reset/stash/merge.
+- M3 source/schema/API/UI đang uncommitted, main API vẫn frozen5d. Không reset/stash/merge.
 - Lệnh cuối trước resume: đóng băng generated Prisma6.19 vào artifact `api-5d626f2`.
 - Native resolution đã kiểm: artifact/generated-prisma/index.js,225models và engine riêng.
 - Acceptance `/tmp/galaxy-lockfix-acceptance.json`: build, Chrome21, repeat10 và2fullAPI đều exit0.
@@ -15,7 +51,7 @@
 - Targeted13/rootlint/typecheck/format trước commit5d PASS; Web527/edge4/Python1/schema PASS còn áp dụng.
 - BFCache NOT_ELIGIBLE_CONFIRMED; reload thật kiểm quyền, không bỏ no-store.
 - Review nhạy cảm/Ponytail5d đã đạt; resume reviewer chỉ kiểm thay đổi trạng thái/cutover.
-- M2_A_STATUS VERIFIED; DB_M2_READY; M2_ENABLED_AT_3000. Browser auth/pilot3000 chưa nghiệm thu.
+- M2_A_STATUS VERIFIED; DB_M2_READY; M2_ENABLED_AT_3000. AUTH_MAIN_VERIFIED; full quyền tài khoản hiện tại đã cấp theo yêu cầu rõ ràng.
 - Runtime mới:3000PID233893,W/apps/web;3001PID233808,artifactM2/api-5d626f2.
 - Main `galaxy_os/public`:82successful,0pending, M2ON đồng bộ; launcher READY/managed cả2.
 - Không thấy migration/restore/acceptance/cutover còn chạy. Không retry lệnh ghi.
@@ -24,8 +60,8 @@
 - Backup mới217tables/66binary restore đạt;13main applied, mọi hàng/ID/tổng tiền/binary cũ giữ nguyên.
 - Baseline có1activebinary8byte thiếu,1deletedbinary thiếu; không bịa phục hồi hoặc che hạn chế.
 - Clock đã sửa W32Time chính thức; hai fullAPI CLEAN; resume kiểm nguồn/status lại.
-- Chrome3000 phiên cũ hết hạn; cần đăng nhập trực tiếp, không đổi password/session hoặc dùng fixture.
-- Pilot ghi thật chưa được người dùng chọn; không seed/grant vào main.
+- Người dùng đã tự đăng nhập Chrome3000: /me/Project/file/download200 (440872bytes), routechat200/0Projects/0chatcaps.
+- Full quyền đã áp qua operator helper cóaudit:10quyền mới/11bindings riêng,9Projectgrants từDBNOW. Không seed/message/publication.
 - Test33001/33002/TLS33003,DB55433/Redis56380/cookie/context riêng.
 - Cutover `/tmp/galaxy-controlled-cutover.py` ĐÃ XONG; không chạy lại lệnh ghi.
 - Đã giữ flock xuyên dừng đúng writer→backup mới→restore/rehearsal→13main→atomicmanifest; không reset/ledger rewrite.
@@ -33,14 +69,20 @@
 - Rollback sau SQL giữ API mới/schema82 và tắt chat cả2phía; không API69/restore đè dữ liệu mới.
 - Lệnh chuẩn: `pnpm --dir /home/galaxy_os/.worktrees/m2-a-20260928 local:up`.
 - Status/stop cùng prefix; root `pnpm dev` dùng cùng launcher. Stop chỉ tác động runtime được quản lý.
-- M3 N1/N2 có8unitPASS; schema/API/panel chưa tích hợp, live provider NOT_RUN.
+- M3 schema/API/index/panel đang tích hợp trong source; mainAI vẫn OFF/liveNOT_RUN.
 - M3 tiếp theo dùng index tăng dần theo source/version; không quét/nạp toàn corpus mỗi câu hỏi.
 - Model yêu cầu: Sol medium điều phối, Astra high reviewer; dispatch Astra resume đã chạy.
 - Runtime model metadata UNVERIFIED; không probe thêm. Luna chưa cần, một sourcewriter/một reviewer.
-- NEXT: M3N3 source-index tăng dần/ACL/storage theo kế hoạch; nghiệm thu main sau người dùng đăng nhập.
+- NEXT: M3N3 source-index tăng dần/ACL/storage; main auth đạt, chưa tự cấp pilot.
 - REMOTE_DEPLOY/GIT_PUSH_MERGE NOT_PERFORMED.
 
-## LOCAL3000 — 2026-09-29 (điểm tiếp tục hiện tại)
+- Smoke sau quyền: `/tmp/galaxy-main-smoke-full-access.json`: me/Project/file/download200,chat9Projects.
+- Rights `/tmp/galaxy-current-actor-rights-after.json`:299permissions/SYSTEM100; sharedrole289/5 không đổi.
+- Quyền receipt `.runtime/local3000/owner-full-access/applied.json`; audit0d8f851c-04d1-4ca5-be0c-e79912422431.
+- Helper script `apps/api/scripts/local-full-access.mjs`; testv4PASS rollback/idempotency/scope; Astra reviewđạt.
+- M3 clock685534a4 bị+112.646ms tại04:21:41Z, BASELINE_CONTAMINATED/testsNOT_RUN, đang đối chiếuOS; không tính xanh.
+
+## Lịch sử LOCAL3000 — 2026-09-29
 
 **Người dùng dùng `http://localhost:3000/`**, Chrome hiện tại giữ đăng nhập và đã mở được Project. Web mới source9235def phục vụ từ worktree này, API/data vẫn bản cũ7faeb58. M2 bị tắt đúng guard/feature flag; chưa có chat M2 hoặc AI M3 ở3000. Không hướng người dùng sang demo33003.
 

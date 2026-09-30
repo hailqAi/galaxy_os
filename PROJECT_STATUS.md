@@ -1,19 +1,22 @@
 # Project status
 
-## Local 2026-09-30 — M2 đã bật, tiếp tục M3
+## Local 2026-09-30 — M2 đã bật, nền M3 đã triển khai
 
 - Runtime chuẩn `/home/galaxy_os/.worktrees/m2-a-20260928`, branch `m2/project-chat-20260928`.
-- `pnpm --dir /home/galaxy_os/.worktrees/m2-a-20260928 local:up`; status/stop cùng prefix. Root `pnpm dev` cùng launcher.
-- PORT_CONFLICT_RESOLVED/SINGLE_RUNTIME_STARTUP_VERIFIED: không spawn trùng; sau cutover up lần nữa ALREADY_RUNNING_VERIFIED.
-- Web3000PID233893/API3001PID233808 đều managed, source5d626f2; main `galaxy_os/public`82migration,0pending, M2ON cả hai phía.
-- CLOCK_STABLE: W32Time nguồn cũ polling0x8, WSL synchronized; cả hai fullAPI CLEAN, resume status vẫn sync/error0.
-- Hai SQL checksum phục hồi đúng ledger. Backup mới/restore/rehearsal13/main13 đã hoàn tất;217table cũ, mọi ID/tổng tiền theo currency và66binary khớp.
-- Baseline thiếu1activebinary8byte và1deletedbinary; không tuyên bố phục hồi. Không reset/đổi DB/account/password/role.
-- M2_A_VERIFIED: repeat10 nhóm6ca, Chrome21, hai fullAPI1200/1200 cùng5d626f2/treeffabd5c, build/lint/type/schema/format đạt.
-- M2_ENABLED_AT_3000: đã bật; AUTH_MAIN và pilot ghi còn chờ người dùng đăng nhập/chọn phạm vi. Chrome thật3000 `/login`, `/me401` do phiên cũ hết hạn.
-- Test dùng33001/33002/TLS33003,DB55433/Redis56380/cookie/context riêng. Ca đăng nhập test PASS; nguyên nhân lỗi33003 người dùng báo trước vẫn chưa xác định.
-- M3 N1/N2 source/provider8unitPASS; schema/index/API/panel đang tiếp tục. Live provider NOT_RUN, không key/budget, không gửi dữ liệu thật.
-- [Checkpoint](docs/galaxy-os/milestones/M2/HANDOFF.md) giữ log/receipt/giới hạn. Không push/merge/remote deploy. Các phần dưới là lịch sử.
+- CODE_SHA=TESTED_SHA `fde08f8f1cf16443049d96a5601609a7cdac8db3`; TESTED_TREE `0209392f76536a609b409e6c3c8457a065be56f2`. Commit sau chỉ cập nhật docs.
+- Lệnh chính: `pnpm --dir /home/galaxy_os/.worktrees/m2-a-20260928 local:up`; `local:status`/`local:stop` cùng prefix. Root `pnpm dev` dùng cùng launcher.
+- PORT_CONFLICT_RESOLVED / SINGLE_RUNTIME_STARTUP_VERIFIED: hai up đồng thời và root dev trả ALREADY_RUNNING_VERIFIED, giữ PID. Lỗi cũ do khởi động Web lần hai trên cổng3000 đã có đúng runtime.
+- Web3000 PID255359, API3001 PID255277, owner `hailq_glx`, đều managed và sourcefde08f8. Web Next16.2.10 dev webpack; API artifact riêng `api-fde08f8`; `galaxy_os/public` tại localhost5432,83migration successful/0pending. M2/M3 bật đồng bộ.
+- AUTH_MAIN_VERIFIED: Chrome154 hiện có `/me`/Project/file/download200; không thay phiên/cookie/password. Tài khoản hiện tại SYSTEM100,300permissions và quyền quản lý/INVOKE trên9Project; sharedrole289permissions/5người không đổi.
+- M2_A_VERIFIED / DB_M2_READY / M2_ENABLED_AT_3000. Lead-only/lifecycle vẫn deferred theo phạm vi đã chốt.
+- M3_IMPLEMENTED: nguồn theo quyền, index tăng dần, lexical retrieval, provider adapter, history/dependency/citation/idempotency/quota/cancel và panel riêng Hỏi AI ở Project → Làm việc. UI main đã thấy chat mới/phạm vi/lịch sử và thông báo chưa cấu hình; không link33003.
+- LIVE_PROVIDER NOT_RUN / M3_LIVE_VERIFIED NOT_VERIFIED: chưa cấu hình key/model/allowlist/hạn mức; outbound main tắt. Không gửi dữ liệu main/backup/clone ra provider. Semantic/embeddings và OCR/PDF chưa được triển khai; tổng toàn bộ cần domain report, không giả từ top-k.
+- Nghiệm thu source cuối: targeted30, Web529, Chrome24, launcher13, repeat10 nhóm6ca, hai fullAPI1222/1222 liên tiếp đều PASS; các run quan sát CLEAN. Build/rootlint/typecheck/schemaPrisma6.19/format/edge4/Python1 PASS.
+- CLOCK_STABLE trong toàn gate cuối. W32Time đã sửa bằng cơ chế OS; probe sudo của người dùng450mẫu/0vượt100ms, timesyncd khôi phục. Tác nhân lệch112ms ở run cũ UNKNOWN; run nhiễu không tính PASS.
+- Checksum hai migration lịch sử khớp SQL gốc/ledger; không sửa ledger. Backup/restore/upgrade M2 đã đạt; backup M3 mới226bảng và binary đã restore/đối soát, fresh canonical83 đạt trước khi áp đúng1migrationM3. Giữ mọi hàng/ID/quan hệ/tổng tiền/binary cũ. Hai binary thiếu từ baseline vẫn được ghi nhận, chưa phục hồi.
+- Test riêng: API33001/Web33002/TLS33003,DB55435/Redis56382/cookie/storage/browser context riêng. Clone rehearsal55436/56383 riêng; không phải DB người dùng. Nguyên nhân lỗi đăng nhập33003 người dùng báo trước UNKNOWN; auth fixture riêng PASS.
+- Review correctness/quyền/race/security và Ponytail đã đạt. Requested Sol medium/high triển khai, Astra high review đã dispatch; actual runtime model UNVERIFIED. Luna không cần thêm task.
+- LOCAL_WEB_API_DB_CHANGED YES; REMOTE_DEPLOY/GIT_PUSH_MERGE NOT_PERFORMED. [Checkpoint](docs/galaxy-os/milestones/M2/HANDOFF.md) và [bằng chứng](docs/galaxy-os/milestones/M2/VERIFICATION.md) là canonical; các mục bên dưới chỉ là lịch sử.
 
 ## LOCAL3000 — 2026-09-29 (hiện hành)
 
