@@ -13,7 +13,10 @@ if (
   throw new Error('M2 browser origin mismatch');
 export default defineConfig({
   testDir: './tests/browser',
-  testMatch: 'm2-project-chat.spec.ts',
+  testMatch:
+    process.env.FEATURE_PROJECT_AI === 'true'
+      ? ['m2-project-chat.spec.ts', 'm3-project-ai.spec.ts']
+      : 'm2-project-chat.spec.ts',
   workers: 1,
   fullyParallel: false,
   outputDir: 'test-results/m2-a',

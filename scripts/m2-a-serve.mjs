@@ -7,7 +7,13 @@ import { assertG00Isolation } from '../apps/api/scripts/g00-isolated-environment
 const root = new URL('../', import.meta.url);
 const env = {
   ...parseEnv(
-    readFileSync(new URL('scripts/m2-a-isolated.env.example', root), 'utf8'),
+    readFileSync(
+      new URL(
+        process.env.GALAXY_TEST_ENV_FILE ?? 'scripts/m2-a-isolated.env.example',
+        root,
+      ),
+      'utf8',
+    ),
   ),
   PATH: process.env.PATH,
 };
@@ -16,11 +22,22 @@ const mode = process.argv[2];
 if (!['api', 'web'].includes(mode))
   throw new Error('Use m2-a-serve.mjs api|web');
 const clockMonitor = process.argv.includes('--clock-monitor');
+const aiFixture = process.argv.includes('--ai-fixture');
+if (aiFixture && (mode !== 'api' || env.FEATURE_PROJECT_AI !== 'true'))
+  throw new Error('AI fixture chỉ dùng API test M3 đã cô lập');
 const productionWeb = process.argv.includes('--production');
 const child = spawn(
   process.execPath,
   mode === 'api'
     ? [
+        ...(aiFixture
+          ? [
+              '--import',
+              fileURLToPath(
+                new URL('scripts/m3-browser-provider-fixture.mjs', root),
+              ),
+            ]
+          : []),
         ...(clockMonitor
           ? [
               '--import',
@@ -49,7 +66,19 @@ const child = spawn(
               ? { APP_PUBLIC_ORIGIN: 'https://localhost:33003' }
               : {}),
           }
-        : { ...env, ...(clockMonitor ? { M2_CLOCK_OBSERVE: 'true' } : {}) },
+        : {
+            ...env,
+            ...(clockMonitor ? { M2_CLOCK_OBSERVE: 'true' } : {}),
+            ...(aiFixture
+              ? {
+                  GALAXY_AI_API_KEY: 'm3-browser-synthetic-only',
+                  GALAXY_AI_MODEL: 'm3-browser-fixture',
+                  GALAXY_AI_ALLOWED_MODELS: 'm3-browser-fixture',
+                  GALAXY_AI_MAX_REQUESTS_PER_DAY: '100',
+                  GALAXY_AI_ALLOW_PROJECT_DATA: 'true',
+                }
+              : {}),
+          },
     stdio: 'inherit',
   },
 );

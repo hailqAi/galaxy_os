@@ -105,7 +105,7 @@ export function chunks(source: TextSource): SourceChunk[] {
   return result;
 }
 
-const tokens = (text: string) =>
+export const sourceTokens = (text: string) =>
   new Set(
     text
       .normalize('NFKC')
@@ -124,7 +124,7 @@ export function retrieve(
     roomIds: string[];
   },
 ): SourceChunk[] {
-  const query = tokens(question);
+  const query = sourceTokens(question);
   return index
     .filter(
       (s) =>
@@ -134,7 +134,7 @@ export function retrieve(
     )
     .map((source) => ({
       source,
-      score: [...query].filter((t) => tokens(source.text).has(t)).length,
+      score: [...query].filter((t) => sourceTokens(source.text).has(t)).length,
     }))
     .filter((row) => row.score > 0)
     .sort(

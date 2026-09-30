@@ -198,6 +198,16 @@ class RuntimeTests(unittest.TestCase):
         self.assertIsNone(existing.poll())
         self.assertFalse(runtime.listeners(self.config["services"]["web"]["port"]))
 
+    def test_inherited_ai_override_is_not_reused(self):
+        spec = self.config["services"]["api"]
+        spec["environment"]["FEATURE_PROJECT_AI"] = "true"
+        existing = self.external_service("api")
+        del spec["environment"]["FEATURE_PROJECT_AI"]
+        with self.assertRaises(RuntimeError):
+            self.manager.up()
+        self.assertIsNone(existing.poll())
+        self.assertFalse(runtime.listeners(self.config["services"]["web"]["port"]))
+
     def test_surviving_owned_descendant_retains_stop_record(self):
         import signal
 

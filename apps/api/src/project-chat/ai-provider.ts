@@ -116,6 +116,12 @@ export async function answerFromProvider(
   const envelope = z
     .object({
       status: z.literal('completed'),
+      usage: z
+        .object({
+          input_tokens: z.number().int().nonnegative(),
+          output_tokens: z.number().int().nonnegative(),
+        })
+        .optional(),
       output: z.array(
         z.object({
           type: z.string(),
@@ -147,5 +153,5 @@ export async function answerFromProvider(
   )
     throw new Error('Citation không hợp lệ');
   combined.throwIfAborted();
-  return answer;
+  return { ...answer, usage: envelope.usage ?? null };
 }

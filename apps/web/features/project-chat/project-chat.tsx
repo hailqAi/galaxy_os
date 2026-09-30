@@ -12,6 +12,7 @@ import { useRouter } from 'next/navigation';
 import { Actor, api, ApiError, apiUrl } from '../../app/lib/api';
 import { ChatManagement, ReleasePanel, ReleaseList } from './chat-controls';
 import { projectDomainLabel } from '../projects/project-domain-labels';
+import { ProjectAi } from './project-ai';
 
 type Attachment = {
   id: string;
@@ -40,6 +41,7 @@ type RoomPage = {
   project: { id: string; name: string };
   rooms: Room[];
   authorityActions: string[];
+  aiEnabled?: boolean;
 };
 type History = {
   locked: boolean;
@@ -246,6 +248,17 @@ export function ProjectChat({ projectId }: { projectId: string }) {
               </button>
             ))}
           </nav>
+          {data.aiEnabled &&
+            actor &&
+            data.authorityActions.includes('INVOKE') && (
+              <ProjectAi
+                key={`${projectId}/${actor.userId}`}
+                projectId={projectId}
+                actorId={actor.userId}
+                group={group}
+                onRevoked={revoked}
+              />
+            )}
           <div className="grid gap-4 md:grid-cols-[15rem_minmax(0,1fr)]">
             <aside
               className={room ? 'hidden md:block' : 'block'}

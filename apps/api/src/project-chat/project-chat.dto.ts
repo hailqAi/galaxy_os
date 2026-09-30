@@ -32,6 +32,7 @@ export const authorityActions = [
   'LOCK',
   'HISTORY',
   'PUBLISH',
+  'INVOKE',
 ] as const;
 export const chatCapability: Record<string, string> = {
   CREATE: 'chat.create',
@@ -39,6 +40,7 @@ export const chatCapability: Record<string, string> = {
   LOCK: 'chat.lock',
   HISTORY: 'chat.history',
   PUBLISH: 'chat.publish',
+  INVOKE: 'ai.invoke',
   READ: 'chat.read',
   SEND: 'chat.send',
   UPLOAD: 'chat.upload',
@@ -62,7 +64,7 @@ export class ChatAuthorityDto {
   @IsArray()
   @ArrayNotEmpty()
   @ArrayUnique()
-  @ArrayMaxSize(5)
+  @ArrayMaxSize(6)
   @IsIn(authorityActions, { each: true })
   actions!: string[];
   @IsArray()
@@ -173,4 +175,16 @@ export class ChatMessagesQuery {
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) after?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) before?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 50;
+}
+
+export class ChatAiScopeDto {
+  @IsIn(['ALL', 'CONSULTING', 'COMMERCIAL', 'SUPPLY', 'AFTER_SALES'])
+  scope!: string;
+}
+export class ChatAiConversationDto extends ChatAiScopeDto {
+  @IsUUID('4') clientKey!: string;
+}
+export class ChatAiQuestionDto {
+  @IsUUID('4') clientKey!: string;
+  @IsString() @Length(1, 8000) question!: string;
 }

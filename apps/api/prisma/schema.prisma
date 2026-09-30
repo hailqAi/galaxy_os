@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  previewFeatures = ["fullTextSearchPostgres"]
 }
 
 datasource db {
@@ -451,6 +452,7 @@ model PasswordResetToken {
 }
 
 model OrganizationMembership {
+  aiConversations ChatAiConversation[]
   id                  String                 @id @default(uuid()) @db.Uuid
   organizationId      String                 @db.Uuid
   userId              String                 @db.Uuid
@@ -856,6 +858,7 @@ model Opportunity {
 }
 
 model Project {
+  aiConversations ChatAiConversation[]
   id                     String                         @id @default(uuid()) @db.Uuid
   organizationId         String                         @db.Uuid
   opportunityId          String?                        @unique @db.Uuid
@@ -952,6 +955,8 @@ model ChatProjectParticipant {
 }
 
 model ChatProjectGrant {
+  aiAnswers ChatAiAnswer[]
+  @@unique([id,organizationId,projectId,userId])
   id             String          @id @default(uuid()) @db.Uuid
   organizationId String          @db.Uuid
   projectId      String          @db.Uuid
@@ -971,6 +976,7 @@ model ChatProjectGrant {
 }
 
 model ChatRoom {
+  aiSources ChatAiSourceIndex[]
   id             String          @id @default(uuid()) @db.Uuid
   organizationId String          @db.Uuid
   projectId      String          @db.Uuid
@@ -1034,6 +1040,8 @@ model ChatHistoryGrant {
 }
 
 model ChatMessage {
+  aiSources ChatAiSourceIndex[]
+  @@unique([id, organizationId, projectId, roomId])
   id             String   @id @default(uuid()) @db.Uuid
   organizationId String   @db.Uuid
   projectId      String   @db.Uuid
@@ -1052,6 +1060,8 @@ model ChatMessage {
 }
 
 model ChatFile {
+  aiSources ChatAiSourceIndex[]
+  @@unique([id, organizationId, projectId, roomId])
   id String @id @default(uuid()) @db.Uuid
   organizationId String @db.Uuid
   projectId String @db.Uuid
@@ -1078,6 +1088,8 @@ model ChatMessageAttachment {
 }
 
 model ChatDocumentRelease {
+  aiSources ChatAiSourceIndex[]
+  @@unique([id, organizationId, projectId, roomId])
   id String @id @default(uuid()) @db.Uuid
   organizationId String @db.Uuid
   projectId String @db.Uuid
@@ -5105,4 +5117,96 @@ model CustomerConfirmation {
   ticket          ServiceTicket @relation(fields: [serviceTicketId], references: [id])
 
   @@index([organizationId, serviceTicketId, confirmed])
+}
+
+
+// Private derived AI data. Canonical content remains in chat/file/publication.
+model ChatAiConversation {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  projectId String @db.Uuid
+  ownerId String @db.Uuid
+  clientKey String @db.Uuid
+  scope String
+  createdAt DateTime @default(now())
+  project Project @relation(fields:[organizationId,projectId], references:[organizationId,id], onDelete:Restrict)
+  membership OrganizationMembership @relation(fields:[organizationId,ownerId], references:[organizationId,userId], onDelete:Restrict)
+  answers ChatAiAnswer[]
+  @@unique([id,organizationId,projectId,ownerId])
+  @@unique([organizationId,projectId,ownerId,clientKey])
+  @@index([organizationId,projectId,ownerId,createdAt])
+}
+
+model ChatAiAnswer {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  projectId String @db.Uuid
+  ownerId String @db.Uuid
+  conversationId String @db.Uuid
+  invokeGrantId String @db.Uuid
+  clientKey String @db.Uuid
+  payloadHash String
+  question String
+  status String @default("QUEUED")
+  answer String?
+  uncertainty String?
+  citations String[] @default([])
+  model String?
+  usage Json?
+  providerStartedAt DateTime?
+  leaseUntil DateTime?
+  errorCode String?
+  createdAt DateTime @default(now())
+  completedAt DateTime?
+  conversation ChatAiConversation @relation(fields:[conversationId,organizationId,projectId,ownerId], references:[id,organizationId,projectId,ownerId], onDelete:Restrict)
+  invokeGrant ChatProjectGrant @relation(fields:[invokeGrantId,organizationId,projectId,ownerId], references:[id,organizationId,projectId,userId], onDelete:Restrict)
+  dependencies ChatAiAnswerDependency[]
+  @@unique([id,organizationId,projectId])
+  @@unique([conversationId,clientKey])
+  @@index([organizationId,ownerId,providerStartedAt])
+}
+
+model ChatAiSourceIndex {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  projectId String @db.Uuid
+  roomId String @db.Uuid
+  messageId String? @db.Uuid
+  chatFileId String? @db.Uuid
+  releaseId String? @db.Uuid
+  version String
+  extractor String @default("utf8-v1")
+  status String @default("QUEUED")
+  text String @default("")
+  chunks Json @default("[]")
+  checksum String?
+  label String
+  provenance String
+  attempts Int @default(0)
+  leaseToken String? @db.Uuid
+  leaseUntil DateTime?
+  errorCode String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  room ChatRoom @relation(fields:[roomId,organizationId,projectId], references:[id,organizationId,projectId], onDelete:Restrict)
+  message ChatMessage? @relation(fields:[messageId,organizationId,projectId,roomId], references:[id,organizationId,projectId,roomId], onDelete:Restrict)
+  chatFile ChatFile? @relation(fields:[chatFileId,organizationId,projectId,roomId], references:[id,organizationId,projectId,roomId], onDelete:Restrict)
+  release ChatDocumentRelease? @relation(fields:[releaseId,organizationId,projectId,roomId], references:[id,organizationId,projectId,roomId], onDelete:Restrict)
+  dependencies ChatAiAnswerDependency[]
+  @@unique([id,organizationId,projectId])
+  @@unique([messageId,extractor])
+  @@unique([chatFileId,extractor])
+  @@unique([releaseId,extractor])
+  @@index([organizationId,projectId,roomId,status])
+}
+
+model ChatAiAnswerDependency {
+  organizationId String @db.Uuid
+  projectId String @db.Uuid
+  answerId String @db.Uuid
+  sourceIndexId String @db.Uuid
+  handles String[]
+  answer ChatAiAnswer @relation(fields:[answerId,organizationId,projectId], references:[id,organizationId,projectId], onDelete:Restrict)
+  source ChatAiSourceIndex @relation(fields:[sourceIndexId,organizationId,projectId], references:[id,organizationId,projectId], onDelete:Restrict)
+  @@id([answerId,sourceIndexId])
 }

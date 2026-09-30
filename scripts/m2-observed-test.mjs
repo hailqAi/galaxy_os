@@ -14,7 +14,13 @@ if (!['api', 'web', 'browser'].includes(mode))
 const runId = randomUUID();
 const env = {
   ...parseEnv(
-    readFileSync(new URL('scripts/m2-a-isolated.env.example', root), 'utf8'),
+    readFileSync(
+      new URL(
+        process.env.GALAXY_TEST_ENV_FILE ?? 'scripts/m2-a-isolated.env.example',
+        root,
+      ),
+      'utf8',
+    ),
   ),
   PATH: process.env.PATH,
   ...(mode === 'browser'

@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+export { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { hash } from 'bcryptjs';
 import { execFileSync } from 'node:child_process';

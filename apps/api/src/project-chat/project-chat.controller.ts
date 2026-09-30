@@ -1,3 +1,9 @@
+import { ProjectAiService } from './project-ai.service';
+import {
+  ChatAiConversationDto,
+  ChatAiQuestionDto,
+  ChatAiScopeDto,
+} from './project-chat.dto';
 import { multipartFilename } from '../files/filename';
 import {
   Body,
@@ -75,9 +81,74 @@ export class ChatActorPrecondition implements CanActivate {
 @UseGuards(ChatActorPrecondition)
 export class ProjectChatController {
   constructor(
+    @Inject(ProjectAiService) private readonly ai: ProjectAiService,
     @Inject(ProjectChatService) private readonly service: ProjectChatService,
     @Inject(FilesService) private readonly files: FilesService,
   ) {}
+  @Post('projects/:id/ai/index') aiIndex(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(input(ChatAiScopeDto)) value: ChatAiScopeDto,
+  ) {
+    return this.ai.index(actor, id, value.scope);
+  }
+  @Post('projects/:id/ai/answers/:answerId/cancel') aiCancel(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('answerId', ParseUUIDPipe) answerId: string,
+  ) {
+    return this.ai.cancel(actor, id, answerId);
+  }
+  @Get('projects/:id/ai/answers/:answerId/sources/:handle') aiCitation(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('answerId', ParseUUIDPipe) answerId: string,
+    @Param('handle') handle: string,
+  ) {
+    return this.ai.citation(actor, id, answerId, handle);
+  }
+  @Get('projects/:id/ai') aiList(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.ai.list(actor, id);
+  }
+  @Get('projects/:id/ai/index') aiIndexStatus(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query(input(ChatAiScopeDto)) query: ChatAiScopeDto,
+  ) {
+    return this.ai.indexStatus(actor, id, query.scope);
+  }
+  @Post('projects/:id/ai/conversations') aiCreate(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(input(ChatAiConversationDto)) value: ChatAiConversationDto,
+  ) {
+    return this.ai.createConversation(actor, id, value);
+  }
+  @Get('projects/:id/ai/conversations/:conversationId') aiHistory(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+  ) {
+    return this.ai.history(actor, id, conversationId);
+  }
+  @Post('projects/:id/ai/conversations/:conversationId/answers') aiAsk(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Body(input(ChatAiQuestionDto)) value: ChatAiQuestionDto,
+  ) {
+    return this.ai.ask(actor, id, conversationId, value);
+  }
+  @Post('projects/:id/ai/answers/:answerId/run') aiRun(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('answerId', ParseUUIDPipe) answerId: string,
+  ) {
+    return this.ai.run(actor, id, answerId);
+  }
   @Get('projects/:id/link-options') linkOptions(
     @Actor() actor: CurrentActor,
     @Param('id', ParseUUIDPipe) id: string,

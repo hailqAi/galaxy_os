@@ -201,6 +201,7 @@ export class ProjectChatService {
         project,
         rooms,
         authorityActions: [...new Set(authorities.flatMap((a) => a.actions))],
+        aiEnabled: process.env.FEATURE_PROJECT_AI === 'true',
       };
     });
   }
@@ -642,14 +643,13 @@ export class ProjectChatService {
     });
   }
 
-  private async visibleFile(
+  async visibleFileWhere(
     tx: Prisma.TransactionClient,
     actor: CurrentActor,
     roomId: string,
-    id: string,
     grant: import('@prisma/client').ChatRoomGrant,
     action: string,
-  ) {
+  ): Promise<Prisma.ChatFileWhereInput> {
     const ranges = await this.access.history(tx, grant, action);
     const time = {
       AND: [
@@ -661,16 +661,29 @@ export class ProjectChatService {
         },
       ],
     };
+    return {
+      roomId,
+      organizationId: actor.organizationId,
+      file: { deletedAt: null },
+      OR: [
+        { actorId: actor.userId, ...time },
+        { messages: { some: { message: { roomId, ...time } } } },
+      ],
+    };
+  }
+
+  async visibleFile(
+    tx: Prisma.TransactionClient,
+    actor: CurrentActor,
+    roomId: string,
+    id: string,
+    grant: import('@prisma/client').ChatRoomGrant,
+    action: string,
+  ) {
     const link = await tx.chatFile.findFirst({
       where: {
         id,
-        roomId,
-        organizationId: actor.organizationId,
-        file: { deletedAt: null },
-        OR: [
-          { actorId: actor.userId, ...time },
-          { messages: { some: { message: { roomId, ...time } } } },
-        ],
+        ...(await this.visibleFileWhere(tx, actor, roomId, grant, action)),
       },
       include: { file: true },
     });
@@ -2807,54 +2820,66 @@ export class ProjectChatService {
     });
   }
 
+  async publishedReleaseWhere(
+    tx: Prisma.TransactionClient,
+    actor: CurrentActor,
+    roomId: string,
+  ): Promise<Prisma.ChatDocumentReleaseWhereInput> {
+    const { grant } = await this.access.assertRoom(
+      actor,
+      roomId,
+      'DOWNLOAD',
+      tx,
+    );
+    const time: Prisma.ChatDocumentReleaseWhereInput[] = [];
+    for (const action of ['READ', 'DOWNLOAD'])
+      time.push({
+        OR: (await this.access.history(tx, grant, action)).map(
+          ({ gte, lt }) => ({ publishedAt: { gte, lt } }),
+        ),
+      });
+    return {
+      roomId,
+      organizationId: actor.organizationId,
+      revokedAt: null,
+      publishedAt: { not: null },
+      file: { deletedAt: null },
+      publishedRecipients: {
+        array_contains: [
+          { userId: actor.userId, actions: ['READ', 'DOWNLOAD'] },
+        ],
+      },
+      AND: time,
+    };
+  }
+
+  async visibleRelease(
+    tx: Prisma.TransactionClient,
+    actor: CurrentActor,
+    id: string,
+  ) {
+    const identity = await tx.chatDocumentRelease.findFirst({
+      where: { id, organizationId: actor.organizationId },
+      select: { roomId: true },
+    });
+    if (!identity) throw new NotFoundException();
+    const release = await tx.chatDocumentRelease.findFirst({
+      where: {
+        id,
+        ...(await this.publishedReleaseWhere(tx, actor, identity.roomId)),
+      },
+      include: { file: true },
+    });
+    if (!release) throw new NotFoundException();
+    return release;
+  }
+
   async downloadRelease(actor: CurrentActor, id: string) {
     const projectId = await this.releaseProject(actor, id);
     return this.access.project(actor, projectId, async (tx) => {
-      const r = await tx.chatDocumentRelease.findFirst({
-        where: {
-          id,
-          organizationId: actor.organizationId,
-          revokedAt: null,
-          publishedAt: { not: null },
-          publishedRecipients: {
-            array_contains: [
-              { userId: actor.userId, actions: ['READ', 'DOWNLOAD'] },
-            ],
-          },
-        },
-        include: { file: true },
-      });
-      if (!r || r.file.deletedAt) throw new NotFoundException();
-      const { grant } = await this.access.assertRoom(
-        actor,
-        r.roomId,
-        'DOWNLOAD',
-        tx,
-      );
-      for (const action of ['READ', 'DOWNLOAD']) {
-        const ranges = await this.access.history(tx, grant, action);
-        if (
-          !ranges.some(
-            (range) =>
-              r.publishedAt! >= range.gte &&
-              (!range.lt || r.publishedAt! < range.lt),
-          )
-        )
-          throw new NotFoundException();
-      }
+      const r = await this.visibleRelease(tx, actor, id);
       const data = await this.releaseBytes(r.file.storageKey, r.checksum);
-      await this.access.assertRoom(actor, r.roomId, 'DOWNLOAD', tx);
-      for (const action of ['READ', 'DOWNLOAD']) {
-        const current = await this.access.history(tx, grant, action);
-        if (
-          !current.some(
-            (range) =>
-              r.publishedAt! >= range.gte &&
-              (!range.lt || r.publishedAt! < range.lt),
-          )
-        )
-          throw new NotFoundException();
-      }
+      await this.visibleRelease(tx, actor, id);
       return {
         file: { originalFilename: r.filename, mimeType: r.mimeType },
         data,
