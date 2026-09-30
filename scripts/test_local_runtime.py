@@ -1,6 +1,7 @@
 """Process thật, cổng ephemeral; không dùng DB, Chrome hoặc cổng người dùng."""
 
 import importlib.util
+import json
 import multiprocessing
 import os
 from pathlib import Path
@@ -354,6 +355,137 @@ class RuntimeTests(unittest.TestCase):
                 except ProcessLookupError:
                     pass
                 time.sleep(0.1)
+
+
+SCRIPTS = Path(__file__).resolve().parent
+
+
+class RuntimeCliTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="galaxy-runtime-cli-")
+        self.root = Path(self.temp.name)
+        self.source_static = self.root / "apps/web/.next/static"
+        self.selected_static = self.root / "release/apps/web/.next/static"
+        for folder in [self.source_static, self.selected_static]:
+            folder.mkdir(parents=True)
+            (folder / "client.js").write_text("public browser code")
+        self.manifest = self.root / ".runtime/local-runtime.json"
+        self.manifest.parent.mkdir()
+        self.manifest.write_text(json.dumps({
+            "runtimeRoot": str(SCRIPTS.parent),
+            "identity": {"database": {"name": "galaxy_os"}},
+            "schemaProbe": ["unused-fixture-probe"],
+            "expectedSchema": {"fixture": True},
+            "services": {
+                "api": {"port": 3001, "fingerprints": {}},
+                "web": {"port": 3000, "cwd": str(self.selected_static.parent.parent), "fingerprints": {}},
+            },
+        }))
+        self.env = {**os.environ, "GALAXY_LOCAL_RUNTIME_MANIFEST": str(self.manifest)}
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def verify_bundle(self):
+        return subprocess.run(
+            ["bash", str(SCRIPTS / "verify-production-artifacts.sh")],
+            cwd=self.root, env=self.env, capture_output=True, text=True,
+        )
+
+    def test_selected_bundle_leak_is_rejected_even_when_source_is_clean(self):
+        for marker in ["127.0.0.1:3001", "credentials-file:", "<TUNNEL_ID>"]:
+            with self.subTest(marker=marker):
+                (self.selected_static / "client.js").write_text(marker)
+                result = self.verify_bundle()
+                self.assertNotEqual(0, result.returncode, result.stdout)
+                self.assertIn("Server-only deployment data", result.stderr)
+                self.assertNotIn(marker, result.stderr)
+
+    def test_clean_selected_bundle_passes_even_when_mutable_source_has_leak(self):
+        (self.source_static / "client.js").write_text("credentials-file: stale-source")
+        result = self.verify_bundle()
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("no internal API or tunnel credential configuration", result.stdout)
+
+    def test_missing_selected_bundle_fails_closed(self):
+        (self.selected_static / "client.js").unlink()
+        self.selected_static.rmdir()
+        result = self.verify_bundle()
+        self.assertNotEqual(0, result.returncode, result.stdout)
+
+    def test_fingerprint_failure_propagates_through_shell_helper(self):
+        config = json.loads(self.manifest.read_text())
+        config["services"]["web"]["fingerprints"] = {str(self.selected_static / "client.js"): "wrong-digest"}
+        self.manifest.write_text(json.dumps(config))
+        result = self.verify_bundle()
+        self.assertNotEqual(0, result.returncode, result.stdout)
+        self.assertIn("source/build/config đã đổi", result.stderr)
+
+    def test_unreadable_selected_bundle_is_not_reported_as_verified(self):
+        manager = runtime.Runtime(json.loads(self.manifest.read_text()), self.root / "state")
+        with patch.object(Path, "read_bytes", side_effect=PermissionError("fixture unreadable")):
+            with self.assertRaises(PermissionError):
+                manager.verify_artifacts()
+
+    @unittest.skipIf(os.geteuid() == 0, "Root bypasses directory permissions")
+    def test_unreadable_bundle_directory_fails_through_shell_helper(self):
+        nested = self.selected_static / "restricted"
+        nested.mkdir()
+        (nested / "client.js").write_text("credentials-file: fixture")
+        nested.chmod(0)
+        try:
+            result = self.verify_bundle()
+        finally:
+            nested.chmod(0o700)
+        self.assertNotEqual(0, result.returncode, result.stdout)
+        self.assertIn("Permission denied", result.stderr)
+
+    def test_status_cli_exit_reflects_verified_ready_state(self):
+        # Exercise main's real manifest validation, output and process exit, while
+        # replacing only status's OS/DB checks with a fixture result.
+        program = """import importlib.util,json,sys
+from unittest.mock import patch
+spec=importlib.util.spec_from_file_location('runtime',sys.argv[1])
+module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+state=sys.argv[2];sys.argv=[sys.argv[1],'status']
+with patch.object(module.Runtime,'status',return_value={'state':state}):
+ sys.exit(module.main())
+"""
+        for state, expected_exit in [("PARTIAL", 1), ("READY", 0)]:
+            with self.subTest(state=state):
+                result = subprocess.run(
+                    [sys.executable, "-c", program, str(SCRIPTS / "local-runtime.py"), state],
+                    cwd=self.root, env=self.env, capture_output=True, text=True,
+                )
+                self.assertEqual(expected_exit, result.returncode, result.stderr)
+                self.assertEqual(state, json.loads(result.stdout)["state"])
+
+    def test_health_shell_entrypoint_exits_nonzero_when_services_are_stopped(self):
+        scripts = self.root / "scripts"
+        scripts.mkdir()
+        for name in ["local-runtime.py", "production-health.sh"]:
+            (scripts / name).write_bytes((SCRIPTS / name).read_bytes())
+        tools = self.root / "bin"
+        tools.mkdir()
+        ss = tools / "ss"
+        ss.write_text("#!/bin/sh\nexit 0\n")
+        ss.chmod(0o700)
+        config = json.loads(self.manifest.read_text())
+        config["runtimeRoot"] = str(self.root)
+        config["expectedSchema"] = {"name": "galaxy_os", "schema": "public", "migrations": []}
+        config["schemaProbe"] = [sys.executable, "-c", "print(" + repr(json.dumps(config["expectedSchema"])) + ")"]
+        config["services"]["api"].update(cwd=str(self.root), environment={})
+        self.manifest.write_text(json.dumps(config))
+        result = subprocess.run(
+            ["bash", str(scripts / "production-health.sh")],
+            cwd=self.root.parent,
+            env={**self.env, "PATH": str(tools) + os.pathsep + os.environ["PATH"]},
+            capture_output=True, text=True,
+        )
+        self.assertEqual(1, result.returncode, result.stderr)
+        output = json.loads(result.stdout)
+        self.assertEqual("PARTIAL", output["state"])
+        self.assertTrue(output["databaseReadOnlyCheck"]["verified"])
 
 
 if __name__ == "__main__":

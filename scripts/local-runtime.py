@@ -317,6 +317,27 @@ class Runtime:
             "services": services,
         }
 
+    def verify_artifacts(self):
+        self.check_files()
+        bundle = Path(self.config["services"]["web"]["cwd"]) / ".next/static"
+        if not bundle.is_dir():
+            raise RuntimeError("Selected browser bundle is missing")
+        markers = [b"127.0.0.1:3001", b"credentials-file:", b"<TUNNEL_ID>"]
+        def scan_error(error):
+            raise error
+        for folder, _, files in os.walk(bundle, onerror=scan_error):
+            for name in files:
+                path = Path(folder) / name
+                content = path.read_bytes()
+                if any(marker in content for marker in markers):
+                    raise RuntimeError(
+                        f"Server-only deployment data found in the browser bundle: {path.relative_to(bundle)}"
+                    )
+        return {
+            "state": "ARTIFACTS_VERIFIED",
+            "message": "Browser bundle contains no internal API or tunnel credential configuration",
+        }
+
     def owned_members(self, record):
         members = []
         if not record.get("token"):
@@ -533,17 +554,18 @@ def main():
     if len(sys.argv) == 3 and sys.argv[1] == 'serve':
         manager.serve(sys.argv[2])
         return
-    if command not in ["status", "up", "stop", "logs"]:
+    if command not in ["status", "up", "stop", "logs", "verify-artifacts"]:
         raise RuntimeError("Dùng local:status, local:up hoặc local:stop")
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
-    result = getattr(manager, command)()
+    result = manager.verify_artifacts() if command == "verify-artifacts" else getattr(manager, command)()
     if command != 'logs':
         print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 1 if command == "status" and result["state"] != "READY" else 0
 
 
 if __name__ == "__main__":
     try:
-        main()
+        sys.exit(main())
     except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as error:
         print(str(error), file=sys.stderr)
         sys.exit(1)
