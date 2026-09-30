@@ -1,5 +1,45 @@
 # M2 — Bàn giao triển khai
 
+## Checkpoint resume 2026-09-30 — cutover đã hoàn tất
+
+- WORKTREE `/home/galaxy_os/.worktrees/m2-a-20260928`; branch `m2/project-chat-20260928`.
+- CODE_SHA/TESTED_SHA `5d626f257b7e73e91f5195d27d89dfb592db2c03`.
+- TESTED_TREE `ffabd5c003967b6b755ab2d2dc8bd63de1f0c30b`; docs đang sửa, chưa commit.
+- Source sạch; diff chưa commit chỉ docs M2/M3 và status. Không reset/stash/merge.
+- Lệnh cuối trước resume: đóng băng generated Prisma6.19 vào artifact `api-5d626f2`.
+- Native resolution đã kiểm: artifact/generated-prisma/index.js,225models và engine riêng.
+- Acceptance `/tmp/galaxy-lockfix-acceptance.json`: build, Chrome21, repeat10 và2fullAPI đều exit0.
+- FullAPI1:1200/1200,CLEAN,run `6dab59eb-2966-46c6-9070-80fdbde23148`.
+- FullAPI2:1200/1200,CLEAN,run `84937a35-118c-40f3-9883-c2b273c21dfc`.
+- Logs `/tmp/galaxy-lockfix-acceptance-{build,browser,repeat-01..10,full-api-1..2}.log`.
+- Targeted13/rootlint/typecheck/format trước commit5d PASS; Web527/edge4/Python1/schema PASS còn áp dụng.
+- BFCache NOT_ELIGIBLE_CONFIRMED; reload thật kiểm quyền, không bỏ no-store.
+- Review nhạy cảm/Ponytail5d đã đạt; resume reviewer chỉ kiểm thay đổi trạng thái/cutover.
+- M2_A_STATUS VERIFIED; DB_M2_READY; M2_ENABLED_AT_3000. Browser auth/pilot3000 chưa nghiệm thu.
+- Runtime mới:3000PID233893,W/apps/web;3001PID233808,artifactM2/api-5d626f2.
+- Main `galaxy_os/public`:82successful,0pending, M2ON đồng bộ; launcher READY/managed cả2.
+- Không thấy migration/restore/acceptance/cutover còn chạy. Không retry lệnh ghi.
+- Cutover exit0, log `/tmp/galaxy-controlled-cutover.log`; BACKUP/REHEARSAL/MAIN_DEPLOY/RUNTIME_READY receipts có thật.
+- Hai SQL checksum restored đúng ledger; không sửa DB history. Rehearsal/freshcanonical82 đã đạt.
+- Backup mới217tables/66binary restore đạt;13main applied, mọi hàng/ID/tổng tiền/binary cũ giữ nguyên.
+- Baseline có1activebinary8byte thiếu,1deletedbinary thiếu; không bịa phục hồi hoặc che hạn chế.
+- Clock đã sửa W32Time chính thức; hai fullAPI CLEAN; resume kiểm nguồn/status lại.
+- Chrome3000 phiên cũ hết hạn; cần đăng nhập trực tiếp, không đổi password/session hoặc dùng fixture.
+- Pilot ghi thật chưa được người dùng chọn; không seed/grant vào main.
+- Test33001/33002/TLS33003,DB55433/Redis56380/cookie/context riêng.
+- Cutover `/tmp/galaxy-controlled-cutover.py` ĐÃ XONG; không chạy lại lệnh ghi.
+- Đã giữ flock xuyên dừng đúng writer→backup mới→restore/rehearsal→13main→atomicmanifest; không reset/ledger rewrite.
+- Recipe/data riêng: `.runtime/local3000/cutover-20260930/`; không vào Git.
+- Rollback sau SQL giữ API mới/schema82 và tắt chat cả2phía; không API69/restore đè dữ liệu mới.
+- Lệnh chuẩn: `pnpm --dir /home/galaxy_os/.worktrees/m2-a-20260928 local:up`.
+- Status/stop cùng prefix; root `pnpm dev` dùng cùng launcher. Stop chỉ tác động runtime được quản lý.
+- M3 N1/N2 có8unitPASS; schema/API/panel chưa tích hợp, live provider NOT_RUN.
+- M3 tiếp theo dùng index tăng dần theo source/version; không quét/nạp toàn corpus mỗi câu hỏi.
+- Model yêu cầu: Sol medium điều phối, Astra high reviewer; dispatch Astra resume đã chạy.
+- Runtime model metadata UNVERIFIED; không probe thêm. Luna chưa cần, một sourcewriter/một reviewer.
+- NEXT: M3N3 source-index tăng dần/ACL/storage theo kế hoạch; nghiệm thu main sau người dùng đăng nhập.
+- REMOTE_DEPLOY/GIT_PUSH_MERGE NOT_PERFORMED.
+
 ## LOCAL3000 — 2026-09-29 (điểm tiếp tục hiện tại)
 
 **Người dùng dùng `http://localhost:3000/`**, Chrome hiện tại giữ đăng nhập và đã mở được Project. Web mới source9235def phục vụ từ worktree này, API/data vẫn bản cũ7faeb58. M2 bị tắt đúng guard/feature flag; chưa có chat M2 hoặc AI M3 ở3000. Không hướng người dùng sang demo33003.

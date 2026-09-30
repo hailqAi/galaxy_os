@@ -1,5 +1,20 @@
 # Trạng thái triển khai và điểm tiếp tục
 
+## Local 2026-09-30 — M2 đã bật, tiếp tục M3
+
+- Runtime chuẩn `/home/galaxy_os/.worktrees/m2-a-20260928`, branch `m2/project-chat-20260928`.
+- `pnpm --dir /home/galaxy_os/.worktrees/m2-a-20260928 local:up`; status/stop cùng prefix. Root `pnpm dev` cùng launcher.
+- PORT_CONFLICT_RESOLVED/SINGLE_RUNTIME_STARTUP_VERIFIED: không spawn trùng; sau cutover up lần nữa ALREADY_RUNNING_VERIFIED.
+- Web3000PID233893/API3001PID233808 đều managed, source5d626f2; main `galaxy_os/public`82migration,0pending, M2ON cả hai phía.
+- CLOCK_STABLE: W32Time nguồn cũ polling0x8, WSL synchronized; cả hai fullAPI CLEAN, resume status vẫn sync/error0.
+- Hai SQL checksum phục hồi đúng ledger. Backup mới/restore/rehearsal13/main13 đã hoàn tất;217table cũ, mọi ID/tổng tiền theo currency và66binary khớp.
+- Baseline thiếu1activebinary8byte và1deletedbinary; không tuyên bố phục hồi. Không reset/đổi DB/account/password/role.
+- M2_A_VERIFIED: repeat10 nhóm6ca, Chrome21, hai fullAPI1200/1200 cùng5d626f2/treeffabd5c, build/lint/type/schema/format đạt.
+- M2_ENABLED_AT_3000: đã bật; AUTH_MAIN và pilot ghi còn chờ người dùng đăng nhập/chọn phạm vi. Chrome thật3000 `/login`, `/me401` do phiên cũ hết hạn.
+- Test dùng33001/33002/TLS33003,DB55433/Redis56380/cookie/context riêng. Ca đăng nhập test PASS; nguyên nhân lỗi33003 người dùng báo trước vẫn chưa xác định.
+- M3 N1/N2 source/provider8unitPASS; schema/index/API/panel đang tiếp tục. Live provider NOT_RUN, không key/budget, không gửi dữ liệu thật.
+- [Checkpoint](milestones/M2/HANDOFF.md) giữ log/receipt/giới hạn. Không push/merge/remote deploy. Các phần dưới là lịch sử.
+
 ## LOCAL3000 — 2026-09-29 (hiện hành)
 
 - Theo chỉ đạo mới, **Web9235def đã chạy tại http://localhost:3000 từ worktree M2**, API3001/data `galaxy_os` schema69 giữ nguyên; FEATURE_PROJECT_CHAT=false. Phiên Chrome người dùng/me200, danh sách/chi tiết Project200. Không đổi account/password/role hoặc dùng testDB thay dữ liệu cũ. LOCAL_3000_READY: PARTIAL_WEB_AND_EXISTING_AUTH_PROJECT; chưa có chat M2/Hỏi AI tại3000.

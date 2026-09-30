@@ -1,5 +1,23 @@
 # M2 — Thiết kế và phạm vi thực thi
 
+## Local một runtime — chỉ đạo hợp nhất 2026-09-30
+
+Phạm vi OWNER_DIRECTED: sửa khởi chạy trùng trước; tiếp tục inline theo prompt
+hợp nhất, giữ phiên/data3000, không chạy lại M0/M1. Dùng Python stdlib hiện có
+cho helper local (fcntl.flock, subprocess, /proc, HTTP), không thêm supervisor.
+Một manifest ignored tại root Git xác định worktree chuẩn, env file, cwd/command,
+fingerprint source/build và cổng. Root chỉ có entrypoint tooling tới helper này.
+Mọi cổng được kiểm trước spawn; đúng cwd/executable/environment/source và health
+mới được reuse. PID luôn kèm start ticks; stop chỉ dừng process group do helper
+tạo, không nhận quyền sở hữu process có trước. Khóa OS tự nhả khi process chết.
+Readiness có timeout monotonic; lỗi/Ctrl+C thu dọn riêng children của lượt gọi.
+
+Trong khi schema chưa nâng cấp: Web M2 hiện có + API legacy tương thích được ghi
+tường minh trong manifest; M2=false. Không auto-migrate/seed/reset. Không cấp phép
+bật M2 từ việc launcher chạy được. Sau backup/restore, reconciliation, clock và
+nghiệm thu sạch mới thay manifest/API/flag đồng bộ. M3 source độc lập được phép
+theo chỉ đạo mới, nhưng không bật AI hoặc gửi dữ liệu thật qua provider trước gate.
+
 ## Thiết kế thực thi M2-A theo chỉ đạo mới 2026-09-28
 
 DESIGN_STATUS: OWNER_DIRECTED_M2_A. B1–B5 đã chốt ở [DECISIONS](DECISIONS.md). Chủ dự án chốt phạm vi/chính sách bằng chỉ đạo hiện tại, ủy quyền lập và rà soát kỹ thuật kế hoạch để thực thi inline. Các đề xuất/điểm chờ phía dưới là lịch sử; không còn dùng chúng để hỏi lại B1–B5. PLAN được tác giả và reviewer kỹ thuật kiểm, không ghi chủ dự án đã đọc một PLAN chưa có.

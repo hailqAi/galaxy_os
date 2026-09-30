@@ -1,5 +1,34 @@
 # Galaxy OS M2-A Implementation Plan
 
+## Tiếp tục inline theo prompt hợp nhất 2026-09-30
+
+Spec: [DESIGN](DESIGN.md), mục Local một runtime và yêu cầu hợp nhất chủ dự án.
+Không ghi PLAN_APPROVED_BY_OWNER cho văn bản mới; đây là kế hoạch kỹ thuật trong
+phạm vi thực thi được giao. Một writer source, reviewer độc lập đọc-only.
+
+- [ ] L1: `scripts/local-runtime.py`, `scripts/test_local_runtime.py`, scripts
+      package; root chỉ `scripts/local-runtime-entry.py` và package entrypoints.
+      Interface: `status|up|stop`, manifest `.runtime/local-runtime.json` tại root Git;
+      state/lock/log riêng trong `.runtime/local-managed/`. Tests dùng process HTTP
+      thật/cổng ephemeral: cold/up twice/concurrent/failure/foreign port/reused stop/
+      stale PID/partial incompatible/source drift. RED trước GREEN bằng
+      `python3 -m unittest discover -s scripts -p test_local_runtime.py`.
+- [ ] L2: khôi phục API tương thích, attach Chrome hiện hữu; kiểm metadata
+      auth/Project/file an toàn. Không sửa session/account hoặc dùng fixture ở3000.
+- [ ] L3: đối soát clock Windows/WSL/NTP bằng observer hiện có; sửa dịch vụ chính
+      thức qua quyền OS hợp lệ. Manifest migration exact names/hashes/provenance;
+      backup nhất quán, restore riêng, reconciliation ID/quan hệ/tiền/binary, diễn tập
+      canonical fresh và upgrade. Thiếu provenance vẫn là blocker live-local.
+- [ ] L4: hai ca handover/site-delivery đến hành vi thật, repeat10, hai full API
+      cùng cây cuối clock sạch; Web/browser/build/typecheck/lint/schema/format.
+- [ ] L5: chỉ sau các gate, maintenance/cutover API/DB/flag và smoke3000.
+      M3 source/unit riêng có thể làm khi OS/migration bị chặn; live AI vẫn đóng.
+
+Pre-flight: L1 reuse đúng runtime của L2; L3 clock/schema là gate L4/L5, không
+phải gate test process helper độc lập. Review focus: identity PID tái sử dụng,
+hai caller đồng thời, child lỗi sau reuse, env root/worktree khác nhau, server
+HTTP200 không thuộc Galaxy. Không full DB suite trên database người dùng.
+
 ## LOCAL3000 — chỉ đạo mới 2026-09-29
 
 Chủ dự án cho phép thay Web/runtime local tại `http://localhost:3000`, không cho phép tự di trú database đang dùng. Giữ INLINE, B1–B5 và M3 có điều kiện; không ghi rằng chủ dự án đã đọc PLAN này. Source đầu lượt `43c1195`; main cũ `7faeb58`. Không dùng log dự án khác.
