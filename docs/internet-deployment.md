@@ -1,11 +1,17 @@
 # Internet deployment
 
+Current deployment: [runtime handoff, 2026-09-30](galaxy-os/handoffs/2026-09-30-runtime-repair.md).
+Internal work uses localhost/LAN3000 and a frozen release under systemd.
+The existing Node TLS Edge is retained; public domain access is deliberately
+closed until internal acceptance. The Tunnel/Caddy recipes below are historical
+options, not instructions to add another proxy or replace the installed Edge.
+
 Galaxy OS must never publish `next dev`, NestJS port 3001, PostgreSQL, Redis,
 or Mailpit. Build first, run Next's installed production server on
 `127.0.0.1:3000`, and run NestJS on `127.0.0.1:3001`. Browsers use only the
 same-origin `/api/v1` route; Next forwards its closed API allowlist internally.
 
-## Production environment and processes
+## Historical production environment recipe
 
 Create ignored `.env.production` with production secrets held outside Git:
 
@@ -34,28 +40,19 @@ pnpm build:api
 pnpm build:web
 ```
 
-The supported foreground commands are `pnpm start:api` and
-`pnpm start:web`. `pnpm prod:health` checks both loopback health endpoints.
-For persistence, copy the three examples from `infra/systemd` to
-`~/.config/systemd/user`, replace `<REPOSITORY_PATH>` and `<PNPM_PATH>` with
-absolute non-secret paths, then run:
+For the installed local release, use `pnpm local:up`, `pnpm local:status`,
+`pnpm local:logs`, and `pnpm local:stop` from the repository root. The selected
+manifest and frozen artifact determine what runs; do not start a second stack
+with the foreground development commands. Use the current handoff for release
+preparation, verified commands, service ownership, Windows lifecycle, and rollback.
+The installed target owns Web/API only; it does not start or stop PostgreSQL
+or Redis and does not apply migrations on restart.
+`pnpm prod:health` uses the same verified runtime status (process ownership,
+artifact/config, read-only database/schema, and HTTP readiness); a non-READY
+result exits nonzero. `pnpm prod:verify-artifacts` checks the selected Web
+artifact's browser bundle, not `.next` in the current source directory.
 
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now galaxy-os.target
-pnpm prod:health
-systemctl --user status galaxy-os-api galaxy-os-web
-```
-
-The target starts PostgreSQL and Redis before the API, then the web service;
-both application processes restart on failure and receive SIGTERM on
-`pnpm prod:stop`. Use `journalctl --user -u galaxy-os-api -u galaxy-os-web`
-for logs; authentication bodies and secrets are redacted, but environment
-files must never be printed. WSL and Docker Desktop must be running. If the
-host does not start WSL automatically, use a Windows startup task that starts
-the distribution, not another application process manager.
-
-## Recommended: Cloudflare Tunnel
+## Historical option: Cloudflare Tunnel
 
 Architecture: Internet HTTPS hostname → outbound Cloudflare Tunnel →
 `127.0.0.1:3000` → same-origin Next API forwarder → `127.0.0.1:3001`.
@@ -82,7 +79,7 @@ No router Virtual Server rule, DMZ, inbound firewall exception, DDNS updater,
 or stable public IPv4 is required. Roll back by disabling the published route
 and tunnel service; local loopback services remain private.
 
-## Alternative: DDNS and Caddy
+## Historical option: DDNS and Caddy
 
 Architecture: Internet HTTPS domain → router TCP 80/443 → Caddy →
 `127.0.0.1:3000`. Copy `infra/caddy/Caddyfile.example` outside Git, set

@@ -2,7 +2,7 @@
 
 ## Runtime/LAN — 2026-09-30 — INTERNAL_RUNTIME_DEPLOYED
 
-Code/tested `264a19546098d9822f6e9805468c030d0bcb3c2f`, release
+App code/tested `264a19546098d9822f6e9805468c030d0bcb3c2f`, release
 `local-f93ef7df2fbc`, Web BUILD_ID `F6amuzt22vwAHV-bQHkvj`.
 Web production + API compiled local-main chạy dưới user systemd; Edge cùng
 artifact, public giữ đóng theo yêu cầu. Windows localhost/LAN app200; fresh
@@ -10,7 +10,11 @@ Chrome cùng actor/9Project/300permissions, entry đến /work.9Project main ch�
 có ChatRoom (COUNT READ ONLY0); không tạo/copy phòng test hoặc grant tự động.
 API1224, Web543, Edge5, runtime/release25, browser HTTPS3+HTTP1 đạt; lifecycle,
 concurrent up, log Ctrl+C, API offline và stop/up đã kiểm thực.
-Cross-device LAN/login → Làm việc: USER_VERIFIED. Đóng Codex thật còn NOT_RUN. Keeper Windows
+Tooling follow-up: health/status không READY trả lỗi; verifier kiểm artifact
+được chọn. CLI8, runtime30 + release3 đạt; hai lệnh chạy thực từ root/canonical
+đều đạt, không restart hay rebuild app. Tooling code/tested SHA
+`92df5d3b3b1b988da3b57862f3a333d1c2ce63ac`; root adapters `1a59665854c99a1298f47a71c6852917eb2c8e7c`.
+Cross-device LAN/login → Làm việc: USER_VERIFIED. Đóng Codex thật: DEFERRED_BY_USER (người dùng sẽ thử sau). Keeper Windows
 đã chạy, linger=yes; reboot/logoff NOT_RUN. Provider thật chưa cấu hình, hai
 binary thiếu baseline giữ nguyên; không đổi lịch sử M2-A VERIFIED.
 [Handoff hiện hành](handoffs/2026-09-30-runtime-repair.md) ghi evidence,

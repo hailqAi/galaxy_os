@@ -77,7 +77,14 @@ Files: recipe tối thiểu dưới `scripts/` theo entry hiện có, manifest/r
 - [x] Windows HTTP localhost/LAN, Chrome Network cache/remote address và Project/work theo phiên hiện hữu. Main không có ChatRoom trong9Project; chat/file mutation chỉ fixture.
 - [x] Test fixture auth/capability/offline; không mutation tài khoản người dùng.
 - [x] Shell/test-stop survival tự động; observer Windows đã chạy và mẫu đầu đúng.
-- [ ] Người dùng đóng Codex thật60giây, rồi đọc native log/journal sau resume.
+- [ ] DEFERRED_BY_USER: người dùng sẽ đóng Codex sau; khởi chạy lại native observer trước thử, rồi đọc log/journal sau resume.
 - [x] LAN khác/login→Làm việc USER_VERIFIED; public domain DEFERRED_BY_OWNER. DNS/WAN discrepancy cần giải quyết đúng quyền trước public.
 - [x] Ponytail/correctness/security/auth/UX review; CODE commit local exact files `264a195`.
 - [x] Cập nhật STATUS/PROJECT_STATUS/handoff theo maintenance/browser main và checkpoint trước đóng Codex; docs commit local riêng.
+
+### Task 6: Chẩn đoán đúng bản đang phục vụ
+
+- [x] RED: `status` trả PARTIAL nhưng exit0; `prod:health` chỉ kiểm liveness; verifier đọc source build thay artifact được chọn và bỏ sót bundle thiếu/rò cấu hình.
+- [x] Dùng chung controller/manifest; status không READY phải exit khác0, verifier kiểm đúng bundle và truyền lỗi.
+- [x] CLI8/8, runtime30/30, release3/3; shell callers root/canonical và hai lệnh chẩn đoán chỉ đọc trên main đều đạt (4/4).
+- [x] Review Ponytail/correctness/security đã chốt; tooling commit92df5d3, root adapters1a59665. Giữ app artifact264a195 nguyên trạng; không rebuild để thay metadata.

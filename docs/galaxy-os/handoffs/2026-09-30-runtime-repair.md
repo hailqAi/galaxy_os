@@ -1,6 +1,7 @@
 # Runtime nội bộ Galaxy OS — bàn giao 2026-09-30
 
-Trạng thái: INTERNAL_RUNTIME_DEPLOYED; CODEX_CLOSED chờ phép thử thực.
+Trạng thái: INTERNAL_RUNTIME_DEPLOYED; CODEX_CLOSED: DEFERRED_BY_USER.
+Người dùng yêu cầu ngày2026-09-30: “lát tôi đóng sau. cứ code hoàn thiện đi”.
 CROSS_DEVICE_LAN: USER_VERIFIED, người dùng đã xác nhận vào Project → Làm việc. Domain public giữ đóng theo chỉ đạo mới:
 **thử nghiệm/làm việc nội bộ ở LAN3000, public domain sau khi ổn định**.
 Không redesign Figma, không triển khai thêm M3/provider, không migrate/seed/reset,
@@ -21,16 +22,16 @@ không xóa hồ sơ/chat/file/history, không push/merge.
 | CROSS_DEVICE_LAN_STATUS       | USER_VERIFIED: người dùng xác nhận từ thiết bị khác cùng LAN đăng nhập và vào được Project → Làm việc. Tool kiểm trên Windows được ghi riêng; không giả có remote executor trên thiết bị đó.                                                                                                                                                                                                                   |
 | DOMAIN_INTERNAL_STATUS        | Node TLS Edge hoạt động, upstream Web mới. HTTPS canonical qua --resolve tới LAN443 trả503 có release Edge đúng: PUBLIC_INTENTIONALLY_DISABLED. Không coi --resolve là kiểm DNS/Internet.                                                                                                                                                                                                                      |
 | DOMAIN_EXTERNAL_STATUS        | DEFERRED_BY_OWNER / NOT_VERIFIED. Đầu lượt A42.112.252.201, không AAAA; outbound đo được1.55.170.20, chưa xác minh router WAN/CGNAT/hairpin. Không đổi DNS/router/firewall.                                                                                                                                                                                                                                    |
-| CODEX_CLOSED_TEST_STATUS      | NOT_RUN. Đã kiểm shell/launcher thoát, dừng fixture, ngắt log-follow; chưa thay thế phép thử đóng Codex/VS Code thật. Observer native Windows đang chạy; log observer-20260930-090514.jsonl. Chưa có phép thử đóng Codex thật.                                                                                                                                                                                 |
+| CODEX_CLOSED_TEST_STATUS      | DEFERRED_BY_USER / NOT_CODEX_CLOSED. Người dùng sẽ đóng sau. Observer đã ghi228request/57đợt đều200 rồi được dừng riêng; keeper/main giữ chạy. Không dùng mẫu khi Codex còn mở để ghi PASS.                                                                                                                                                                                                                    |
 | PROJECT_CHAT_UI_STATUS        | Entry đúng workspace, quyền CREATE/ACCESS_ADMIN/LOCK/HISTORY/PUBLISH/INVOKE đúng account. Trong cả9Project của phiên này, API rooms200 nhưng0phòng; transaction READ ONLY xác nhận ChatRoom count0 trong đúng phạm vi9Project. Không có composer phòng trên main khi chưa có phòng. Ô đang thấy là Câu hỏi AI. Login/chat/file/quyền/offline đã PASS trong fixture riêng; không chép room/demo/grant vào main. |
 | AUTH_DATA_CONTINUITY          | Hash actor và tập9Project trước/sau giống hệt; me200/300permissions. Cùng DB galaxy_os/storage/config phiên. Cookie từng host riêng: tab LAN mới hiện login, me401 đúng nghĩa chưa có phiên; không copy cookie/auto-login.                                                                                                                                                                                     |
 | OLD_CODE_RETIRED              | Bỏ điểm mở hardcode stage-1 và ownership detached của main. Giữ UI nghiệp vụ/deep links còn chức năng; không có component nghiệp vụ dead được chứng minh để xóa.                                                                                                                                                                                                                                               |
 | ROLLBACK_STATUS               | Artifact source cũ0e5680a và APIfde08f8 giữ riêng; Web build, fingerprints, Prisma và schema READ ONLY đã kiểm. Recipe emergency có sẵn nhưng chuyển rollback thật NOT_RUN. Giữ new Edge publicfalse; rollback không restore DB, không tự fallback. Bản cũ không có sửa LAN mới.                                                                                                                               |
 | LOG_FOLLOW_COMMAND            | pnpm --dir /home/galaxy_os local:logs — journal Web/API; Ctrl+C đã chứng minh không dừng app.                                                                                                                                                                                                                                                                                                                  |
 | START_STATUS_STOP_COMMANDS    | pnpm --dir /home/galaxy_os local:up ; local:status ; local:stop — dùng cùng prefix, đã chạy thực. Stop chỉ Web/API; giữ DB/Redis/Edge và Windows keeper.                                                                                                                                                                                                                                                       |
-| CODE_SHA / TESTED_SHA         | 264a19546098d9822f6e9805468c030d0bcb3c2f. Commit local root entry/docs: 737784993aa2ca5952072be0e953a3c778edb183. DOCS_COMMIT_SHA là commit chứa handoff này, được báo sau commit; không amend tự tham chiếu.                                                                                                                                                                                                  |
-| FIGMA_IMPLEMENTATION_BASELINE | Worktree /home/galaxy_os/.worktrees/m2-a-20260928, branch m2/project-chat-20260928, code264a195; runtime artifact riêng, sửa source không đổi bản phục vụ.                                                                                                                                                                                                                                                     |
-| REMAINING_BLOCKERS            | Đóng Codex thật chưa nghiệm thu; LAN từ thiết bị khác/đăng nhập được người dùng xác nhận. Main chưa có phòng chat trong9Project được kiểm; tạo/cấp quyền nghiệp vụ qua flow hiện hữu khi người dùng cần, không dùng mutation test trên main. Public domain hoãn; DNS/WAN/cấu hình API production còn cần xử lý trước mở public.                                                                                |
+| CODE_SHA / TESTED_SHA         | App:264a19546098d9822f6e9805468c030d0bcb3c2f. CLI tooling:92df5d3b3b1b988da3b57862f3a333d1c2ce63ac. Root adapters/docs:1a59665854c99a1298f47a71c6852917eb2c8e7c. DOCS_COMMIT_SHA là commit chứa handoff này, báo sau commit; không amend tự tham chiếu.                                                                                                                                                        |
+| FIGMA_IMPLEMENTATION_BASELINE | Worktree /home/galaxy_os/.worktrees/m2-a-20260928, branch m2/project-chat-20260928; app/UI264a195 cùng tooling92df5d3. Runtime artifact riêng; sửa source không đổi bản phục vụ.                                                                                                                                                                                                                               |
+| REMAINING_BLOCKERS            | Đóng Codex thật được người dùng hoãn; LAN từ thiết bị khác/đăng nhập đã được người dùng xác nhận. Main chưa có phòng chat trong9Project được kiểm; tạo/cấp quyền nghiệp vụ qua flow hiện hữu khi người dùng cần, không dùng mutation test trên main. Public domain hoãn; DNS/WAN/cấu hình API production còn cần xử lý trước mở public.                                                                        |
 | HANDOFF_PATH                  | /home/galaxy_os/.worktrees/m2-a-20260928/docs/galaxy-os/handoffs/2026-09-30-runtime-repair.md                                                                                                                                                                                                                                                                                                                  |
 
 ## Bản phát hành và ownership
@@ -163,9 +164,12 @@ pnpm --dir /home/galaxy_os local:up
 pnpm --dir /home/galaxy_os local:status
 pnpm --dir /home/galaxy_os local:logs
 pnpm --dir /home/galaxy_os local:stop
+pnpm --dir /home/galaxy_os prod:health
+pnpm --dir /home/galaxy_os prod:verify-artifacts
 ```
 
-Log-follow không giữ sống app. Sau mỗi release kiểm status (identity+schema+HTTP),
+Log-follow không giữ sống app. `prod:health` dùng status và exit1 nếu không READY;
+`prod:verify-artifacts` kiểm browser bundle của artifact được chọn. Sau mỗi release kiểm status (identity+schema+HTTP),
 Windows localhost/LAN/login, Chrome cùng account/Project/capability, API LAN
 không mở và Edge public gate đúng. Nếu mở public sau này, kiểm domain nội bộ
 và từ Internet riêng, không dùng --resolve thay cả hai.
@@ -191,10 +195,59 @@ Observer đã start và có16row đầu (4sample ×4URL) đều200/no-store/rele
 `C:\Users\Admin\AppData\Local\GalaxyOS\observer\observer-20260930-090514.jsonl`.
 PID21352, parent1052, đúng owner Admin/Limited; không thuộc shell/tool Codex.
 Receipt `/home/galaxy_os/.runtime/runtime-repair-20260930/observer-start-receipt.json`.
-Đây là checkpoint trước thao tác người dùng; chưa ghi Codex-closed PASS.
+Người dùng sau đó hoãn thao tác đóng Codex. Observer đã được dừng riêng sau
+228request/57đợt từ09:05:14Z đến09:14:48Z, tất cả200/no-store/releaseMatches,
+228request ID riêng,0lỗi. Đây là steady-state observation khi Codex còn mở,
+**NOT_CODEX_CLOSED**, không thay phép thử được hoãn. Keeper/main không dừng.
+Receipt `/home/galaxy_os/.runtime/runtime-repair-20260930/observer-deferred-receipt.json`;
+log bền `observer-before-user-close.jsonl` trong cùng thư mục. Khi người dùng
+sẵn sàng, chạy lại đúng task đã cài từ Windows PowerShell thường:
+
+```powershell
+Start-ScheduledTask -TaskName 'Galaxy OS Runtime Observer'
+```
+
+Lệnh này đã chạy thực trong lượt trước; mỗi lần tạo logfile mới cùng directory.
+Task IgnoreNew ngăn chạy trùng. Kiểm mẫu đầu rồi mới đóng Codex; không dùng log
+cũ để xác nhận một khoảng đóng diễn ra sau đó.
 
 Sau khi observer có mẫu đầu đúng, người dùng đóng Codex/VS Code và terminal
 WSL trong60giây, giữ Windows thức/có mạng, mở lại và báo đã thử. Đọc log native
 trong đúng khoảng đóng, đối chiếu journal và refresh Project cùng phiên; chỉ
 sau đó mới cập nhật CODEX_CLOSED_TEST_STATUS. Không tự kill phiên, reboot,
 shutdown distro hoặc logoff. Máy ngủ/tắt/mất mạng không phải online24/7.
+
+## Rà soát cuối sau yêu cầu tiếp tục
+
+- Installed audit mới xác nhận main READY, cùng API309735/Web310056, exact
+  candidate/unit/cgroup; target enabled/Wants API+Web; linger=yes, Edge active.
+  Không restart app, đổi mạng hoặc ghi DB trong rà soát này. Receipt
+  `final-installed-runtime-audit.json` trong private runtime folder.
+- DATABASE_URL và SESSION_COOKIE_NAME trước/sau bằng nhau. FILE_STORAGE_PATH,
+  LOCAL_UPLOAD_PATH, AVATAR_STORAGE_PATH đều explicit/absolute/không đổi và
+  nằm ngoài artifact. Files/uploads tồn tại; avatar path không có directory,
+  không tự tạo file hoặc coi đó là khôi phục binary. Receipt
+  `storage-config-continuity.json` không chứa giá trị env hoặc credentials.
+- Rà soát phát hiện `prod:health` chỉ kiểm liveness, `status` PARTIAL vẫn exit0,
+  còn `prod:verify-artifacts` đọc `.next` trong source thay vì artifact được chọn.
+  Đã cho hai shell helpers dùng cùng controller/manifest; status không READY
+  exit1, verifier kiểm fingerprint và bundle tại Web cwd trong manifest, lỗi
+  đọc/thiếu bundle phải thất bại. Không in nội dung bundle hoặc env.
+- RED→GREEN cho bundle được chọn bị rò marker, source cũ gây báo sai, bundle
+  thiếu/không đọc được và mã thoát PARTIAL. Thêm test chạy shell/controller
+  thật: bỏ sys.exit chỉ trong bản sao tạm làm test fail; bản đúng pass.
+  CLI8/8, toàn runtime30/30 và release3/3 đạt. Không chạy lại API/Web/clock/
+  migration campaign vì code ứng dụng không đổi.
+- `prod:health` và `prod:verify-artifacts` chạy thực từ cả root và canonical
+  đều đạt (4/4), giữ API309735/Web310056, schema83 đã đối chiếu read-only.
+  Không restart, không sửa artifact live hoặc database. Evidence mới:
+  `cli-{red,entry-red,green,runtime-full,release-full}.log`,
+  `cli-main-readonly-verification.json`, `cli-review.json` trong evidence folder.
+- Tooling follow-up commit `92df5d3b3b1b988da3b57862f3a333d1c2ce63ac`;
+  root adapters/docs `1a59665854c99a1298f47a71c6852917eb2c8e7c`.
+  Web/API/Edge và frozen controller của
+  systemd vẫn thuộc app code264a195/release local-f93ef7df2fbc. Root entry dùng
+  controller source mới cho CLI. Không sửa metadata artifact để giả là đã rebuild.
+- `docs/internet-deployment.md` đánh dấu Tunnel/Caddy là phương án lịch sử;
+  chỉ dẫn hiện hành dùng Node TLS Edge và handoff này. Target không tự chạy
+  PostgreSQL/Redis hoặc migrate khi restart.
