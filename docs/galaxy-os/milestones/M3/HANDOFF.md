@@ -1,5 +1,15 @@
 # M3 — Bàn giao AI đa nhà cung cấp và Figma
 
+## Cập nhật 04/10 — UI PDF đã phát hành, live AI còn thiếu credential
+
+Release hiện hành `local-49bd3faf2e63`, code/tested `de274d3e1c38dfb0136fee25334f031b95eb328b`,
+tree `030849c361c7c34f64ee6373c4fe715ac7473b57`. [Bàn giao UI và trạng thái cuối](ui-figma/HANDOFF.md)
+chứa manifest PDF/function map/deviations, activation và evidence theo UNIT/INTEGRATION/
+CHROME/LIVE_PROVIDER. API1272/Web557/Edge5/document1/Python37 và Chrome28 theo nhóm
+cùng build đạt; main/LAN/session/public gate/keeper/logs đã kiểm. Web flag AI đã đồng bộ.
+Cả3provider configLoaded=true nhưng credentialConfigured=false; live NOT_RUN.
+Các kết quả và release bên dưới thuộc lượt03/10, không thay trạng thái hiện hành.
+
 ## Phạm vi và cách dùng
 
 Lối vào vẫn **http://localhost:3000/ → Project → Làm việc → Hỏi AI**.

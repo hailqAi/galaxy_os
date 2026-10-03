@@ -73,10 +73,12 @@ Consumes: Tasks1–5. Produces: local release mới và handoff có evidence th�
 
 - [x] Full lint/typecheck/test/build/format, Python runtime/CLI, Chrome/M2/M3 phù hợp source.
 - [x] Reviewer độc lập Astra/high read-only: correctness/security/authorization/egress/UX; Ponytail diff review. Sửa finding bằng RED→GREEN.
-- [ ] Commit local scope; build snapshot riêng, schema/artifact/readiness; cutover recipe systemd hiện hữu, rollback giữ dữ liệu.
-- [ ] Kiểm localhost/LAN/session/Edge closed/logs; cập nhật STATUS/PROJECT_STATUS/VERIFICATION/HANDOFF, commit docs.
+- [x] Commit local scope; build snapshot riêng, schema/artifact/readiness; cutover recipe systemd hiện hữu, rollback giữ dữ liệu.
+- [x] Kiểm localhost/LAN/session/Edge closed/logs; cập nhật STATUS/PROJECT_STATUS/VERIFICATION/HANDOFF, commit docs.
 
 Kế hoạch đã tự review: Tasks2–4 cùng header và IDs; Task5 dùng registry/adapter, không tạo provider thứ hai.
 Chrome MCP hiện không tìm executable Windows trong sandbox; kiểm đường CDP/Chrome đã có trước khi chọn fallback.
 
 Checkpoint trước phát hành: API1272/Web557/Edge5/document1, Python37 PASS; lint/typecheck/format/build PASS. Chrome28 đã đạt theo nhóm cùng build: M2 21, M3 3, PDF 4; giữ room-only breadcrumb, URL room/Back/Forward và mobile. P02 tạo thật trong fixture cần cả project.create và estimate.create. Live provider chưa chạy vì store không có credential.
+
+Phát hành: code/tested de274d3, tree030849c; local-49bd3faf2e63 READY. Hậu kiểm Chrome chính/Windows LAN/public503/session/log follower PASS. Chỉ live provider còn blocked; [handoff](HANDOFF.md) là điểm tiếp tục.

@@ -1,5 +1,11 @@
 # Runtime nội bộ Galaxy OS — bàn giao 2026-09-30
 
+Cập nhật04/10: release hiện hành `local-49bd3faf2e63` (UI PDF), code/tested
+`de274d3e1c38dfb0136fee25334f031b95eb328b`. Web/API vẫn user systemd, schema83,
+Edge/keeper/public-closed giữ nguyên; Web đã đồng bộ cờ AI. Xem
+[bàn giao hiện hành](../milestones/M3/ui-figma/HANDOFF.md) để lấy build/config/evidence
+mới. Nội dung phía dưới là bằng chứng và recipe của lượt30/09.
+
 Trạng thái: INTERNAL_RUNTIME_DEPLOYED; CODEX_CLOSED: DEFERRED_BY_USER.
 Người dùng yêu cầu ngày2026-09-30: “lát tôi đóng sau. cứ code hoàn thiện đi”.
 CROSS_DEVICE_LAN: USER_VERIFIED, người dùng đã xác nhận vào Project → Làm việc. Domain public giữ đóng theo chỉ đạo mới:

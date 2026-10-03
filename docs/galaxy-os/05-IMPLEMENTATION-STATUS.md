@@ -1,5 +1,34 @@
 # Trạng thái triển khai và điểm tiếp tục
 
+## UI từ PDF và kích hoạt AI — 2026-10-04 — UI_LOCAL_RELEASED / AI_LIVE_BLOCKED
+
+S01 theo Desktop/Mobile/States; P01/P02/P03/P04/P05/P06 và AI toàn dự án đã lên
+`http://localhost:3000/`, dùng domain/API/chat/source hiện hữu. Nguồn LOCAL_PDF;
+không Figma MCP, không OCR hoặc hệ thống song song. PDF/function map và sai khác
+ở [bàn giao thiết kế](milestones/M3/ui-figma/HANDOFF.md).
+
+CODE_SHA=TESTED_SHA `de274d3e1c38dfb0136fee25334f031b95eb328b`; TESTED_TREE
+`030849c361c7c34f64ee6373c4fe715ac7473b57`. Release `local-49bd3faf2e63`,
+BUILD_ID `NvG_M-0f5VT5zYHKmg3WB`, từ snapshot sạch; docs commit riêng sau code.
+Web/API user systemd READY; schema83/0pending không đổi, không restore DB.
+Web bổ sung FEATURE_PROJECT_AI=true theo API để mở route AI01; giữ session,
+storage/signing và public gate. Edge308598/Windows keeper giữ chạy.
+
+API1272/Web557/Edge5/document1, Python37, Chrome28 theo nhóm cùng build PASS;
+lint/typecheck/format/build/artifact/schema đạt. Reviewer read-only correctness/
+auth/egress/UX và Ponytail không còn P0/P1/P2 được phát hiện. Runtime reviewer
+chỉ ra race/rollback của script Web flag; đã sửa trước thực thi.
+Chrome main cùng actor/9Project/300permission/0room, reload/settings200; Windows
+localhost/LAN200 đúng release; public HTTPS503 qua LAN resolve/TLS bật. Log follower
+độc lập; root local:status/prod:health/artifact PASS. Không kiểm WAN/reboot/logoff.
+
+Store AI còn thiếu đã tạo0600 nhưng chưa có credential; API configLoaded=true,
+MISSING_CREDENTIAL/revision=null cả3. Admin test tổng hợp, phân loại lỗi, config/
+lease/revoke và capability evidence đã code/test; **chưa có model access/generation
+live**. Gemini ảnh/PDF vẫn gated; Mistral/Kira text-only. SYNTHETIC_PUBLIC_APPROVED
+không đổi; không duyệt9Project thật. Hai binary thiếu baseline giữ nguyên.
+Chỉ commit local; không push/merge/public. Những mục dưới là lịch sử.
+
 ## AI đa nhà cung cấp — 2026-10-03 — LOCAL_DEPLOYED / LIVE_BLOCKED
 
 Code/tested `d8ce57d0bb5c1faeabfe7f9f1fab5698af8a732b`, tree
