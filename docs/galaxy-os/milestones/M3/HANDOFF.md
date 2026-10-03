@@ -87,7 +87,7 @@ mock làm live. Không tự sửa các cờ live chỉ để mở nút.
 - Mistral/Kira hiện chỉ text; không gọi OCR tính phí hoặc gửi raw binary.
 - Không có extractor Word/Excel sẵn trong nền AI: trả unsupported, không giả đọc đủ.
 - Không dùng provider file storage/handle, nên expiry/re-upload handle hiện N/A.
-  FileAssetVersion/storage Galaxy vẫn là nguồn gốc, kiểm ACL/version trước và sau I/O.
+  ChatFile/version hoặc publication gắn FileAsset/checksum và storage Galaxy vẫn là nguồn gốc, kiểm ACL/version trước và sau I/O.
 - Hai binary thiếu baseline giữ `MISSING_BINARY`; không tạo file rỗng.
 
 ## API và phần bàn giao Figma
@@ -126,6 +126,7 @@ completed. Figma có thể thay trình bày mà không tạo provider/memory kh�
 Baseline `local-f93ef7df2fbc`; source đầu lượt `3c27d94`, branch
 `m2/project-chat-20260928`, worktree `/home/galaxy_os/.worktrees/m2-a-20260928`.
 Không migration mới; schema83 giữ nguyên. Chỉ commit local file đã review;
-không push/merge/remote deploy. Kết quả release cuối cập nhật tại
+không push/merge/remote deploy. Đã chuyển release `local-665429741c6f`, Web/API systemd READY. Chrome chính
+localhost3000 xác minh3 lựa chọn thiếu key, admin settings và reload. Kết quả cuối tại
 [VERIFICATION](VERIFICATION.md). Public domain giữ đóng; LAN/Edge/keeper giữ
 cơ chế hiện hữu, đóng Codex thật vẫn deferred theo quyết định trước.

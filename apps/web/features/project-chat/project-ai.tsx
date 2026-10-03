@@ -70,8 +70,17 @@ const scopes = [
   ['SUPPLY', 'Cung ứng & giao hàng'],
   ['AFTER_SALES', 'Thi công & hậu mãi'],
 ];
-export const aiStatusLabel = (status: string) =>
+export const aiStatusLabel = (
+  status: string,
+  fallback = 'Trạng thái chưa xác định',
+) =>
   ({
+    INVALID_CONFIG:
+      'Cấu hình model chưa hợp lệ; quản trị cần kiểm tra tại máy chủ',
+    SOURCE_UNAVAILABLE: 'Nguồn chưa sẵn sàng hoặc phiên bản không còn hợp lệ',
+    INVALID_CONTEXT: 'Câu hỏi hoặc ngữ cảnh chưa hợp lệ',
+    OUTPUT_TOO_LARGE: 'Kết quả vượt giới hạn kiểm tra; chưa được phát hành',
+    PROVIDER_REJECTED: 'Nhà cung cấp từ chối yêu cầu; cần kiểm tra cấu hình',
     FILE_NOT_LIVE_VERIFIED:
       'Ảnh/PDF chưa được kiểm chứng live và chưa được bật',
     PDF_PAGE_LIMIT: 'PDF vượt giới hạn 10 trang; cần bản trích trang phù hợp',
@@ -118,7 +127,7 @@ export const aiStatusLabel = (status: string) =>
     FORBIDDEN: 'Nguồn không được phép lập chỉ mục',
     INVALID: 'Không đọc được nội dung UTF-8',
     TOO_LARGE: 'Nguồn vượt giới hạn đọc',
-  })[status] ?? 'Trạng thái chưa xác định';
+  })[status] ?? fallback;
 
 export function AiAnswer({
   answer,
@@ -136,7 +145,12 @@ export function AiAnswer({
       {answer.status !== 'ACCESS_REVOKED' && answer.question && (
         <h3 className="whitespace-pre-wrap font-semibold">{answer.question}</h3>
       )}
-      <p role="status">{aiStatusLabel(answer.errorCode ?? answer.status)}</p>
+      <p role="status">
+        {aiStatusLabel(
+          answer.errorCode ?? answer.status,
+          aiStatusLabel(answer.status),
+        )}
+      </p>
       {answer.model && (
         <p>
           {answer.modelLabel ?? answer.model} ·{' '}
@@ -303,7 +317,9 @@ export function ProjectAi({
       setList([]);
       setSource(undefined);
       setIndex(undefined);
-      setLoadError((cause as Error).message);
+      setLoadError(
+        aiStatusLabel((cause as Error).message, (cause as Error).message),
+      );
       if (
         cause instanceof ApiError &&
         [401, 403, 404, 412].includes(cause.status)
@@ -492,7 +508,9 @@ export function ProjectAi({
     } catch (cause) {
       if (!controller.current?.signal.aborted) {
         invalidate(cause);
-        setError((cause as Error).message);
+        setError(
+          aiStatusLabel((cause as Error).message, (cause as Error).message),
+        );
         setRetryPin(requestKey.current);
       }
     } finally {
@@ -577,7 +595,9 @@ export function ProjectAi({
     } catch (cause) {
       if (!controller.current?.signal.aborted && sourceKey.current === key) {
         invalidate(cause);
-        setError((cause as Error).message);
+        setError(
+          aiStatusLabel((cause as Error).message, (cause as Error).message),
+        );
         setRetryPin(requestKey.current);
       }
     }
@@ -663,7 +683,14 @@ export function ProjectAi({
             if (event.currentTarget.open)
               void call<{ models: ModelChoice[] }>('/settings')
                 .then((result) => setSettings(result.models))
-                .catch((cause) => setError((cause as Error).message));
+                .catch((cause) =>
+                  setError(
+                    aiStatusLabel(
+                      (cause as Error).message,
+                      (cause as Error).message,
+                    ),
+                  ),
+                );
           }}
         >
           <summary>Cấu hình nhà cung cấp và hạn mức</summary>

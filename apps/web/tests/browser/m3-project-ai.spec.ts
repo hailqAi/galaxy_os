@@ -126,6 +126,25 @@ test('private AI uses old sources, persists history and clears revoked derived c
   await panel
     .getByLabel('Câu hỏi AI', { exact: true })
     .fill('GH-M3-42 kích thước?');
+  const deniedPattern = /\/ai\/conversations\/[^/]+\/answers$/;
+  await page.route(deniedPattern, async (route) => {
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'MODEL_DISABLED' }),
+    });
+    await page.unroute(deniedPattern);
+  });
+  await panel.getByRole('button', { name: 'Hỏi AI', exact: true }).click();
+  await expect(
+    panel
+      .getByRole('alert')
+      .filter({ hasText: 'Quản trị chưa bật model' })
+      .first(),
+  ).toBeVisible();
+  await panel
+    .getByRole('button', { name: 'Tạo lượt mới theo lựa chọn hiện tại' })
+    .click();
   await panel.getByRole('button', { name: 'Hỏi AI', exact: true }).dblclick();
   await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
   await expect(

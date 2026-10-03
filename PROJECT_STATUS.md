@@ -1,5 +1,35 @@
 # Project status
 
+## AI đa nhà cung cấp — 2026-10-03 — LOCAL_DEPLOYED / LIVE_BLOCKED
+
+Code/tested `f8a51aacc7dd9ca9ad353842ca1f1f20f321d947`, tree
+`682ae67171ad42c61a56d716ea14d0632073808b`; release local `local-665429741c6f`,
+Web BUILD_ID `WElPBvqSwo1rB4-KZF68S`. Web/API cùng snapshot sạch, user systemd
+READY; API361132/Web361133; Edge308598 và Windows keeper giữ nguyên.
+Schema83/DB/storage/account giữ nguyên; public HTTPS503, không DNS/WAN mới.
+
+Project → Làm việc → Hỏi AI tại localhost3000 có Gemini3.8Flash, MistralMedium3.5,
+Kira3.5Pro. Registry/adapter/request pin/policy/usage/native Gemini đã code.
+Đổi model giữ conversation/index, không copy bộ nhớ; history/dependency/egress
+kiểm lại trước gửi/nhận/mở lịch sử. Secret nhập terminal local ẩn, file0600 ngoài
+Git; API systemd đã nhận path thật. User chọn không giới hạn lượt/ngày; vẫn có
+concurrency/input/output kỹ thuật và không tự bật billing.
+
+Cả3provider **BLOCKED_BY_CREDENTIALS**, chưa model access/text/RAG live; Gemini
+ảnh/PDF có contract/mock/local-parser test nhưng còn tắt. Mistral/Kira text-only;
+không OCR/tạo ảnh/video. Pilot synthetic/public-approved, chưa duyệt dữ liệu
+nghiệp vụ của9Project; không index/upload/tạo room demo trên main.
+
+Fresh checks: fullAPI1246/Web547/Edge5/document-service1; runtime/secret36;
+Chrome production M2/M3 24; lint/typecheck/format/build/artifact/schema PASS.
+Chrome main154 với session người dùng tự đăng nhập lại:9Project/300permission/
+0room, dropdown disabled đúng thiếu key, settings200 và reload PASS. LAN health200.
+Review correctness/security/auth/UX/Ponytail không còn Important/Critical; metadata
+model thực thi UNVERIFIED. Chỉ local commits; không push/merge/remote deploy.
+
+[Handoff hiện hành và Figma](docs/galaxy-os/milestones/M3/HANDOFF.md), [bằng chứng](docs/galaxy-os/milestones/M3/VERIFICATION.md).
+Đóng Codex thật/reboot/logoff vẫn deferred. Những mục dưới là lịch sử trước release này.
+
 ## Runtime/LAN — 2026-09-30 — INTERNAL_RUNTIME_DEPLOYED
 
 App code/tested `264a19546098d9822f6e9805468c030d0bcb3c2f`, release

@@ -120,3 +120,31 @@ it('keeps unavailable models visible and disabled with reasons', () => {
   expect(html).toMatch(/<option[^>]*value="kira-3.5-pro"[^>]*disabled=""/);
   expect(html).toContain('Chưa cấu hình');
 });
+
+it('localizes configuration/source errors and preserves an existing Vietnamese server message', () => {
+  expect(aiStatusLabel('SOURCE_UNAVAILABLE')).toContain('Nguồn');
+  expect(aiStatusLabel('INVALID_CONFIG')).toContain('Cấu hình');
+  expect(aiStatusLabel('Vui lòng thử lại', 'Vui lòng thử lại')).toBe(
+    'Vui lòng thử lại',
+  );
+});
+
+it('preserves the answer status label when its detailed error code has no label', () => {
+  const html = renderToStaticMarkup(
+    createElement(AiAnswer, {
+      answer: {
+        id: 'a',
+        status: 'NO_SOURCES',
+        errorCode: 'NO_READABLE_INDEXED_SOURCE',
+        question: 'Nguồn?',
+        answer: null,
+        sources: [],
+      },
+      onSource: () => {},
+      onCancel: () => {},
+      onRun: () => {},
+    }),
+  );
+  expect(html).toContain(aiStatusLabel('NO_SOURCES'));
+  expect(html).not.toContain('Trạng thái chưa xác định');
+});
