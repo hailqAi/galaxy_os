@@ -31,6 +31,10 @@ import {
 } from './tasks.dto';
 import { TasksService } from './tasks.service';
 class TasksQuery extends PageQuery {
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  open?: boolean;
   @IsOptional() @IsString() @Length(1, 200) search?: string;
   @IsOptional()
   @IsIn(['TODO', 'IN_PROGRESS', 'BLOCKED', 'IN_REVIEW', 'DONE', 'CANCELLED'])

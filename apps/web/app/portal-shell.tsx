@@ -28,6 +28,7 @@ export default function PortalShell({
   const [actor, setActor] = useState<Actor>();
   const [unread, setUnread] = useState(0);
   const [authEpoch, setAuthEpoch] = useState(0);
+  const [navigationOpen, setNavigationOpen] = useState(false);
   const publicPage =
     path === '/login' ||
     path === '/forgot-password' ||
@@ -105,19 +106,43 @@ export default function PortalShell({
       router.push(`/search?q=${encodeURIComponent(query)}`);
   }
   return (
-    <div className="portal-shell min-h-screen">
-      <aside className="portal-sidebar flex flex-col px-4 py-3 md:min-h-screen md:px-5 md:py-6">
+    <div
+      className="portal-shell min-h-screen"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') setNavigationOpen(false);
+      }}
+    >
+      <div className="mobile-topbar">
+        <button
+          aria-label="Mở điều hướng"
+          aria-controls="portal-sidebar"
+          aria-expanded={navigationOpen}
+          onClick={() => setNavigationOpen((value) => !value)}
+        >
+          ☰
+        </button>
+        <Link href="/">Galaxy OS</Link>
+      </div>
+      <aside
+        id="portal-sidebar"
+        className={`portal-sidebar flex flex-col px-4 py-3 md:min-h-screen md:px-5 md:py-6 ${navigationOpen ? 'is-open' : ''}`}
+        onClick={(event) => {
+          if ((event.target as HTMLElement).closest('a'))
+            setNavigationOpen(false);
+        }}
+      >
         <Link className="text-xl font-semibold tracking-wide" href="/">
           Galaxy OS
         </Link>
-        <p className="mt-1 text-sm text-black/55">{actor.organization.name}</p>
+        <p className="brand-caption mt-1 text-xs">{actor.organization.name}</p>
         <nav
           aria-label="Điều hướng chính"
           className="mt-3 flex gap-2 overflow-x-auto pb-1 md:mt-8 md:flex-col md:overflow-visible md:pb-0"
         >
-          {chatEnabled && <Link href="/work">Làm việc dự án</Link>}
-          {visibleNavigation(actor.permissions, actor.administrationScope).map(
-            (group) => (
+          <p className="nav-section-label">Làm việc</p>
+          {visibleNavigation(actor.permissions, actor.administrationScope)
+            .sort((a, b) => a.sortOrder - b.sortOrder)
+            .map((group) => (
               <section className="grid shrink-0 gap-1" key={group.key}>
                 <Link
                   aria-current={
@@ -158,7 +183,11 @@ export default function PortalShell({
                     </Link>
                   ))}
               </section>
-            ),
+            ))}
+          {chatEnabled && (
+            <Link className="rounded px-3 py-2 text-sm" href="/work">
+              Trao đổi dự án
+            </Link>
           )}
         </nav>
         <Link
@@ -183,7 +212,7 @@ export default function PortalShell({
             <strong className="block truncate text-sm">
               {actor.displayName}
             </strong>
-            <small className="block truncate text-black/55">
+            <small className="block truncate text-slate-400">
               {actor.roles.map(({ name }) => name).join(', ')}
               {actor.roles.length > 0 && ' · '}
               {actor.administrationScope}

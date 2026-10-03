@@ -1,3 +1,4 @@
+import { ChatAiActivationDto } from './project-chat.dto';
 import { ProjectAiService } from './project-ai.service';
 import {
   ChatAiConversationDto,
@@ -91,12 +92,19 @@ export class ProjectChatController {
   ) {
     return this.ai.settings(actor, id);
   }
+  @Post('projects/:id/ai/settings/test') aiActivation(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(input(ChatAiActivationDto)) value: ChatAiActivationDto,
+  ) {
+    return this.ai.testActivation(actor, id, value);
+  }
   @Post('projects/:id/ai/index') aiIndex(
     @Actor() actor: CurrentActor,
     @Param('id', ParseUUIDPipe) id: string,
     @Body(input(ChatAiScopeDto)) value: ChatAiScopeDto,
   ) {
-    return this.ai.index(actor, id, value.scope);
+    return this.ai.index(actor, id, value.scope, value);
   }
   @Post('projects/:id/ai/answers/:answerId/cancel') aiCancel(
     @Actor() actor: CurrentActor,
@@ -124,7 +132,7 @@ export class ProjectChatController {
     @Param('id', ParseUUIDPipe) id: string,
     @Query(input(ChatAiScopeDto)) query: ChatAiScopeDto,
   ) {
-    return this.ai.indexStatus(actor, id, query.scope);
+    return this.ai.indexStatus(actor, id, query.scope, query);
   }
   @Post('projects/:id/ai/conversations') aiCreate(
     @Actor() actor: CurrentActor,

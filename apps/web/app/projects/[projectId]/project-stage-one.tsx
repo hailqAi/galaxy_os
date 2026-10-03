@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ApiError, api, apiUrl, type Actor } from '../../lib/api';
 import { createCommandKey } from '../../lib/create-command-key';
 import { EntityActivity } from '../../entity-activity';
+import { ProjectWorkspaceHeader } from '../../../features/projects/project-workspace-header';
 import { EntityFiles } from '../../entity-files';
 import { ProjectStageHeader } from '../../project-pms';
 import { type UploadConstraints } from './documents/document-upload';
@@ -1494,11 +1495,22 @@ export function ProjectMembersWorkspace({ projectId }: { projectId: string }) {
 export function ProjectFilesWorkspace({ projectId }: { projectId: string }) {
   const [actor, setActor] = useState<Actor>();
   const [message, setMessage] = useState('');
+  const [projectName, setProjectName] = useState('Dự án');
   useEffect(() => {
-    void api<Actor>('/me')
+    const controller = new AbortController();
+    void api<{ project: { name: string } }>(
+      `/projects/${projectId}/workspace-summary`,
+      { signal: controller.signal },
+    )
+      .then((p) => {
+        if (!controller.signal.aborted) setProjectName(p.project.name);
+      })
+      .catch(() => undefined);
+    void api<Actor>('/me', { signal: controller.signal })
       .then(setActor)
       .catch((error) => setMessage(readableError(error)));
-  }, []);
+    return () => controller.abort();
+  }, [projectId]);
   if (!actor)
     return (
       <p role={message ? 'alert' : 'status'}>
@@ -1506,10 +1518,13 @@ export function ProjectFilesWorkspace({ projectId }: { projectId: string }) {
       </p>
     );
   return (
-    <main className="grid gap-4 p-5">
-      <Link href={`/projects/${projectId}/stage-1?step=1`}>
-        Quay lại Giai đoạn 1
-      </Link>
+    <main className="grid gap-5">
+      <ProjectWorkspaceHeader
+        projectId={projectId}
+        active="files"
+        name={projectName}
+        permissions={actor.permissions}
+      />
       <EntityFiles
         entityId={projectId}
         entityType="Project"

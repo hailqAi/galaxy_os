@@ -36,7 +36,7 @@ it('keeps three disabled choices without credentials and never exposes keys', ()
   const models = modelChoices({}, 'org', 'project');
   expect(models).toHaveLength(3);
   expect(
-    models.every((m) => !m.available && m.reason === 'NOT_CONFIGURED'),
+    models.every((m) => !m.available && m.reason === 'MISSING_CREDENTIAL'),
   ).toBe(true);
   const choices = modelChoices(fixture(), 'org', 'project');
   expect(choices[0]).toMatchObject({
@@ -47,7 +47,7 @@ it('keeps three disabled choices without credentials and never exposes keys', ()
   });
   expect(JSON.stringify(choices)).not.toContain('synthetic-replacement');
   expect(modelChoices(fixture(), 'org', 'other')[0]?.reason).toBe(
-    'DATA_POLICY_BLOCKED',
+    'EGRESS_POLICY_DENIED',
   );
 });
 it('requires replacement credentials, exact registry model and source egress independent of READ', () => {
@@ -68,7 +68,7 @@ it('requires replacement credentials, exact registry model and source egress ind
     assertEgress(c, 'org', 'project', 'SYNTHETIC_PUBLIC_APPROVED', [
       { id: 'source', version: 'v2' },
     ]),
-  ).toThrow('DATA_POLICY_BLOCKED');
+  ).toThrow('EGRESS_POLICY_DENIED');
   expect(() =>
     assertEgress(c, 'org', 'other', 'SYNTHETIC_PUBLIC_APPROVED', []),
   ).toThrow();
@@ -95,4 +95,57 @@ it('loads private config freshly, rejects unsafe file permissions and isolates a
   );
   chmodSync(path, 0o644);
   expect(readAiConfig(env)).toEqual({});
+});
+
+it('phân biệt service chưa nạp cấu hình, thiếu khóa và chặn nguồn dù provider sẵn sàng', () => {
+  expect(modelChoices(readAiConfig({}), 'org', 'project')[0]?.reason).toBe(
+    'CREDENTIAL_NOT_LOADED',
+  );
+  expect(modelChoices({}, 'org', 'project')[0]?.reason).toBe(
+    'MISSING_CREDENTIAL',
+  );
+  expect(modelChoices(fixture(), 'org', 'other')[0]).toMatchObject({
+    providerReady: true,
+    sourcePolicy: 'DENIED',
+    reason: 'EGRESS_POLICY_DENIED',
+  });
+});
+it('chỉ bật capability từ evidence đúng revision/model, không tự làm đổi config digest', () => {
+  const raw = fixture();
+  const base = configuredModel(raw, 'gemini-3.8-flash');
+  const evidence = {
+    revision: provider.revision,
+    provider: 'google_gemini',
+    requestedModel: 'gemini-3.8-flash',
+    returnedModel: 'gemini-3.8-flash',
+    capability: 'text',
+    fixtureVersion: 'galaxy-ai-activation-v1',
+    testedAt: '2026-10-04T00:00:00.000Z',
+    requestId: '00000000-0000-4000-8000-000000000001',
+    result: 'PASS',
+    httpStatus: 200,
+    usage: null,
+  };
+  const verified = { google_gemini: { ...provider, tests: [evidence] } };
+  expect(modelChoices(verified, 'org', 'project')[0]).toMatchObject({
+    textLiveVerified: true,
+    capabilities: { imageInput: false, pdfInput: false },
+  });
+  expect(configuredModel(verified, 'gemini-3.8-flash').configDigest).toBe(
+    base.configDigest,
+  );
+  expect(
+    modelChoices(
+      { google_gemini: { ...verified.google_gemini, revision: 'r2' } },
+      'org',
+      'project',
+    )[0]?.textLiveVerified,
+  ).toBe(false);
+  expect(
+    modelChoices(
+      { google_gemini: { ...provider, textLiveVerified: true } },
+      'org',
+      'project',
+    )[0]?.textLiveVerified,
+  ).toBe(false);
 });

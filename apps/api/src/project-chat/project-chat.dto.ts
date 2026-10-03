@@ -177,14 +177,22 @@ export class ChatMessagesQuery {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 50;
 }
 
-export class ChatAiScopeDto {
+export class ChatAiContextDto {
+  @IsOptional() @IsUUID('4') roomId?: string;
+  @IsOptional() @IsUUID('4') productLineId?: string;
+  @IsOptional() @IsUUID('4') fileAssetId?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) fileVersion?: number;
+}
+export class ChatAiScopeDto extends ChatAiContextDto {
   @IsIn(['ALL', 'CONSULTING', 'COMMERCIAL', 'SUPPLY', 'AFTER_SALES'])
   scope!: string;
 }
-export class ChatAiConversationDto extends ChatAiScopeDto {
+export class ChatAiConversationDto {
+  @IsIn(['ALL', 'CONSULTING', 'COMMERCIAL', 'SUPPLY', 'AFTER_SALES'])
+  scope!: string;
   @IsUUID('4') clientKey!: string;
 }
-export class ChatAiQuestionDto {
+export class ChatAiQuestionDto extends ChatAiContextDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(3)
@@ -202,4 +210,11 @@ export class ChatAiQuestionDto {
   dataClassification?: string;
   @IsUUID('4') clientKey!: string;
   @IsString() @Length(1, 8000) question!: string;
+}
+
+export class ChatAiActivationDto {
+  @IsIn(['gemini-3.8-flash', 'mistral-medium-3-5', 'kira-3.5-pro'])
+  model!: string;
+  @IsIn(['text', 'image', 'pdf']) capability!: 'text' | 'image' | 'pdf';
+  @IsUUID('4') clientKey!: string;
 }

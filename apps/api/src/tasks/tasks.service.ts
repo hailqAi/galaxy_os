@@ -80,6 +80,7 @@ export class TasksService {
       departmentId?: string;
       assigneeId?: string;
       overdue?: boolean;
+      open?: boolean;
       mine?: boolean;
       sort?: 'title' | 'updatedAt' | 'dueDate' | 'priority';
       direction?: 'asc' | 'desc';
@@ -100,7 +101,10 @@ export class TasksService {
           ? { some: { userId: q.mine ? actor.userId : q.assigneeId } }
           : undefined,
       dueDate: q.overdue ? { lt: now } : undefined,
-      NOT: q.overdue ? { status: { in: ['DONE', 'CANCELLED'] } } : undefined,
+      NOT:
+        q.overdue || q.open
+          ? { status: { in: ['DONE', 'CANCELLED'] } }
+          : undefined,
     };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.task.findMany({

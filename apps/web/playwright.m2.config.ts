@@ -15,7 +15,11 @@ export default defineConfig({
   testDir: './tests/browser',
   testMatch:
     process.env.FEATURE_PROJECT_AI === 'true'
-      ? ['m2-project-chat.spec.ts', 'm3-project-ai.spec.ts']
+      ? [
+          'm2-project-chat.spec.ts',
+          'm3-project-ai.spec.ts',
+          'm3-pdf-workspace.spec.ts',
+        ]
       : 'm2-project-chat.spec.ts',
   workers: 1,
   fullyParallel: false,
@@ -31,7 +35,8 @@ export default defineConfig({
       chromiumSandbox: true,
       ignoreDefaultArgs: ['--disable-back-forward-cache'],
     },
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
+    // CDP also exposes the user's existing contexts. Capture only explicit fixture pages.
+    trace: process.env.M2_CHROME_CDP_ENDPOINT ? 'off' : 'retain-on-failure',
+    screenshot: process.env.M2_CHROME_CDP_ENDPOINT ? 'off' : 'only-on-failure',
   },
 });

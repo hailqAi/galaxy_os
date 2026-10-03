@@ -813,17 +813,21 @@ for (const mobile of [false, true]) {
     await page
       .getByRole('button', { name: 'Rời và bỏ nháp', exact: true })
       .click();
-    await expect(page).toHaveURL(`${process.env.APP_PUBLIC_ORIGIN}/work`);
+    // Chọn room nay có entry URL riêng; Back đầu tiên trở về Project chưa chọn room.
+    await expect(page).toHaveURL(
+      `${process.env.APP_PUBLIC_ORIGIN}/projects/${fixture.projectId}/work`,
+    );
+    await expect(draft).toHaveCount(0);
     await page.goForward();
     await expect(page).toHaveURL(url);
-    await page.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+    // URL room khôi phục lựa chọn; mobile đang ẩn danh sách để ưu tiên composer.
     await expect(draft).toHaveValue('');
     // A real forward entry, without fabricating or replacing history.state.
     await page.getByRole('link', { name: '← Các dự án được cấp' }).click();
     await expect(page).toHaveURL(`${process.env.APP_PUBLIC_ORIGIN}/work`);
     await page.goBack();
     await expect(page).toHaveURL(url);
-    await page.getByRole('button', { name: /Khách thử nghiệm/ }).click();
+    await expect(draft).toHaveValue('');
     await draft.fill('Nháp trước Forward');
     await page.evaluate(() => history.forward());
     await page.getByRole('button', { name: 'Ở lại', exact: true }).click();
@@ -1223,7 +1227,7 @@ test('delayed polling cannot restore a departed room and offline revoke clears t
     await reached;
     await draft.fill('Nháp không được gửi sau thu hồi');
     await page
-      .getByRole('button', { name: 'Hợp đồng & tài chính', exact: true })
+      .getByRole('button', { name: '← Danh sách phòng', exact: true })
       .click();
     await page
       .getByRole('button', { name: 'Rời và bỏ nháp', exact: true })

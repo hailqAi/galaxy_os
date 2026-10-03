@@ -8,10 +8,22 @@ export type ProjectDomainLabelKind =
   | 'role'
   | 'readiness'
   | 'stage'
-  | 'boolean';
+  | 'boolean'
+  | 'activity';
 
 const labels: Partial<Record<ProjectDomainLabelKind, Record<string, string>>> =
   {
+    activity: {
+      PROJECT_CREATED: 'Tạo hồ sơ dự án',
+      PROJECT_UPDATED: 'Cập nhật hồ sơ dự án',
+      FILE_UPLOADED: 'Tải tài liệu lên',
+      FILE_UPDATED: 'Cập nhật tài liệu',
+      FILE_DELETED: 'Xóa tài liệu',
+      FILE_RESTORED: 'Khôi phục tài liệu',
+      PROJECT_STAGE_ONE_SIMPLE_UPDATED: 'Cập nhật thông tin khởi tạo',
+      PROJECT_STAGE_ONE_SIMPLE_INITIATED: 'Khởi tạo dự án',
+      PROJECT_UPLOAD_BATCH_SUBMITTED: 'Nộp bộ tài liệu',
+    },
     projectType: {
       DESIGN_AND_BUILD: 'Thiết kế & thi công trọn gói',
       DESIGN_ONLY: 'Chỉ thiết kế',
@@ -166,6 +178,7 @@ export function projectDomainLabel(
       unknownLabel(code)
     );
   const label = labels[kind]?.[code];
+  if (kind === 'activity') return label ?? 'Cập nhật hồ sơ';
   if (label) return label;
   if (process.env.NODE_ENV === 'development')
     console.warn('Unknown Project domain label', { kind, value });

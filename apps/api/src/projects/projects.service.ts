@@ -210,8 +210,12 @@ export class ProjectsService {
       direction?: 'asc' | 'desc';
       currentStage?: VisualProjectStage;
       mine?: boolean;
+      active?: boolean;
+      commitment?: 'POTENTIAL' | 'SIGNED';
     },
   ) {
+    if (q.commitment && !actor.permissions.includes('contract.read'))
+      throw new ForbiddenException('Contract permission required');
     if (
       q.sort === 'estimatedValue' &&
       !this.hasUnscopedPermission(actor, 'estimate.read')
@@ -220,6 +224,21 @@ export class ProjectsService {
     const where: Prisma.ProjectWhereInput = {
       AND: [
         this.visibleWhere(actor),
+        q.active ? { status: { in: ['PLANNING', 'ACTIVE'] } } : {},
+        q.commitment
+          ? this.visibleWhere(actor, ['project.read', 'contract.read'])
+          : {},
+        q.commitment
+          ? {
+              contracts: {
+                [q.commitment === 'SIGNED' ? 'some' : 'none']: {
+                  status: {
+                    in: ['SIGNED', 'ACTIVE', 'SUSPENDED', 'COMPLETED'],
+                  },
+                },
+              },
+            }
+          : {},
         q.mine
           ? {
               OR: [
@@ -235,6 +254,11 @@ export class ProjectsService {
               OR: [
                 { code: { contains: q.search, mode: 'insensitive' } },
                 { name: { contains: q.search, mode: 'insensitive' } },
+                {
+                  customer: {
+                    displayName: { contains: q.search, mode: 'insensitive' },
+                  },
+                },
               ],
             }
           : {},
@@ -256,19 +280,34 @@ export class ProjectsService {
         include: {
           ...this.include(),
           stageStates: { select: { stage: true, status: true } },
+          contracts: actor.permissions.includes('contract.read')
+            ? { select: { status: true } }
+            : false,
         },
         omit: this.financialOmit(actor),
-        orderBy: {
-          [q.sort ?? 'updatedAt']: q.direction ?? 'desc',
-        },
+        orderBy: [
+          {
+            [q.sort ?? 'updatedAt']: q.direction ?? 'desc',
+          },
+          { id: 'asc' },
+        ],
         skip: (q.page - 1) * q.pageSize,
         take: q.pageSize,
       }),
       this.prisma.project.count({ where }),
     ]);
     return {
-      items: items.map(({ stageStates, ...item }) => ({
+      items: items.map(({ stageStates, contracts, ...item }) => ({
         ...this.redactFinancials(actor, item),
+        ...(this.permissionApplies(actor, 'contract.read', item) && {
+          commitment: (contracts ?? []).some((contract) =>
+            ['SIGNED', 'ACTIVE', 'SUSPENDED', 'COMPLETED'].includes(
+              contract.status,
+            ),
+          )
+            ? 'SIGNED'
+            : 'POTENTIAL',
+        }),
         canDeleteProject: this.permissionApplies(actor, 'project.delete', item),
         currentStage: visualProjectStage(
           item.phase,

@@ -5,6 +5,8 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  IsInt,
+  Min,
   Length,
 } from 'class-validator';
 import { PartialType } from '@nestjs/swagger';
@@ -39,6 +41,9 @@ class FileMetadataDto {
     | 'CONFIDENTIAL';
 }
 export class UpdateFileDto extends PartialType(FileMetadataDto) {}
+export class FileVersionQuery {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) version?: number;
+}
 export class FilesQuery extends PageQuery {
   @IsOptional() @IsString() @Length(1, 200) search?: string;
   @IsOptional() @IsUUID() projectId?: string;

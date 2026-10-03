@@ -44,6 +44,7 @@ export class LeadsService {
     query: {
       page: number;
       pageSize: number;
+      active?: boolean;
       search?: string;
       status?: LeadStatus;
       sourceId?: string;
@@ -76,7 +77,11 @@ export class LeadsService {
             }
           : {},
       ],
-      status: query.status,
+      status:
+        query.status ??
+        (query.active
+          ? { in: ['NEW', 'ASSIGNED', 'CONTACTED', 'QUALIFIED'] }
+          : undefined),
       sourceId: query.sourceId,
       ownerId: query.ownerId,
       departmentId: query.departmentId,

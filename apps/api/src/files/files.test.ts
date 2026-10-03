@@ -51,6 +51,7 @@ const previewFixture = (mimeType: string) => {
         originalFilename: "Kế hoạch (1)'*.pdf",
         mimeType,
         sizeBytes: 13n,
+        version: 2,
         storageKey: 'organization/2026/08/file',
         attachments: [{ entityType: 'Project', entityId: 'project' }],
       }),
@@ -69,6 +70,17 @@ const previewFixture = (mimeType: string) => {
 };
 
 describe('FilesController preview', () => {
+  it('từ chối preview sai phiên bản và giữ MISSING_BINARY sau kiểm tra ACL', async () => {
+    const { service, storage } = previewFixture('application/pdf');
+    await expect(service.preview(actor, 'file', 1)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(storage.stream).not.toHaveBeenCalled();
+    vi.mocked(storage.stream).mockRejectedValue(new NotFoundException());
+    await expect(service.preview(actor, 'file', 2)).rejects.toMatchObject({
+      response: expect.objectContaining({ category: 'MISSING_BINARY' }),
+    });
+  });
   it('streams an authorized safe preview inline with RFC 5987 headers', async () => {
     const { data, service } = previewFixture('application/pdf');
     const response = { setHeader: vi.fn() };

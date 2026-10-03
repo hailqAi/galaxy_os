@@ -146,7 +146,20 @@ export class FilesService {
     };
   }
   async get(actor: CurrentActor, id: string, includeDeleted = false) {
-    return this.view(await this.file(actor, id, includeDeleted, 'file.read'));
+    const file = await this.file(actor, id, includeDeleted, 'file.read');
+    let canDownload = false;
+    if (actor.permissions.includes('file.download')) {
+      try {
+        await this.file(actor, id, includeDeleted, [
+          'file.read',
+          'file.download',
+        ]);
+        canDownload = true;
+      } catch (error) {
+        if (!(error instanceof NotFoundException)) throw error;
+      }
+    }
+    return { ...this.view(file), canDownload };
   }
   private async file(
     actor: CurrentActor,
@@ -564,15 +577,32 @@ export class FilesService {
     actor: CurrentActor,
     id: string,
     requiredPermissions: string | readonly string[] = 'file.download',
+    version?: number,
   ) {
     const file = await this.file(actor, id, false, requiredPermissions);
-    return { file, data: await this.storage.stream(file.storageKey) };
+    if (version !== undefined && file.version !== version)
+      throw new ConflictException(
+        'Phiên bản file đã thay đổi; tải lại danh sách trước khi mở.',
+      );
+    try {
+      return { file, data: await this.storage.stream(file.storageKey) };
+    } catch (error) {
+      if (error instanceof NotFoundException)
+        throw new NotFoundException({
+          category: 'MISSING_BINARY',
+          message:
+            'Thiếu file gốc trong kho lưu trữ. Hồ sơ vẫn được giữ; cần khôi phục đúng binary từ nguồn hợp lệ.',
+        });
+      throw error;
+    }
   }
-  async preview(actor: CurrentActor, id: string) {
-    const result = await this.download(actor, id, [
-      'file.read',
-      'file.download',
-    ]);
+  async preview(actor: CurrentActor, id: string, version?: number) {
+    const result = await this.download(
+      actor,
+      id,
+      ['file.read', 'file.download'],
+      version,
+    );
     if (!previewMimeTypes.has(result.file.mimeType)) {
       result.data.destroy();
       throw new UnsupportedMediaTypeException('Preview is not supported');

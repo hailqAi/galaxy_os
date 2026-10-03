@@ -40,6 +40,13 @@ class ProjectsQuery extends PageQuery {
   @IsOptional()
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
+  active?: boolean;
+  @IsOptional() @IsIn(['POTENTIAL', 'SIGNED']) commitment?:
+    | 'POTENTIAL'
+    | 'SIGNED';
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
   mine?: boolean;
   @IsOptional() @IsString() @Length(1, 200) search?: string;
   @IsOptional() @IsUUID() customerId?: string;

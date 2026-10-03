@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
 const statuses = [
@@ -31,7 +32,18 @@ type Project = { id: string; name: string };
 export default function TasksPage() {
   const [data, setData] = useState<Page>();
   const [projects, setProjects] = useState<Project[]>([]);
-  const [tab, setTab] = useState<'mine' | 'all' | 'board' | 'overdue'>('mine');
+  const params = useSearchParams();
+  const requestedTab = params.get('tab') ?? 'mine';
+  const projectId = params.get('projectId');
+  const onlyOpen = params.get('open') === 'true';
+  const tab = ['mine', 'all', 'board', 'overdue'].includes(requestedTab)
+    ? requestedTab
+    : 'mine';
+  const setTab = (value: string) => {
+    const url = new URL(location.href);
+    url.searchParams.set('tab', value);
+    window.history.pushState(null, '', url);
+  };
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState('');
@@ -39,13 +51,13 @@ export default function TasksPage() {
     try {
       setData(
         await api<Page>(
-          `/tasks?${new URLSearchParams({ page: '1', pageSize: '100', ...(search && { search }), ...(tab === 'mine' && { mine: 'true' }), ...(tab === 'overdue' && { overdue: 'true' }) })}`,
+          `/tasks?${new URLSearchParams({ page: '1', pageSize: '100', ...(projectId && { projectId }), ...(onlyOpen && { open: 'true' }), ...(search && { search }), ...(tab === 'mine' && { mine: 'true' }), ...(tab === 'overdue' && { overdue: 'true' }) })}`,
         ),
       );
     } catch (error) {
       setMessage((error as Error).message);
     }
-  }, [search, tab]);
+  }, [search, tab, projectId, onlyOpen]);
   useEffect(() => {
     const timeout = setTimeout(() => void load(), 0);
     return () => clearTimeout(timeout);

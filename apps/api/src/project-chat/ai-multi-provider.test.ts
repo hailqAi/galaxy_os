@@ -120,9 +120,9 @@ it.each(AI_MODELS)(
   },
 );
 it.each([
-  [401, 'INVALID_KEY'],
+  [401, 'INVALID_CREDENTIAL'],
   [403, 'PROVIDER_FORBIDDEN'],
-  [404, 'MODEL_UNAVAILABLE'],
+  [404, 'MODEL_NOT_AVAILABLE'],
   [429, 'RATE_LIMITED'],
   [503, 'TEMPORARY_ERROR'],
 ])('classifies %i without leaking response or retry', async (status, code) => {
@@ -203,7 +203,7 @@ it('rejects unknown citations and late cancellation even if transport ignores ab
       sources,
       new AbortController().signal,
     ),
-  ).rejects.toThrow('INVALID_OUTPUT');
+  ).rejects.toThrow('ADAPTER_RESPONSE_ERROR');
   const controller = new AbortController();
   vi.stubGlobal(
     'fetch',
@@ -220,4 +220,54 @@ it('rejects unknown citations and late cancellation even if transport ignores ab
       controller.signal,
     ),
   ).rejects.toThrow();
+});
+
+it.each([
+  [400, { error: { code: 'parameter_unknown' } }, 'UNSUPPORTED_PARAMETER'],
+  [429, { error: { code: 'quota_exceeded' } }, 'ACCOUNT_QUOTA_OR_BILLING'],
+  [429, { error: { code: 'rate_limit_exceeded' } }, 'RATE_LIMITED'],
+  [402, {}, 'ACCOUNT_QUOTA_OR_BILLING'],
+  [
+    401,
+    { error: { code: 'invalid_api_key', message: 'NEVER_EXPOSE' } },
+    'INVALID_CREDENTIAL',
+  ],
+  [429, { error: { code: 'insufficient_quota' } }, 'ACCOUNT_QUOTA_OR_BILLING'],
+  [400, { error: { code: 'unsupported_parameter' } }, 'UNSUPPORTED_PARAMETER'],
+  [404, { error: { code: 'model_not_found' } }, 'MODEL_NOT_AVAILABLE'],
+])(
+  'phân loại lỗi vendor %i bằng mã, không lộ body',
+  async (status, body, code) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify(body), { status: Number(status) }),
+      ),
+    );
+    await expect(
+      answerFromProvider(
+        config('kira-3.5-pro'),
+        'GH-42?',
+        sources,
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(String(code));
+  },
+);
+it('phân biệt lỗi DNS/TLS với timeout chưa rõ kết quả', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => {
+      throw new TypeError('TLS private diagnostic');
+    }),
+  );
+  await expect(
+    answerFromProvider(
+      config('kira-3.5-pro'),
+      'GH-42?',
+      sources,
+      new AbortController().signal,
+    ),
+  ).rejects.toThrow('NETWORK_OR_TLS');
 });

@@ -14,6 +14,10 @@ import { nativeSource } from './ai-native-source';
 import { ProviderConfig, answerFromProvider } from './ai-provider';
 import {
   AiError,
+  activationEvidence,
+  ActivationEvidence,
+  AiContext,
+  aiContextSchema,
   AI_MODELS,
   AiRequestMetadata,
   ConfiguredModel,
@@ -32,7 +36,20 @@ import {
 } from './ai-source';
 import { ProjectChatService } from './project-chat.service';
 import { FileStorage } from '../files/file-storage';
-import { ChatAiConversationDto, ChatAiQuestionDto } from './project-chat.dto';
+import {
+  activationFixture,
+  activationFixtureVersion,
+  recordActivation,
+} from './ai-activation';
+import {
+  ChatAiActivationDto,
+  ChatAiConversationDto,
+  ChatAiQuestionDto,
+} from './project-chat.dto';
+
+const adminRunWhere = {
+  usage: { path: ['kind'], equals: 'ADMIN_SMOKE' },
+} satisfies Prisma.ChatAiAnswerWhereInput;
 
 @Injectable()
 export class ProjectAiService {
@@ -63,17 +80,32 @@ export class ProjectAiService {
     );
   }
 
+  private context(input: AiContext) {
+    const parsed = aiContextSchema.safeParse(
+      Object.fromEntries(
+        (['roomId', 'productLineId', 'fileAssetId', 'fileVersion'] as const)
+          .filter((key) => input[key] !== undefined)
+          .map((key) => [key, input[key]]),
+      ),
+    );
+    if (!parsed.success) throw new ConflictException('INVALID_CONTEXT');
+    return Object.keys(parsed.data).length ? parsed.data : undefined;
+  }
+
   private async sourceScope(
     tx: Prisma.TransactionClient,
     actor: CurrentActor,
     projectId: string,
     scope: string,
+    context?: AiContext,
   ) {
     const rooms = await tx.chatRoom.findMany({
       where: {
         organizationId: actor.organizationId,
         projectId,
         ...(scope === 'ALL' ? {} : { group: scope }),
+        ...(context?.roomId && { id: context.roomId }),
+        ...(context?.productLineId && { productLineId: context.productLineId }),
       },
       select: { id: true },
     });
@@ -95,24 +127,48 @@ export class ProjectAiService {
           ),
         };
         const kinds: Prisma.ChatAiSourceIndexWhereInput[] = [
-          { message: { is: messages } },
+          ...(context?.fileAssetId ? [] : [{ message: { is: messages } }]),
         ];
         try {
           await this.access.assertRoom(actor, room.id, 'DOWNLOAD', tx);
           kinds.push({
             chatFile: {
-              is: await this.chat.visibleFileWhere(
-                tx,
-                actor,
-                room.id,
-                grant,
-                'DOWNLOAD',
-              ),
+              is: {
+                AND: [
+                  await this.chat.visibleFileWhere(
+                    tx,
+                    actor,
+                    room.id,
+                    grant,
+                    'DOWNLOAD',
+                  ),
+                  ...(context?.fileAssetId
+                    ? [
+                        {
+                          fileAssetId: context.fileAssetId,
+                          file: { version: context.fileVersion },
+                        },
+                      ]
+                    : []),
+                ],
+              },
             },
           });
           kinds.push({
             release: {
-              is: await this.chat.publishedReleaseWhere(tx, actor, room.id),
+              is: {
+                AND: [
+                  await this.chat.publishedReleaseWhere(tx, actor, room.id),
+                  ...(context?.fileAssetId
+                    ? [
+                        {
+                          fileAssetId: context.fileAssetId,
+                          file: { version: context.fileVersion },
+                        },
+                      ]
+                    : []),
+                ],
+              },
             },
           });
         } catch (error) {
@@ -229,12 +285,24 @@ export class ProjectAiService {
     throw new NotFoundException();
   }
 
-  async index(actor: CurrentActor, projectId: string, scope: string) {
+  async index(
+    actor: CurrentActor,
+    projectId: string,
+    scope: string,
+    input: AiContext = {},
+  ) {
+    const context = this.context(input);
     const jobs = await this.authorized(
       actor,
       projectId,
       async (tx, grantId) => {
-        const where = await this.sourceScope(tx, actor, projectId, scope);
+        const where = await this.sourceScope(
+          tx,
+          actor,
+          projectId,
+          scope,
+          context,
+        );
         let discovered = 0;
         // ponytail: bounded delta batches; add a background worker when indexing volume warrants it.
         for (const room of where.OR)
@@ -447,7 +515,7 @@ export class ProjectAiService {
     return this.authorized(actor, projectId, async (tx) => ({
       processed: jobs.rows.length,
       hasMore: jobs.discovered === 25,
-      sources: await this.sourceMetadata(tx, actor, projectId, scope),
+      sources: await this.sourceMetadata(tx, actor, projectId, scope, context),
     }));
   }
 
@@ -456,9 +524,10 @@ export class ProjectAiService {
     actor: CurrentActor,
     projectId: string,
     scope: string,
+    context?: AiContext,
   ) {
     const rows = await tx.chatAiSourceIndex.findMany({
-      where: await this.sourceScope(tx, actor, projectId, scope),
+      where: await this.sourceScope(tx, actor, projectId, scope, context),
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
@@ -484,9 +553,15 @@ export class ProjectAiService {
     return visible;
   }
 
-  indexStatus(actor: CurrentActor, projectId: string, scope: string) {
+  indexStatus(
+    actor: CurrentActor,
+    projectId: string,
+    scope: string,
+    input: AiContext = {},
+  ) {
+    const context = this.context(input);
     return this.authorized(actor, projectId, async (tx) => ({
-      sources: await this.sourceMetadata(tx, actor, projectId, scope),
+      sources: await this.sourceMetadata(tx, actor, projectId, scope, context),
     }));
   }
 
@@ -511,6 +586,7 @@ export class ProjectAiService {
           organizationId: actor.organizationId,
           projectId,
           ownerId: actor.userId,
+          answers: { none: adminRunWhere },
         },
       })
       .then((row) => {
@@ -528,6 +604,439 @@ export class ProjectAiService {
       };
     });
   }
+  private async reserveProvider(
+    tx: Prisma.TransactionClient,
+    actor: CurrentActor,
+    config: NonNullable<ReturnType<ProjectAiService['config']>>,
+    id: string,
+    heldBy?: string,
+  ) {
+    // Reserve quota across Projects atomically. Failed/cancelled starts still count.
+    await tx.$queryRaw(
+      Prisma.sql`WITH quota_lock AS (
+              SELECT pg_advisory_xact_lock(hashtextextended(${'provider' in config ? `ai-quota:${config.provider}` : `ai-quota:${actor.organizationId}:${actor.userId}`},0))
+            ) SELECT TRUE AS locked FROM quota_lock`,
+    );
+    const now = new Date();
+    const day = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
+    const count = await tx.chatAiAnswer.count({
+      where: {
+        ...('provider' in config
+          ? { model: config.model }
+          : {
+              organizationId: actor.organizationId,
+              ownerId: actor.userId,
+            }),
+        providerStartedAt: { gte: day },
+      },
+    });
+    const concurrent =
+      'provider' in config
+        ? await tx.chatAiAnswer.count({
+            where: {
+              model: config.model,
+              ...(heldBy && { id: { not: heldBy } }),
+              providerStartedAt: { not: null },
+              status: { not: 'COMPLETED' },
+              leaseUntil: { gt: now },
+            },
+          })
+        : 0;
+    if (
+      (config!.daily !== null && count >= config!.daily) ||
+      ('provider' in config && concurrent >= config.maxConcurrent)
+    ) {
+      await tx.chatAiAnswer.update({
+        where: { id },
+        data: {
+          status: 'FAILED',
+          errorCode:
+            config!.daily !== null && count >= config!.daily
+              ? 'DAILY_QUOTA_EXCEEDED'
+              : 'CONCURRENCY_LIMIT',
+          completedAt: now,
+        },
+      });
+      return false;
+    }
+    await tx.chatAiAnswer.update({
+      where: { id },
+      data: {
+        status: 'RUNNING',
+        model: config!.model,
+        providerStartedAt: now,
+        leaseUntil: new Date(now.getTime() + 120000),
+      },
+    });
+    return true;
+  }
+
+  async testActivation(
+    actor: CurrentActor,
+    projectId: string,
+    input: ChatAiActivationDto,
+  ) {
+    const fixture = activationFixture(input.capability);
+    const payloadHash = createHash('sha256')
+      .update(
+        JSON.stringify([
+          input.model,
+          input.capability,
+          activationFixtureVersion,
+        ]),
+      )
+      .digest('hex');
+    const claimed = await this.authorized(
+      actor,
+      projectId,
+      async (tx, grantId) => {
+        const admin = await this.access.authority(
+          tx,
+          actor,
+          projectId,
+          'ACCESS_ADMIN',
+        );
+        let conversation = await tx.chatAiConversation.findFirst({
+          where: {
+            organizationId: actor.organizationId,
+            projectId,
+            ownerId: actor.userId,
+            clientKey: input.clientKey,
+          },
+        });
+        if (conversation) {
+          let previous = await tx.chatAiAnswer.findFirstOrThrow({
+            where: { conversationId: conversation.id },
+            orderBy: { createdAt: 'asc' },
+          });
+          if (
+            (previous.usage as Prisma.JsonObject | null)?.kind !==
+              'ADMIN_SMOKE' ||
+            previous.payloadHash !== payloadHash ||
+            previous.invokeGrantId !== grantId
+          )
+            throw new ConflictException('Khóa đã dùng cho lần kiểm thử khác');
+          if (
+            previous.status === 'RUNNING' &&
+            previous.leaseUntil &&
+            previous.leaseUntil <= new Date()
+          ) {
+            previous = await tx.chatAiAnswer.update({
+              where: { id: previous.id },
+              data: {
+                status: 'FAILED_UNKNOWN',
+                errorCode: 'INTERRUPTED_NO_AUTO_RETRY',
+                completedAt: new Date(),
+                leaseUntil: null,
+                usage: {
+                  kind: 'ADMIN_SMOKE',
+                  fixtureVersion: activationFixtureVersion,
+                },
+              },
+            });
+          }
+          const parsed = activationEvidence.safeParse(
+            (previous.usage as Prisma.JsonObject | null)?.activation,
+          );
+          return {
+            started: false as const,
+            result: {
+              requestId: previous.id,
+              status: previous.status,
+              errorCode: previous.errorCode,
+              evidence: parsed.success ? parsed.data : null,
+            },
+          };
+        }
+        let config: ConfiguredModel;
+        try {
+          config = configuredModel(readAiConfig(), input.model);
+        } catch (e) {
+          throw new ConflictException(
+            e instanceof AiError ? e.code : 'INVALID_CONFIG',
+          );
+        }
+        if (input.capability !== 'text' && !config.nativeMedia)
+          throw new ConflictException('UNSUPPORTED_FILE');
+        conversation = await tx.chatAiConversation.create({
+          data: {
+            organizationId: actor.organizationId,
+            projectId,
+            ownerId: actor.userId,
+            clientKey: input.clientKey,
+            scope: 'ALL',
+          },
+        });
+        const answer = await tx.chatAiAnswer.create({
+          data: {
+            organizationId: actor.organizationId,
+            projectId,
+            ownerId: actor.userId,
+            conversationId: conversation.id,
+            invokeGrantId: grantId,
+            clientKey: input.clientKey,
+            payloadHash,
+            question: fixture.questions[0]!,
+            model: config.model,
+            usage: {
+              kind: 'ADMIN_SMOKE',
+              fixtureVersion: activationFixtureVersion,
+            },
+          },
+        });
+        const reserved = await this.reserveProvider(
+          tx,
+          actor,
+          { ...config, daily: config.maxRequestsPerDay },
+          answer.id,
+        );
+        if (!reserved)
+          return {
+            started: false as const,
+            result: {
+              requestId: answer.id,
+              status: 'FAILED',
+              errorCode: 'CONCURRENCY_OR_QUOTA',
+              evidence: null,
+            },
+          };
+        return {
+          started: true as const,
+          answer,
+          config,
+          grantId,
+          adminId: admin.id,
+        };
+      },
+    );
+    if (!claimed.started) return claimed.result;
+    const { config, answer } = claimed;
+    const controller = new AbortController();
+    this.running.set(answer.id, controller);
+    const signal = AbortSignal.any([
+      controller.signal,
+      AbortSignal.timeout(100000),
+    ]);
+    const evidence: ActivationEvidence = {
+      revision: config.revision,
+      provider: config.provider,
+      requestedModel: config.model,
+      returnedModel: null,
+      capability: input.capability,
+      fixtureVersion: activationFixtureVersion,
+      testedAt: new Date().toISOString(),
+      requestId: answer.id,
+      result: 'PASS',
+      httpStatus: null,
+      usage: null,
+    };
+    const history: { question: string; answer: string }[] = [];
+    let currentId = answer.id;
+    let firstResult: Awaited<ReturnType<typeof answerFromProvider>> | undefined;
+    const gate = async (
+      tx: Prisma.TransactionClient,
+      grantId: string,
+      active = true,
+    ) => {
+      const admin = await this.access.authority(
+        tx,
+        actor,
+        projectId,
+        'ACCESS_ADMIN',
+      );
+      if (grantId !== claimed.grantId || admin.id !== claimed.adminId)
+        throw new NotFoundException();
+      if (
+        active &&
+        !(await tx.chatAiAnswer.findFirst({
+          where: {
+            id: answer.id,
+            status: 'RUNNING',
+            leaseUntil: { gt: new Date() },
+          },
+          select: { id: true },
+        }))
+      )
+        throw new AiError('INTERRUPTED_NO_AUTO_RETRY');
+      const current = configuredModel(readAiConfig(), config.model);
+      if (
+        current.revision !== config.revision ||
+        current.configDigest !== config.configDigest
+      )
+        throw new AiError('CONFIG_CHANGED');
+    };
+    try {
+      for (const media of fixture.media)
+        await nativeSource(
+          {
+            organizationId: actor.organizationId,
+            projectId,
+            roomId: 'ADMIN_SMOKE',
+            sourceId: answer.id,
+            version: activationFixtureVersion,
+            text: '',
+          },
+          input.capability === 'pdf' ? 'activation.pdf' : 'activation.png',
+          media.mime,
+          media.bytes,
+          createHash('sha256').update(media.bytes).digest('hex'),
+        );
+      for (let index = 0; index < fixture.questions.length; index++) {
+        await this.authorized(actor, projectId, async (tx, grantId) => {
+          await gate(tx, grantId);
+          if (index) {
+            const row = await tx.chatAiAnswer.create({
+              data: {
+                organizationId: actor.organizationId,
+                projectId,
+                ownerId: actor.userId,
+                conversationId: answer.conversationId,
+                invokeGrantId: grantId,
+                clientKey: randomUUID(),
+                payloadHash,
+                question: fixture.questions[index]!,
+                model: config.model,
+                usage: {
+                  kind: 'ADMIN_SMOKE',
+                  parent: answer.id,
+                  fixtureVersion: activationFixtureVersion,
+                },
+              },
+            });
+            currentId = row.id;
+            if (
+              !(await this.reserveProvider(
+                tx,
+                actor,
+                { ...config, daily: config.maxRequestsPerDay },
+                currentId,
+                answer.id,
+              ))
+            )
+              throw new AiError('CONCURRENCY_OR_QUOTA');
+          }
+        });
+        signal.throwIfAborted();
+        const result = await answerFromProvider(
+          {
+            ...config,
+            maxOutputTokens: Math.min(config.maxOutputTokens, 1024),
+          },
+          fixture.questions[index]!,
+          fixture.sources,
+          signal,
+          { history, media: fixture.media },
+        );
+        if (!index) firstResult = result;
+        evidence.returnedModel = result.returnedModel;
+        evidence.httpStatus = result.httpStatus;
+        if (result.returnedModel && result.returnedModel !== config.model)
+          throw new AiError('MODEL_RETURNED_DIFFERENT');
+        if (!fixture.assertions[index]!.test(result.answer))
+          throw new AiError('FIXTURE_ASSERTION_FAILED');
+        evidence.usage =
+          result.usage && (index === 0 || evidence.usage)
+            ? {
+                input_tokens:
+                  (evidence.usage?.input_tokens ?? 0) +
+                  result.usage.input_tokens,
+                output_tokens:
+                  (evidence.usage?.output_tokens ?? 0) +
+                  result.usage.output_tokens,
+              }
+            : null;
+        await this.authorized(actor, projectId, async (tx, grantId) => {
+          await gate(tx, grantId);
+          if (index)
+            await tx.chatAiAnswer.update({
+              where: { id: currentId },
+              data: {
+                answer: result.answer,
+                citations: result.citations,
+                uncertainty: result.uncertainty,
+                status: 'COMPLETED',
+                completedAt: new Date(),
+                leaseUntil: null,
+              },
+            });
+        });
+        history.push({
+          question: fixture.questions[index]!,
+          answer: result.answer,
+        });
+      }
+      await this.authorized(actor, projectId, async (tx, grantId) => {
+        await gate(tx, grantId);
+        await recordActivation(config, evidence);
+        await tx.chatAiAnswer.update({
+          where: { id: answer.id },
+          data: {
+            status: 'COMPLETED',
+            answer: firstResult!.answer,
+            citations: firstResult!.citations,
+            uncertainty: firstResult!.uncertainty,
+            completedAt: new Date(),
+            leaseUntil: null,
+            usage: {
+              kind: 'ADMIN_SMOKE',
+              activation: evidence,
+              samples: history.length,
+            },
+          },
+        });
+      });
+    } catch (error) {
+      if (error instanceof AiError) evidence.httpStatus = error.httpStatus;
+      evidence.result = this.denied(error)
+        ? 'ACCESS_REVOKED'
+        : error instanceof AiError
+          ? error.code
+          : signal.aborted
+            ? 'PROVIDER_TIMEOUT_UNKNOWN'
+            : 'ADAPTER_RESPONSE_ERROR';
+      await this.db.chatAiAnswer.updateMany({
+        where: {
+          id: { in: [answer.id, currentId] },
+          status: { in: ['QUEUED', 'RUNNING'] },
+        },
+        data: {
+          status: 'FAILED',
+          errorCode: evidence.result,
+          completedAt: new Date(),
+          usage: {
+            kind: 'ADMIN_SMOKE',
+            activation: evidence,
+            samples: history.length,
+          },
+        },
+      });
+      if (!this.denied(error)) {
+        try {
+          await this.authorized(actor, projectId, async (tx, grantId) => {
+            await gate(tx, grantId, false);
+            await recordActivation(config, evidence);
+          });
+        } catch {
+          /* Giữ nguyên cấu hình mới/quyền mới; bằng chứng lỗi chỉ còn ở run riêng. */
+        }
+      }
+    } finally {
+      this.running.delete(answer.id);
+    }
+    return this.authorized(actor, projectId, async (tx, grantId) => {
+      await this.access.authority(tx, actor, projectId, 'ACCESS_ADMIN');
+      if (grantId !== claimed.grantId) throw new NotFoundException();
+      return {
+        requestId: answer.id,
+        status: evidence.result === 'PASS' ? 'COMPLETED' : 'FAILED',
+        errorCode: evidence.result === 'PASS' ? null : evidence.result,
+        evidence,
+      };
+    });
+  }
+
   private selectedConfig(answer: ChatAiAnswer, requireRevision = true) {
     const pin = requestMetadata(answer.usage);
     if (!pin) return null;
@@ -542,26 +1051,30 @@ export class ProjectAiService {
     return config;
   }
   list(actor: CurrentActor, projectId: string) {
-    return this.authorized(actor, projectId, async (tx) => ({
-      provider:
-        this.config() ||
-        modelChoices(readAiConfig(), actor.organizationId, projectId).some(
-          (m) => m.available,
-        )
+    return this.authorized(actor, projectId, async (tx) => {
+      const models = modelChoices(
+        readAiConfig(),
+        actor.organizationId,
+        projectId,
+      );
+      return {
+        provider: models.some((m) => m.providerReady)
           ? 'CONFIGURED'
           : 'NOT_CONFIGURED',
-      models: modelChoices(readAiConfig(), actor.organizationId, projectId),
-      conversations: await tx.chatAiConversation.findMany({
-        where: {
-          organizationId: actor.organizationId,
-          projectId,
-          ownerId: actor.userId,
-        },
-        select: { id: true, scope: true, createdAt: true },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
-      }),
-    }));
+        models,
+        conversations: await tx.chatAiConversation.findMany({
+          where: {
+            organizationId: actor.organizationId,
+            projectId,
+            ownerId: actor.userId,
+            answers: { none: adminRunWhere },
+          },
+          select: { id: true, scope: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+          take: 100,
+        }),
+      };
+    });
   }
   createConversation(
     actor: CurrentActor,
@@ -578,6 +1091,12 @@ export class ProjectAiService {
         },
       });
       if (existing) {
+        if (
+          await tx.chatAiAnswer.count({
+            where: { ...adminRunWhere, conversationId: existing.id },
+          })
+        )
+          throw new NotFoundException();
         if (existing.scope !== input.scope)
           throw new ConflictException('Khóa đã dùng cho phạm vi khác');
         return { id: existing.id, scope: existing.scope };
@@ -601,6 +1120,9 @@ export class ProjectAiService {
   ) {
     return this.authorized(actor, projectId, async (tx, grantId) => {
       await this.conversation(tx, actor, projectId, conversationId);
+      const context = this.context(input);
+      if (context && !input.model)
+        throw new ConflictException('Cần chọn model');
       if (!input.question.trim()) throw new ConflictException('Câu hỏi trống');
       if (
         !input.model &&
@@ -616,6 +1138,7 @@ export class ProjectAiService {
                 input.reasoning ?? 'default',
                 input.dataClassification,
                 input.sourceIds ?? [],
+                ...(context ? [context] : []),
               ])
             : input.question,
         )
@@ -640,7 +1163,7 @@ export class ProjectAiService {
           grantId,
         );
         if (
-          ['ACCESS_REVOKED', 'DATA_POLICY_BLOCKED', 'MODEL_DISABLED'].includes(
+          ['ACCESS_REVOKED', 'EGRESS_POLICY_DENIED', 'MODEL_DISABLED'].includes(
             visible.status,
           )
         )
@@ -649,6 +1172,16 @@ export class ProjectAiService {
           );
         return { id: existing.id, status: existing.status };
       }
+      const first = await tx.chatAiAnswer.findFirst({
+        where: { conversationId },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (
+        first &&
+        JSON.stringify(requestMetadata(first.usage)?.context) !==
+          JSON.stringify(context)
+      )
+        throw new ConflictException('CONVERSATION_CONTEXT_CHANGED');
       let pin: AiRequestMetadata | null = null;
       if (input.model) {
         try {
@@ -672,6 +1205,7 @@ export class ProjectAiService {
             reasoning,
             dataClassification: 'SYNTHETIC_PUBLIC_APPROVED',
             sourceIds: input.sourceIds ?? [],
+            ...(context && { context }),
           };
         } catch (error) {
           throw new ConflictException(
@@ -709,6 +1243,7 @@ export class ProjectAiService {
         projectId,
         ownerId: actor.userId,
         invokeGrantId: grantId,
+        conversation: { answers: { none: adminRunWhere } },
       },
     });
     if (!row) throw new NotFoundException();
@@ -749,6 +1284,28 @@ export class ProjectAiService {
     }
     const pin = requestMetadata(answer.usage);
     if (pin) {
+      if (pin.context) {
+        const where = await this.sourceScope(
+          tx,
+          actor,
+          projectId,
+          'ALL',
+          pin.context,
+        );
+        if (
+          !where.OR.length ||
+          (dependencies.length &&
+            (await tx.chatAiSourceIndex.count({
+              where: {
+                AND: [
+                  where,
+                  { id: { in: dependencies.map((d) => d.source.id) } },
+                ],
+              },
+            })) !== dependencies.length)
+        )
+          return hidden;
+      }
       try {
         const config = this.selectedConfig(
           answer,
@@ -764,9 +1321,10 @@ export class ProjectAiService {
       } catch (error) {
         return {
           ...hidden,
-          status: error instanceof AiError ? error.code : 'DATA_POLICY_BLOCKED',
+          status:
+            error instanceof AiError ? error.code : 'EGRESS_POLICY_DENIED',
           errorCode:
-            error instanceof AiError ? error.code : 'DATA_POLICY_BLOCKED',
+            error instanceof AiError ? error.code : 'EGRESS_POLICY_DENIED',
         };
       }
     }
@@ -790,7 +1348,7 @@ export class ProjectAiService {
       id: answer.id,
       status:
         answer.status === 'FAILED' &&
-        ['DATA_POLICY_BLOCKED', 'HISTORY_UNAVAILABLE'].includes(
+        ['EGRESS_POLICY_DENIED', 'HISTORY_UNAVAILABLE'].includes(
           answer.errorCode ?? '',
         )
           ? answer.errorCode!
@@ -857,6 +1415,7 @@ export class ProjectAiService {
       return {
         id: conversation.id,
         scope: conversation.scope,
+        context: requestMetadata(answers[0]?.usage)?.context ?? null,
         answers: visible,
       };
     });
@@ -953,7 +1512,10 @@ export class ProjectAiService {
       const checked = await this.authorized(actor, projectId, async (tx) => {
         const index = await tx.chatAiSourceIndex.findFirst({
           where: {
-            AND: [await this.sourceScope(tx, actor, projectId, scope), { id }],
+            AND: [
+              await this.sourceScope(tx, actor, projectId, scope, pin.context),
+              { id },
+            ],
           },
         });
         if (!index || index.messageId) throw new NotFoundException();
@@ -1104,7 +1666,7 @@ export class ProjectAiService {
     const controller = new AbortController();
     this.running.set(id, controller);
     try {
-      await this.index(actor, projectId, claimed.scope);
+      await this.index(actor, projectId, claimed.scope, pin?.context);
       controller.signal.throwIfAborted();
       const native = await this.mediaContext(
         actor,
@@ -1171,7 +1733,7 @@ export class ProjectAiService {
                 !previousPin ||
                 previousPin.dataClassification !== pin.dataClassification
               )
-                throw new AiError('DATA_POLICY_BLOCKED');
+                throw new AiError('EGRESS_POLICY_DENIED');
               const deps = await tx.chatAiAnswerDependency.findMany({
                 where: { answerId: previousAnswer.id },
                 include: { source: true },
@@ -1215,6 +1777,7 @@ export class ProjectAiService {
             actor,
             projectId,
             claimed.scope,
+            pin?.context,
           );
           await tx.$executeRaw`SET LOCAL default_text_search_config = 'pg_catalog.simple'`;
           // ponytail: Prisma6.19 FTS ranks before LIMIT but has no indexed search support.
@@ -1331,64 +1894,7 @@ export class ProjectAiService {
                 },
               });
           }
-          // Reserve quota across Projects atomically. Failed/cancelled starts still count.
-          await tx.$queryRaw(
-            Prisma.sql`WITH quota_lock AS (
-              SELECT pg_advisory_xact_lock(hashtextextended(${'provider' in config ? `ai-quota:${config.provider}` : `ai-quota:${actor.organizationId}:${actor.userId}`},0))
-            ) SELECT TRUE AS locked FROM quota_lock`,
-          );
-          const now = new Date();
-          const day = new Date(
-            Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-          );
-          const count = await tx.chatAiAnswer.count({
-            where: {
-              ...('provider' in config
-                ? { model: config.model }
-                : {
-                    organizationId: actor.organizationId,
-                    ownerId: actor.userId,
-                  }),
-              providerStartedAt: { gte: day },
-            },
-          });
-          const concurrent =
-            'provider' in config
-              ? await tx.chatAiAnswer.count({
-                  where: {
-                    model: config.model,
-                    providerStartedAt: { not: null },
-                    status: { not: 'COMPLETED' },
-                    leaseUntil: { gt: now },
-                  },
-                })
-              : 0;
-          if (
-            (config!.daily !== null && count >= config!.daily) ||
-            ('provider' in config && concurrent >= config.maxConcurrent)
-          ) {
-            await tx.chatAiAnswer.update({
-              where: { id },
-              data: {
-                status: 'FAILED',
-                errorCode:
-                  config!.daily !== null && count >= config!.daily
-                    ? 'DAILY_QUOTA_EXCEEDED'
-                    : 'CONCURRENCY_LIMIT',
-                completedAt: now,
-              },
-            });
-            return null;
-          }
-          await tx.chatAiAnswer.update({
-            where: { id },
-            data: {
-              status: 'RUNNING',
-              model: config!.model,
-              providerStartedAt: now,
-              leaseUntil: new Date(now.getTime() + 120000),
-            },
-          });
+          if (!(await this.reserveProvider(tx, actor, config, id))) return null;
           return selected.map((chunk) => {
             const source = readable.find((row) =>
               (row.chunks as unknown as SourceChunk[]).some(

@@ -8,6 +8,7 @@ import {
   loadProjectsPage,
   projectListPath,
   ProjectsPage,
+  readProjectFilters,
 } from './page';
 
 const project = {
@@ -121,6 +122,26 @@ function dashboardCallbacks(view: ReturnType<typeof dashboardState>) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Project Stage 1 page loading', () => {
+  it('đọc lại bộ lọc, sort và trang từ URL để giữ cùng tập hồ sơ khi quay lại', () => {
+    const filters = readProjectFilters(
+      '?search=Bi%E1%BB%87t+th%E1%BB%B1&page=3&commitment=SIGNED&sort=name&direction=asc&active=true',
+    );
+    expect(filters).toMatchObject({
+      search: 'Biệt thự',
+      page: 3,
+      commitment: 'SIGNED',
+      sort: 'name',
+      direction: 'asc',
+      active: true,
+    });
+    const path = projectListPath(filters);
+    expect(path).toContain('commitment=SIGNED');
+    expect(path).toContain('page=3');
+    expect(path).toContain('sort=name');
+    expect(
+      readProjectFilters('?page=-1&sort=secret&commitment=guess'),
+    ).toMatchObject({ page: 1, sort: 'updatedAt', commitment: '' });
+  });
   it('shows the shared Project-delete action only for a row capability', () => {
     const allowed = renderToStaticMarkup(
       React.createElement(DashboardView, {
@@ -175,9 +196,9 @@ describe('Project Stage 1 page loading', () => {
       }),
     );
 
-    expect(markup.match(/href="\/projects\/project-root"/g) ?? []).toHaveLength(
-      2,
-    );
+    expect(
+      markup.match(/href="\/projects\/project-root\/overview"/g) ?? [],
+    ).toHaveLength(2);
     expect(markup).not.toContain('href="/projects/project-root/stage-1"');
   });
 

@@ -16,6 +16,27 @@ const actor = {
   administrationTier: 1,
 } satisfies CurrentActor;
 describe('TasksService', () => {
+  it('lọc việc chưa kết thúc trước phân trang để P03 không suy ưu tiên từ top N đã đóng', async () => {
+    const findMany = vi.fn().mockResolvedValue([]),
+      count = vi.fn().mockResolvedValue(0);
+    const prisma = {
+      task: { findMany, count },
+      $transaction: vi.fn((queries) => Promise.all(queries)),
+    } as unknown as PrismaService;
+    await new TasksService(prisma).list(actor, {
+      page: 1,
+      pageSize: 8,
+      open: true,
+      projectId: 'project',
+    });
+    expect(findMany.mock.calls[0]![0].where).toMatchObject({
+      projectId: 'project',
+      NOT: { status: { in: ['DONE', 'CANCELLED'] } },
+    });
+    expect(count.mock.calls[0]![0].where).toEqual(
+      findMany.mock.calls[0]![0].where,
+    );
+  });
   it('omits allocated budget from generic Task lists without estimate.read', async () => {
     const findMany = vi.fn().mockResolvedValue([{ id: 'task' }]);
     const prisma = {

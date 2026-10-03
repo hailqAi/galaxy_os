@@ -18,7 +18,12 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Actor, RequirePermission } from '../access-control/access.decorators';
 import { CurrentActor } from '../access-control/current-actor';
-import { FilesQuery, UpdateFileDto, UploadFileDto } from './files.dto';
+import {
+  FilesQuery,
+  FileVersionQuery,
+  UpdateFileDto,
+  UploadFileDto,
+} from './files.dto';
 import { FilesService } from './files.service';
 import { MultipartAdmissionInterceptor } from './multipart-admission.interceptor';
 type BinaryResponse = {
@@ -77,8 +82,9 @@ export class FilesController {
     @Actor() a: CurrentActor,
     @Param('id', ParseUUIDPipe) id: string,
     @Res({ passthrough: true }) response: BinaryResponse,
+    @Query() query: FileVersionQuery = {},
   ): Promise<StreamableFile> {
-    const result = await this.files.preview(a, id);
+    const result = await this.files.preview(a, id, query.version);
     response.setHeader('Content-Type', result.file.mimeType);
     response.setHeader(
       'Content-Disposition',
@@ -91,8 +97,14 @@ export class FilesController {
     @Actor() a: CurrentActor,
     @Param('id', ParseUUIDPipe) id: string,
     @Res({ passthrough: true }) response: BinaryResponse,
+    @Query() query: FileVersionQuery = {},
   ): Promise<StreamableFile> {
-    const result = await this.files.download(a, id);
+    const result = await this.files.download(
+      a,
+      id,
+      'file.download',
+      query.version,
+    );
     response.setHeader('Content-Type', result.file.mimeType);
     response.setHeader(
       'Content-Disposition',

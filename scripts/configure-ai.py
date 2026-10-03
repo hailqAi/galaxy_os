@@ -3,6 +3,9 @@ import argparse
 import fcntl
 import getpass
 import json
+import hashlib
+import re
+from datetime import datetime
 import os
 from pathlib import Path
 import sys
@@ -16,23 +19,24 @@ PROVIDERS = {
     'kira': ('KIRA_API_KEY', 'kiraai.vn'),
 }
 
-def read_private(path):
+def read_private(path, metadata=False):
     if not path.exists() and not path.is_symlink():
-        return {'providers': {}}
+        return ({'providers': {}}, None) if metadata else {'providers': {}}
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     try:
         stat = os.fstat(fd)
         if stat.st_uid != os.getuid() or stat.st_mode & 0o077:
             raise ValueError('File cấu hình cần đúng owner và quyền 0600')
         with os.fdopen(fd, 'r', closefd=False) as stream:
-            data = json.load(stream)
+            raw = stream.read()
+            data = json.loads(raw)
         if not isinstance(data.get('providers'), dict):
             raise ValueError('Cấu hình không hợp lệ; không ghi đè')
-        return data
+        return (data, hashlib.sha256(raw.encode()).hexdigest()) if metadata else data
     finally:
         os.close(fd)
 
-def update(path, operation):
+def update(path, operation, expected_digest=None):
     path = Path(path)
     if path.is_symlink():
         raise ValueError('Không dùng symlink cho cấu hình')
@@ -41,7 +45,9 @@ def update(path, operation):
     temporary = None
     try:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        data = read_private(path)
+        data, digest = read_private(path, metadata=True)
+        if expected_digest is not None and digest != expected_digest:
+            raise ValueError('CONFIG_CHANGED')
         operation(data['providers'])
         fd, temporary = tempfile.mkstemp(dir=path.parent, prefix='.ai-')
         with os.fdopen(fd, 'w') as stream:
@@ -65,13 +71,37 @@ def save_provider(path, provider, key, host):
             **previous, name: key, 'revision': str(uuid.uuid4()),
             'replacementConfirmed': True, 'enabled': False,
             'modelAccessVerified': False, 'textLiveVerified': False,
-            'imageLiveVerified': False, 'pdfLiveVerified': False, 'lastTest': 'NOT_RUN',
+            'imageLiveVerified': False, 'pdfLiveVerified': False, 'lastTest': 'NOT_RUN', 'tests': [],
             'dataPolicy': 'SYNTHETIC_PUBLIC_APPROVED',
             'maxRequestsPerDay': None, 'maxConcurrent': 1, 'maxOutputTokens': 8192,
             'approvedProjects': previous.get('approvedProjects', []),
             'approvedSources': previous.get('approvedSources', []),
         }
     update(path, change)
+
+def record_test(path, provider, expected_digest, evidence):
+    # Chỉ metadata do backend tạo; không nhận secret hoặc dữ liệu Project qua đường này.
+    models = dict(google_gemini='gemini-3.8-flash', mistral='mistral-medium-3-5', kira='kira-3.5-pro')
+    fields = {'revision', 'provider', 'requestedModel', 'returnedModel', 'capability', 'fixtureVersion', 'testedAt', 'requestId', 'result', 'httpStatus', 'usage'}
+    if (not isinstance(evidence, dict) or set(evidence) != fields or
+        evidence['provider'] != provider or evidence['requestedModel'] != models[provider] or
+        evidence['capability'] not in ['text', 'image', 'pdf'] or
+        (provider != 'google_gemini' and evidence['capability'] != 'text') or
+        evidence['fixtureVersion'] != 'galaxy-ai-activation-v1' or
+        not re.fullmatch(r'[A-Z_]{1,80}', evidence['result']) or
+        not re.fullmatch(r'[a-f0-9]{64}', expected_digest)):
+        raise ValueError('INVALID_EVIDENCE')
+    uuid.UUID(evidence['requestId'])
+    datetime.fromisoformat(evidence['testedAt'].replace('Z', '+00:00'))
+    if len(json.dumps(evidence)) > 4096:
+        raise ValueError('INVALID_EVIDENCE')
+    def change(providers):
+        state = providers.get(provider)
+        if not state or state['revision'] != evidence['revision']:
+            raise ValueError('CONFIG_CHANGED')
+        state['tests'] = [t for t in state.get('tests', []) if t['capability'] != evidence['capability']] + [evidence]
+        state['lastTest'] = evidence['result']
+    update(path, change, expected_digest)
 
 def hidden_key():
     try:
@@ -83,7 +113,7 @@ def hidden_key():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['key', 'enable', 'disable', 'approve-source', 'approve-project', 'status'])
+    parser.add_argument('action', choices=['key', 'enable', 'disable', 'approve-source', 'approve-project', 'status', 'record-test'])
     parser.add_argument('--provider', choices=PROVIDERS, required=True)
     parser.add_argument('--file', type=Path, default=Path('/home/galaxy_os/.runtime/ai-providers.json'))
     parser.add_argument('--organization')
@@ -91,6 +121,13 @@ def main():
     parser.add_argument('--source')
     parser.add_argument('--version')
     args = parser.parse_args()
+    if args.action == 'record-test':
+        payload = json.loads(sys.stdin.read(16385))
+        if set(payload) != {'expectedDigest', 'evidence'}:
+            raise ValueError('INVALID_EVIDENCE')
+        record_test(args.file, args.provider, payload['expectedDigest'], payload['evidence'])
+        print('Đã ghi bằng chứng kiểm thử theo đúng revision; không đổi khóa/policy.')
+        return
     if args.action == 'key':
         if not sys.stdin.isatty() or not sys.stderr.isatty():
             raise ValueError('Nhập khóa tại terminal tương tác có input ẩn')
@@ -105,7 +142,10 @@ def main():
         return
     if args.action == 'status':
         state = read_private(args.file)['providers'].get(args.provider, {})
-        print(json.dumps({k: state.get(k) for k in ['revision', 'enabled', 'replacementConfirmed', 'modelAccessVerified', 'textLiveVerified', 'lastTest', 'dataPolicy', 'maxRequestsPerDay', 'maxConcurrent', 'maxOutputTokens']}, ensure_ascii=False, indent=2))
+        tests = [t for t in state.get('tests', []) if t['revision'] == state.get('revision') and t['result'] == 'PASS']
+        result = {k: state.get(k) for k in ['revision', 'enabled', 'replacementConfirmed', 'dataPolicy', 'maxRequestsPerDay', 'maxConcurrent', 'maxOutputTokens']}
+        result.update(credentialConfigured=bool(state.get(PROVIDERS[args.provider][0]) and state.get('replacementConfirmed')), modelAccessVerified=bool(tests), textLiveVerified=any(t['capability'] == 'text' for t in tests), imageLiveVerified=any(t['capability'] == 'image' for t in tests), pdfLiveVerified=any(t['capability'] == 'pdf' for t in tests), lastTest=state.get('lastTest', 'NOT_RUN'))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return
     def change(providers):
         state = providers.get(args.provider)
@@ -132,6 +172,9 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except (ValueError, OSError, KeyError):
+    except (ValueError, OSError, KeyError, TypeError) as error:
+        if str(error) in ['CONFIG_CHANGED', 'INVALID_EVIDENCE']:
+            print(str(error), file=sys.stderr)
+            sys.exit(1)
         print('Không cập nhật: kiểm tra owner/quyền file, host và tham số. Không ghi đè cấu hình lỗi.', file=sys.stderr)
         sys.exit(1)

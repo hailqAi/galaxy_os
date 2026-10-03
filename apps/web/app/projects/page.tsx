@@ -29,6 +29,7 @@ type Project = {
   customer: { displayName: string };
   projectManager: { displayName: string } | null;
   canDeleteProject?: boolean;
+  commitment?: 'SIGNED' | 'POTENTIAL';
 };
 type Page = {
   items: Project[];
@@ -83,6 +84,10 @@ export function projectListPath({
   search,
   status,
   health,
+  active,
+  commitment,
+  sort,
+  direction,
 }: {
   currentStage?: string;
   mine?: boolean;
@@ -90,6 +95,10 @@ export function projectListPath({
   search?: string;
   status?: string;
   health?: string;
+  active?: boolean;
+  commitment?: string;
+  sort?: string;
+  direction?: string;
 }) {
   return `/projects?${new URLSearchParams({
     page: String(page),
@@ -99,7 +108,39 @@ export function projectListPath({
     ...(currentStage && { currentStage }),
     ...(status && { status }),
     ...(health && { health }),
+    ...(active && { active: 'true' }),
+    ...(commitment && { commitment }),
+    ...(sort && { sort }),
+    ...(direction && { direction }),
   })}`;
+}
+
+export function readProjectFilters(search: string) {
+  const q = new URLSearchParams(search);
+  const choice = (name: string, values: string[], fallback = '') =>
+    values.includes(q.get(name) ?? '') ? q.get(name)! : fallback;
+  const number = Number(q.get('page'));
+  return {
+    search: (q.get('search') ?? '').slice(0, 200),
+    page: Number.isSafeInteger(number) && number > 0 ? number : 1,
+    currentStage: choice('currentStage', [...projectStages]),
+    status: choice('status', [
+      'PLANNING',
+      'ACTIVE',
+      'ON_HOLD',
+      'COMPLETED',
+      'CANCELLED',
+    ]),
+    health: choice('health', ['ON_TRACK', 'AT_RISK', 'OFF_TRACK']),
+    commitment: choice('commitment', ['SIGNED', 'POTENTIAL']),
+    active: q.get('active') === 'true',
+    sort: choice(
+      'sort',
+      ['updatedAt', 'name', 'code', 'expectedCompletionDate'],
+      'updatedAt',
+    ),
+    direction: choice('direction', ['asc', 'desc'], 'desc'),
+  };
 }
 
 export async function loadProjectsPage({
@@ -227,11 +268,18 @@ function ProjectTable({
               <td>
                 <Link
                   className="block truncate font-semibold text-slate-900 hover:text-blue-700"
-                  href={`/projects/${item.id}`}
+                  href={`/projects/${item.id}/overview`}
                   title={item.name}
                 >
                   {item.name}
                 </Link>
+                <span className="mt-1 block text-xs text-slate-500">
+                  {item.commitment === 'SIGNED'
+                    ? 'Đã có hợp đồng ký'
+                    : item.commitment === 'POTENTIAL'
+                      ? 'Chưa ghi nhận hợp đồng ký'
+                      : 'Cam kết: chưa được cấp dữ liệu'}
+                </span>
               </td>
               <td>
                 <span
@@ -243,7 +291,7 @@ function ProjectTable({
               </td>
               <td>
                 <span className="block truncate">
-                  {item.projectManager?.displayName ?? '—'}
+                  {item.projectManager?.displayName ?? 'Chưa phân công'}
                 </span>
               </td>
               <td>
@@ -272,7 +320,7 @@ function ProjectTable({
                 <div className="flex items-center gap-2">
                   <Link
                     className="primary inline-flex whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold"
-                    href={`/projects/${item.id}`}
+                    href={`/projects/${item.id}/overview`}
                   >
                     MỞ DỰ ÁN
                   </Link>
@@ -321,7 +369,7 @@ export function DashboardView({
         <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div>
             <h1 className="text-[22px] font-semibold text-slate-900">
-              TỔNG QUAN DỰ ÁN
+              Danh sách dự án
             </h1>
             <p className="mt-1 text-sm text-slate-600">
               Theo dõi toàn bộ dự án bạn được quyền xem.
@@ -337,7 +385,8 @@ export function DashboardView({
           )}
         </div>
         {summary ? (
-          <>
+          <details className="portfolio-summary">
+            <summary>Tổng quan danh mục · {summary.total} dự án</summary>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {(
                 [
@@ -427,7 +476,7 @@ export function DashboardView({
                 </p>
               </section>
             )}
-          </>
+          </details>
         ) : dashboardError ? (
           <div role="alert">
             <p>{dashboardError}</p>
@@ -473,11 +522,48 @@ export function ProjectsPage({
   const [dashboard, setDashboard] = useState<Dashboard>();
   const [dashboardError, setDashboardError] = useState('');
   const [stageRows, setStageRows] = useState<StageOneRow<Project>[]>();
-  const [search, setSearch] = useState('');
-  const [currentStage, setCurrentStage] = useState('');
-  const [status, setStatus] = useState('');
-  const [health, setHealth] = useState('');
-  const [page, setPage] = useState(1);
+  const [filtersState, setFiltersState] = useState(() =>
+    readProjectFilters(''),
+  );
+  const [urlReady, setUrlReady] = useState(false);
+  const [canReadCommitment, setCanReadCommitment] = useState(false);
+  const {
+    search,
+    currentStage,
+    status,
+    health,
+    page,
+    active,
+    commitment,
+    sort,
+    direction,
+  } = filtersState;
+  useEffect(() => {
+    const restore = () => {
+      setFiltersState(readProjectFilters(window.location.search));
+      setUrlReady(true);
+    };
+    restore();
+    window.addEventListener('popstate', restore);
+    api<{ permissions: string[] }>('/me')
+      .then((actor) =>
+        setCanReadCommitment(actor.permissions.includes('contract.read')),
+      )
+      .catch(() => undefined);
+    return () => window.removeEventListener('popstate', restore);
+  }, []);
+  function changeFilters(patch: Partial<typeof filtersState>) {
+    invalidateLoad();
+    setData(undefined);
+    const next = { ...filtersState, page: 1, ...patch };
+    setFiltersState(next);
+    window.history.pushState(
+      null,
+      '',
+      `${window.location.pathname}?${projectListPath(next).split('?')[1]}`,
+    );
+  }
+  const setPage = (value: number) => changeFilters({ page: value });
   const [message, setMessage] = useState('');
   const [listFailed, setListFailed] = useState(false);
   const loadGeneration = useRef(0);
@@ -509,6 +595,7 @@ export function ProjectsPage({
     await loadProjectsPage({
       callbacks: {
         onStart: () => {
+          setData(undefined);
           setListFailed(false);
           setMessage('');
           setStageRows(undefined);
@@ -527,6 +614,10 @@ export function ProjectsPage({
       },
       isCurrent: () => request === loadGeneration.current,
       path: projectListPath({
+        active,
+        commitment,
+        sort,
+        direction,
         currentStage,
         health,
         mine,
@@ -536,14 +627,27 @@ export function ProjectsPage({
       }),
       stageOneMode,
     });
-  }, [currentStage, health, mine, page, search, stageOneMode, status]);
+  }, [
+    active,
+    commitment,
+    sort,
+    direction,
+    currentStage,
+    health,
+    mine,
+    page,
+    search,
+    stageOneMode,
+    status,
+  ]);
   useEffect(() => {
+    if (!urlReady) return;
     const timeout = setTimeout(() => void load(), 0);
     return () => {
       clearTimeout(timeout);
       invalidateLoad();
     };
-  }, [invalidateLoad, load]);
+  }, [invalidateLoad, load, urlReady]);
   useEffect(() => {
     if (mine || stageOneMode) return;
     const timeout = setTimeout(() => void loadDashboard(), 0);
@@ -554,72 +658,116 @@ export function ProjectsPage({
   }, [invalidateDashboardLoad, loadDashboard, mine, stageOneMode]);
   const visibleStageRows = stageRows ?? [];
   const filters = (
-    <div className="flex flex-wrap gap-3">
-      <input
-        aria-label="Tìm dự án"
-        autoComplete="off"
-        id="project-search"
-        name="search"
-        placeholder="Tìm mã hoặc tên…"
-        value={search}
-        onChange={(event) =>
-          applyProjectFilter(event.target.value, setSearch, setPage)
-        }
-      />
-      <select
-        aria-label="Giai đoạn hiện tại"
-        id="project-stage-filter"
-        name="currentStage"
-        value={currentStage}
-        onChange={(event) =>
-          applyProjectFilter(event.target.value, setCurrentStage, setPage)
-        }
-      >
-        <option value="">Tất cả giai đoạn</option>
-        {projectStages.map((value) => (
-          <option key={value} value={value}>
-            {projectDomainLabel('stage', value)}
-          </option>
-        ))}
-      </select>
-      <select
-        aria-label="Trạng thái"
-        id="project-status-filter"
-        name="status"
-        value={status}
-        onChange={(event) =>
-          applyProjectFilter(event.target.value, setStatus, setPage)
-        }
-      >
-        <option value="">Tất cả trạng thái</option>
-        {['PLANNING', 'ACTIVE', 'ON_HOLD', 'COMPLETED', 'CANCELLED'].map(
-          (value) => (
+    <div className="grid gap-4">
+      {!mine && !stageOneMode && (
+        <nav className="workspace-tabs" aria-label="Hồ sơ dự án">
+          {[
+            ['', 'Tất cả'],
+            ['POTENTIAL', 'Tiềm năng'],
+            ['SIGNED', 'Đã ký'],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              disabled={!!value && !canReadCommitment}
+              title={
+                value && !canReadCommitment
+                  ? 'Cần quyền đọc hợp đồng để lọc trạng thái ký'
+                  : undefined
+              }
+              aria-pressed={commitment === value}
+              onClick={() => changeFilters({ commitment: value })}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      )}
+      <div className="flex flex-wrap gap-3">
+        <input
+          aria-label="Tìm dự án"
+          autoComplete="off"
+          id="project-search"
+          name="search"
+          placeholder="Tìm mã, tên dự án hoặc khách hàng…"
+          value={search}
+          onChange={(event) => changeFilters({ search: event.target.value })}
+        />
+        <select
+          aria-label="Giai đoạn hiện tại"
+          id="project-stage-filter"
+          name="currentStage"
+          value={currentStage}
+          onChange={(event) =>
+            changeFilters({ currentStage: event.target.value })
+          }
+        >
+          <option value="">Tất cả giai đoạn</option>
+          {projectStages.map((value) => (
+            <option key={value} value={value}>
+              {projectDomainLabel('stage', value)}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Trạng thái"
+          id="project-status-filter"
+          name="status"
+          value={status}
+          onChange={(event) => changeFilters({ status: event.target.value })}
+        >
+          <option value="">Tất cả trạng thái</option>
+          {['PLANNING', 'ACTIVE', 'ON_HOLD', 'COMPLETED', 'CANCELLED'].map(
+            (value) => (
+              <option key={value} value={value}>
+                {projectDomainLabel('status', value)}
+              </option>
+            ),
+          )}
+        </select>
+        <select
+          aria-label="Sức khỏe"
+          id="project-health-filter"
+          name="health"
+          value={health}
+          onChange={(event) => changeFilters({ health: event.target.value })}
+        >
+          <option value="">Tất cả sức khỏe</option>
+          {['ON_TRACK', 'AT_RISK', 'OFF_TRACK'].map((value) => (
             <option key={value} value={value}>
               {projectDomainLabel('status', value)}
             </option>
-          ),
+          ))}
+        </select>
+        <select
+          aria-label="Sắp xếp dự án"
+          value={`${sort}:${direction}`}
+          onChange={(event) => {
+            const [sort, direction] = event.target.value.split(':');
+            changeFilters({ sort: sort!, direction: direction! });
+          }}
+        >
+          <option value="updatedAt:desc">Cập nhật mới nhất</option>
+          <option value="name:asc">Tên A → Z</option>
+          <option value="code:asc">Mã tăng dần</option>
+          <option value="expectedCompletionDate:asc">Hạn gần nhất</option>
+        </select>
+        {active && (
+          <button onClick={() => changeFilters({ active: false })}>
+            Đang thực hiện ×
+          </button>
         )}
-      </select>
-      <select
-        aria-label="Sức khỏe"
-        id="project-health-filter"
-        name="health"
-        value={health}
-        onChange={(event) =>
-          applyProjectFilter(event.target.value, setHealth, setPage)
-        }
-      >
-        <option value="">Tất cả sức khỏe</option>
-        {['ON_TRACK', 'AT_RISK', 'OFF_TRACK'].map((value) => (
-          <option key={value} value={value}>
-            {projectDomainLabel('status', value)}
-          </option>
-        ))}
-      </select>
+      </div>
+      {commitment && (
+        <p className="text-xs text-slate-500">
+          Theo hợp đồng khách hàng trong phạm vi được đọc; không suy từ PI hoặc
+          tiến độ. Hồ sơ Lead chưa chuyển thành Project chưa nằm trong danh sách
+          này.
+        </p>
+      )}
     </div>
   );
   return (
-    <div className="mx-auto grid w-full max-w-[1280px] gap-5">
+    <div className="project-list mx-auto grid w-full max-w-[1280px] gap-5">
       <p className="text-sm text-black/55">Trang chủ / Dự án</p>
       {(stageOneMode || mine) && (
         <header>
@@ -708,7 +856,7 @@ export function ProjectsPage({
                         <td>
                           <Link
                             className="underline"
-                            href={`/projects/${row.project.id}`}
+                            href={`/projects/${row.project.id}/overview`}
                           >
                             {row.project.name}
                           </Link>
@@ -748,7 +896,7 @@ export function ProjectsPage({
                         <td>
                           <Link
                             className="underline"
-                            href={`/projects/${row.project.id}`}
+                            href={`/projects/${row.project.id}/overview`}
                           >
                             {row.project.name}
                           </Link>

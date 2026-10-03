@@ -37,7 +37,7 @@ export const navigation: NavigationItem[] = [
     href: '/settings/users',
     icon: '♙',
     activeRouteMatcher: '^/settings/(users|departments|roles|audit-logs)',
-    sortOrder: 20,
+    sortOrder: 55,
     children: [
       item('accounts', 'Tài khoản', '/settings/users', 'user.read', 10),
       item(

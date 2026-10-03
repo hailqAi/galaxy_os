@@ -1,0 +1,134 @@
+{
+  "source": "/home/galaxy_os/figma",
+  "method": "Poppler pdfinfo/pdftotext/pdftoppm; chữ và ảnh, không OCR; không Figma MCP",
+  "sources": [
+    {
+      "screen": "P04",
+      "filename": "AI Panel - Active State.pdf",
+      "page": 1,
+      "sha256": "0b5a4557e637675baad925a08065de046d32809dab11bbd910e1a6a160accfe6",
+      "role": "tham khảo answer/nguồn",
+      "dimensions": "480 x 1007.88 pts"
+    },
+    {
+      "screen": "S01",
+      "filename": "Dashboard States_ Loading, Empty, No Access.pdf",
+      "page": 1,
+      "sha256": "50db3d8c930191c3a1ffa5b2af932c1e272d775320f44c2df84253343b44892a",
+      "role": "trạng thái",
+      "dimensions": "1200 x 2043 pts"
+    },
+    {
+      "screen": "AI01",
+      "filename": "Galaxy AI - Project Wide Search.pdf",
+      "page": 1,
+      "sha256": "94a82b50c8ec9335655154307cd4d27cec419ff86615f6f42f7eb55f80462973",
+      "role": "chính",
+      "dimensions": "1440 x 1145.5 pts"
+    },
+    {
+      "screen": "F00",
+      "filename": "Galaxy OS Foundations.pdf",
+      "page": 1,
+      "sha256": "31f115fc68e82f6314ce7dfb4fc6d6958b77dae54435999a69479969d0a957c4",
+      "role": "chính",
+      "dimensions": "1452 x 1749 pts"
+    },
+    {
+      "screen": "STATES",
+      "filename": "Galaxy OS_ M2-A UI States & Edge Cases.pdf",
+      "page": 1,
+      "sha256": "cf1e40247614d5833c850d1cff87cd9f28cf4ee1b475c5cd509bf78948502639",
+      "role": "trạng thái",
+      "dimensions": "1241.33 x 1434.38 pts"
+    },
+    {
+      "screen": "P01/P02",
+      "filename": "P01 Project List & P02 Creation.pdf",
+      "page": 1,
+      "sha256": "776d8e10cda1841dc3aff54d7608f3dda037b5e367a0c38ad32a6561149c0d30",
+      "role": "chính",
+      "dimensions": "1452 x 1057 pts"
+    },
+    {
+      "screen": "P03",
+      "filename": "P03 - Tổng quan dự án Biệt thự A.pdf",
+      "page": 1,
+      "sha256": "7382ec995336d8d8bdd97b1439067e126b27c5bcd39c873a56f09bec9ac2f5d7",
+      "role": "chính",
+      "dimensions": "1440 x 1346 pts"
+    },
+    {
+      "screen": "P03/P05",
+      "filename": "P03 Overview & P05 Items Sync.pdf",
+      "page": 1,
+      "sha256": "8c9cd575f8493e3685b0e3e978176896d9b95117ec0f34335824112552f104af",
+      "role": "tham khảo liên kết",
+      "dimensions": "1440 x 1316 pts"
+    },
+    {
+      "screen": "P04",
+      "filename": "P04 - Làm việc & Chat (Cửa D-01).pdf",
+      "page": 1,
+      "sha256": "3dd49065933c3123dffce5e275b753aef9a169372f7505580d7de05c7baaad28",
+      "role": "tham khảo nhóm/task",
+      "dimensions": "1440 x 1182 pts"
+    },
+    {
+      "screen": "P04",
+      "filename": "P04 Workspace - Contextual AI.pdf",
+      "page": 1,
+      "sha256": "6c71c87480e8d0c82c4fd43e2de9c1c50e84177968ed988f385f67c572fbbd19",
+      "role": "chính",
+      "dimensions": "1440 x 1024 pts"
+    },
+    {
+      "screen": "P05",
+      "filename": "P05 - Hạng mục dự án Biệt thự A.pdf",
+      "page": 1,
+      "sha256": "cb47c3d658c5087e6a2400d4b3822a26a77a36f4d0d3c4b5c422ffe3784178bb",
+      "role": "chính",
+      "dimensions": "1440 x 1024 pts"
+    },
+    {
+      "screen": "P06",
+      "filename": "P06 - Hồ sơ & kiến thức dự án Biệt thự A.pdf",
+      "page": 1,
+      "sha256": "db6ce93ae55cbfbc9cae4bcc702a6e107aae0480113a3029f2a760d902f974be",
+      "role": "chính",
+      "dimensions": "1440 x 1236.33 pts"
+    },
+    {
+      "screen": "P06",
+      "filename": "P06 Documents & AI Source View.pdf",
+      "page": 1,
+      "sha256": "96d29934b0c14e41c2ec62bd48707507591c23df0b7dd19fa321cab0bec91e33",
+      "role": "tham khảo nguồn/version",
+      "dimensions": "1446 x 1055 pts"
+    },
+    {
+      "screen": "S01",
+      "filename": "S01_ Tổng quan Galaxy OS - Desktop.pdf",
+      "page": 1,
+      "sha256": "e85b99ed7ba1f197d4f6e88963d14c2cd7dc81ef70dab8e519ba005d15522f46",
+      "role": "chính",
+      "dimensions": "1440 x 1786 pts"
+    },
+    {
+      "screen": "S01",
+      "filename": "S01_ Tổng quan Galaxy OS - M2-A Refined.pdf",
+      "page": 1,
+      "sha256": "9120f51c97dc652f3a04faf54af42663b15591107e901784d83a94021b31fb25",
+      "role": "tham khảo publication",
+      "dimensions": "1497.05 x 1927 pts"
+    },
+    {
+      "screen": "S01",
+      "filename": "S01_ Tổng quan Galaxy OS - Mobile.pdf",
+      "page": 1,
+      "sha256": "667e8cf65a0a3a5290ca6c8a53f033748598ae386b37bf5875ba089257cac585",
+      "role": "mobile",
+      "dimensions": "375 x 2096 pts"
+    }
+  ]
+}

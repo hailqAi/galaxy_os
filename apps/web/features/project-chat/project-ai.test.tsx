@@ -3,6 +3,34 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
 import { AiAnswer, aiStatusLabel, ModelSelector } from './project-ai';
 
+it('chỉ đưa câu trả lời hoàn tất vào nháp khi người dùng yêu cầu, không tạo nút đăng tự động', () => {
+  const answer = {
+    id: 'a',
+    status: 'COMPLETED',
+    question: 'Soạn phản hồi',
+    answer: 'Bản nháp từ nguồn',
+    sources: [],
+  };
+  const props = {
+    answer,
+    onSource: () => {},
+    onCancel: () => {},
+    onRun: () => {},
+    onDraft: () => {},
+  };
+  expect(renderToStaticMarkup(createElement(AiAnswer, props))).toContain(
+    'Dùng làm nháp phản hồi',
+  );
+  expect(
+    renderToStaticMarkup(
+      createElement(AiAnswer, {
+        ...props,
+        answer: { ...answer, status: 'ACCESS_REVOKED' },
+      }),
+    ),
+  ).not.toContain('Dùng làm nháp phản hồi');
+});
+
 it('renders truthful AI state and escaped answer with versioned backend citations', () => {
   expect(aiStatusLabel('NOT_CONFIGURED')).toContain('Chưa cấu hình');
   expect(aiStatusLabel('FAILED_UNKNOWN')).toContain('Không tự gọi lại');
@@ -99,6 +127,11 @@ it('keeps unavailable models visible and disabled with reasons', () => {
     available: false,
     reason: 'NOT_CONFIGURED',
     credentialConfigured: false,
+    providerReady: false,
+    providerReason: 'MISSING_CREDENTIAL',
+    sourcePolicy: 'DENIED',
+    configLoaded: true,
+    lastTest: 'NOT_RUN',
     adminEnabled: false,
     accountVisible: false,
     textLiveVerified: false,

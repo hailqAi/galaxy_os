@@ -42,6 +42,7 @@ const contentSecurityPolicy = (nonce: string, development: boolean) =>
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
+    'frame-src blob:',
     "worker-src 'self' blob:",
     "manifest-src 'self'",
   ].join('; ');

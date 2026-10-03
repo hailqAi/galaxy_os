@@ -20,6 +20,23 @@ const actor = {
   administrationTier: 1,
 } satisfies CurrentActor;
 describe('Contract and receivable workflow', () => {
+  it('lọc quyền đọc tài chính theo Project trước khi trả hợp đồng và phải thu', async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const prisma = {
+      contract: { findMany },
+      customerPaymentSchedule: { findMany },
+    } as unknown as PrismaService;
+    const service = new ContractsService(prisma, {} as BusinessEntityPolicy);
+    await service.list(actor, 'project');
+    await service.receivables(actor, 'project');
+    for (const [query] of findMany.mock.calls)
+      expect(
+        query.where.project ?? query.where.contract?.project,
+      ).toMatchObject({
+        organizationId: actor.organizationId,
+        id: { in: [] },
+      });
+  });
   const activePolicy = {
     assertView: vi.fn().mockResolvedValue({ projectId: 'project' }),
   } as unknown as BusinessEntityPolicy;

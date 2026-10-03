@@ -34,6 +34,46 @@ const actor = {
   administrationTier: 1,
 } satisfies CurrentActor;
 describe('ProjectsService', () => {
+  it('lọc hồ sơ đã ký từ Contract thật, cùng scope/count và phân trang phía dữ liệu', async () => {
+    const findMany = vi.fn(),
+      count = vi.fn();
+    const prisma = {
+      project: { findMany, count },
+      $transaction: vi.fn().mockResolvedValue([[], 0]),
+    } as unknown as PrismaService;
+    const service = new ProjectsService(prisma, {} as AuditService);
+    await service.list(
+      { ...actor, permissions: ['project.read', 'contract.read'] },
+      {
+        page: 2,
+        pageSize: 20,
+        active: true,
+        commitment: 'SIGNED',
+        sort: 'name',
+        direction: 'asc',
+      },
+    );
+    const query = findMany.mock.calls[0]![0];
+    expect(query.where).toEqual(count.mock.calls[0]![0].where);
+    expect(query.where.AND).toContainEqual({
+      status: { in: ['PLANNING', 'ACTIVE'] },
+    });
+    expect(query.where.AND).toContainEqual({
+      contracts: {
+        some: {
+          status: { in: ['SIGNED', 'ACTIVE', 'SUSPENDED', 'COMPLETED'] },
+        },
+      },
+    });
+    expect(query).toMatchObject({
+      skip: 20,
+      take: 20,
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+    });
+    await expect(
+      service.list(actor, { page: 1, pageSize: 20, commitment: 'SIGNED' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
   const createCommand = {
     name: '  Galaxy Centre  ',
     estimatedInvestmentAmount: '1000000000.50',

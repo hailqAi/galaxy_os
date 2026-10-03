@@ -14,6 +14,10 @@ import { Actor, api, ApiError, apiUrl } from '../../app/lib/api';
 import { ChatManagement, ReleasePanel, ReleaseList } from './chat-controls';
 import { projectDomainLabel } from '../projects/project-domain-labels';
 import { ProjectAi } from './project-ai';
+import {
+  ProjectWorkspaceHeader,
+  projectGroups as groups,
+} from '../projects/project-workspace-header';
 
 type Attachment = {
   id: string;
@@ -71,12 +75,6 @@ type History = {
   scopeToken: string;
 };
 // (History carries a digest of effective intervals; it is not an authorization token.)
-const groups = [
-  ['CONSULTING', 'Tư vấn & báo giá'],
-  ['COMMERCIAL', 'Hợp đồng & tài chính'],
-  ['SUPPLY', 'Cung ứng & giao hàng'],
-  ['AFTER_SALES', 'Thi công & hậu mãi'],
-] as const;
 const denied = (error: unknown) =>
   error instanceof ApiError && [401, 403, 404, 412].includes(error.status);
 export const mergeMessages = (before: Message[], incoming: Message[]) =>
@@ -163,6 +161,21 @@ export function ProjectChat({ projectId }: { projectId: string }) {
   const [actor, setActor] = useState<Actor>();
   const [selected, setSelected] = useState('');
   const [group, setGroup] = useState('CONSULTING');
+  const [roomSearch, setRoomSearch] = useState('');
+  const draftWriterRef = useRef<((text: string) => void) | undefined>(
+    undefined,
+  );
+  useEffect(() => {
+    const restore = () => {
+      const q = new URLSearchParams(location.search);
+      const value = q.get('group');
+      if (groups.some(([id]) => id === value)) setGroup(value!);
+      setSelected(q.get('room') ?? '');
+    };
+    restore();
+    window.addEventListener('popstate', restore);
+    return () => window.removeEventListener('popstate', restore);
+  }, [projectId]);
   const leaveGuardRef = useRef<(leave: () => void) => void>((leave) => leave());
   const [error, setError] = useState('');
   useEffect(() => {
@@ -195,28 +208,29 @@ export function ProjectChat({ projectId }: { projectId: string }) {
     setRevision((value) => value + 1);
   }, []);
   const room = data?.rooms.find((r) => r.id === selected);
+  const hasAi = Boolean(
+    data?.aiEnabled && actor && data?.authorityActions.includes('INVOKE'),
+  );
+  function navigateRoom(nextGroup: string, nextRoom = '') {
+    leaveGuardRef.current(() => {
+      setGroup(nextGroup);
+      setSelected(nextRoom);
+      const url = new URL(location.href);
+      url.searchParams.set('group', nextGroup);
+      if (nextRoom) url.searchParams.set('room', nextRoom);
+      else url.searchParams.delete('room');
+      window.history.pushState(window.history.state, '', url);
+    });
+  }
   return (
-    <section className="grid gap-4">
-      <Link href="/work">← Các dự án được cấp</Link>
-      <h1 className="text-2xl">{data?.project.name ?? 'Không gian dự án'}</h1>
-      <nav aria-label="Hồ sơ dự án" className="flex flex-wrap gap-4">
-        {actor?.permissions.includes('project.read') ? (
-          <Link href={`/projects/${projectId}/stage-1`}>Tổng quan</Link>
-        ) : (
-          <span>Tổng quan — chưa được cấp</span>
-        )}
-        <strong aria-current="page">Làm việc</strong>
-        {actor?.permissions.includes('project.read') ? (
-          <Link href={`/projects/${projectId}/products`}>Hạng mục</Link>
-        ) : (
-          <span>Hạng mục — chưa được cấp</span>
-        )}
-        {actor?.permissions.includes('file.read') ? (
-          <Link href={`/projects/${projectId}/files`}>Hồ sơ & kiến thức</Link>
-        ) : (
-          <span>Hồ sơ & kiến thức — xem file trong phòng được cấp</span>
-        )}
-      </nav>
+    <section className="project-chat-workspace grid gap-4">
+      <ProjectWorkspaceHeader
+        projectId={projectId}
+        name={data?.project.name ?? 'Không gian dự án'}
+        active="work"
+        permissions={actor?.permissions ?? []}
+        aiEnabled={hasAi}
+      />
       {error && <p role="alert">{error}</p>}
       {!data && !error && <p>Đang kiểm tra phạm vi…</p>}
       {data && (
@@ -233,61 +247,80 @@ export function ProjectChat({ projectId }: { projectId: string }) {
                 onChanged={() => setRevision((v) => v + 1)}
               />
             )}
-          <nav aria-label="Nhóm chuyên môn" className="flex flex-wrap gap-2">
-            {groups.map(([id, label]) => (
-              <button
-                key={id}
-                aria-pressed={group === id}
-                onClick={() => {
-                  leaveGuardRef.current(() => {
-                    setGroup(id);
-                    setSelected('');
-                  });
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </nav>
-          {data.aiEnabled &&
-            actor &&
-            data.authorityActions.includes('INVOKE') && (
-              <ProjectAi
-                key={`${projectId}/${actor.userId}`}
-                projectId={projectId}
-                actorId={actor.userId}
-                group={group}
-                canConfigure={data.authorityActions.includes('ACCESS_ADMIN')}
-                onRevoked={revoked}
-              />
-            )}
-          <div className="grid gap-4 md:grid-cols-[15rem_minmax(0,1fr)]">
+          <div className={`contextual-workspace ${hasAi ? 'with-ai' : ''}`}>
             <aside
-              className={room ? 'hidden md:block' : 'block'}
+              className={`room-sidebar panel ${room ? 'room-selected' : ''}`}
               aria-label="Cuộc trao đổi"
             >
-              {data.rooms
-                .filter((r) => r.group === group)
-                .map((r) => (
+              <h2 className="font-semibold">Cuộc trao đổi</h2>
+              <input
+                aria-label="Tìm cuộc trao đổi"
+                placeholder="Tìm chủ đề…"
+                value={roomSearch}
+                onChange={(e) => setRoomSearch(e.target.value)}
+              />
+              <nav aria-label="Nhóm chuyên môn" className="room-groups">
+                {groups.map(([id, label]) => (
                   <button
-                    className="mb-2 block w-full text-left"
-                    key={r.id}
-                    onClick={() => {
-                      if (r.id !== selected)
-                        leaveGuardRef.current(() => setSelected(r.id));
-                    }}
+                    key={id}
+                    aria-pressed={group === id}
+                    onClick={() => navigateRoom(id)}
                   >
-                    {r.title}
-                    <small className="block">
-                      {r.audience === 'CUSTOMER'
-                        ? 'Phòng khách/đối tác'
-                        : 'Nội bộ Galaxy'}
-                      {r.locked ? ' · Đã khóa' : ''}
-                    </small>
+                    {label}
                   </button>
                 ))}
+              </nav>
+              <div className="room-list">
+                {data.rooms
+                  .filter(
+                    (r) =>
+                      r.group === group &&
+                      r.title
+                        .toLocaleLowerCase('vi')
+                        .includes(roomSearch.toLocaleLowerCase('vi')),
+                  )
+                  .map((r) => (
+                    <button
+                      className="room-choice"
+                      aria-pressed={r.id === selected}
+                      key={r.id}
+                      onClick={() => {
+                        if (r.id !== selected) navigateRoom(r.group, r.id);
+                      }}
+                    >
+                      <strong>{r.title}</strong>
+                      <small>
+                        {r.audience === 'CUSTOMER'
+                          ? 'Phòng khách/đối tác'
+                          : 'Nội bộ Galaxy'}
+                        {r.locked ? ' · Đã khóa' : ''}
+                      </small>
+                    </button>
+                  ))}
+              </div>
               {!data.rooms.some((r) => r.group === group) && (
-                <p>Chưa có phòng được cấp trong nhóm này.</p>
+                <p className="text-sm text-slate-500">
+                  Chưa có phòng được cấp trong nhóm này.
+                  {data.authorityActions.includes('CREATE')
+                    ? ' Dùng Quản lý trao đổi để tạo chủ đề.'
+                    : ''}
+                </p>
+              )}
+              {roomSearch &&
+                !data.rooms.some(
+                  (r) =>
+                    r.group === group &&
+                    r.title
+                      .toLocaleLowerCase('vi')
+                      .includes(roomSearch.toLocaleLowerCase('vi')),
+                ) && <p>Không có chủ đề phù hợp.</p>}
+              {hasAi && (
+                <Link
+                  className="ai-launch text-center"
+                  href={`/projects/${projectId}/ai`}
+                >
+                  Tra cứu AI toàn dự án →
+                </Link>
               )}
             </aside>
             {room && actor ? (
@@ -299,12 +332,38 @@ export function ProjectChat({ projectId }: { projectId: string }) {
                 authorityActions={data.authorityActions}
                 onRevoked={revoked}
                 leaveGuardRef={leaveGuardRef}
-                onBack={() => {
-                  leaveGuardRef.current(() => setSelected(''));
-                }}
+                draftWriterRef={draftWriterRef}
+                onBack={() => navigateRoom(group)}
               />
             ) : (
-              <p>Chọn một cuộc trao đổi để làm việc.</p>
+              <div className="panel empty-state room-empty">
+                <span className="text-3xl">▤</span>
+                <h2 className="mt-4 font-semibold">
+                  Chọn một cuộc trao đổi để làm việc.
+                </h2>
+                <p className="mt-2 text-sm">
+                  Mỗi chủ đề có thành viên, công việc và hồ sơ riêng.
+                </p>
+              </div>
+            )}
+            {hasAi && actor && (
+              <ProjectAi
+                initialContext={room ? { roomId: room.id } : undefined}
+                roomLabels={Object.fromEntries(
+                  (data?.rooms ?? []).map((r) => [r.id, r.title]),
+                )}
+                key={`${projectId}/${actor.userId}`}
+                projectId={projectId}
+                actorId={actor.userId}
+                group={group}
+                canConfigure={data.authorityActions.includes('ACCESS_ADMIN')}
+                onRevoked={revoked}
+                onDraft={
+                  room?.actions.includes('SEND') && !room.locked
+                    ? (text) => draftWriterRef.current?.(text)
+                    : undefined
+                }
+              />
             )}
           </div>
         </>
@@ -321,6 +380,7 @@ function ChatRoomView({
   onRevoked,
   onBack,
   leaveGuardRef,
+  draftWriterRef,
 }: {
   projectId: string;
   room: Room;
@@ -329,6 +389,7 @@ function ChatRoomView({
   onRevoked: () => void;
   onBack: () => void;
   leaveGuardRef: React.RefObject<(leave: () => void) => void>;
+  draftWriterRef: React.RefObject<((text: string) => void) | undefined>;
 }) {
   const router = useRouter();
   const [leaveAction, setLeaveAction] = useState<(() => void) | undefined>();
@@ -341,6 +402,13 @@ function ChatRoomView({
     pending: [],
   });
   const [draft, setDraft] = useState('');
+  useEffect(() => {
+    draftWriterRef.current = (text) =>
+      leaveGuardRef.current(() => setDraft(text));
+    return () => {
+      draftWriterRef.current = undefined;
+    };
+  }, [draftWriterRef, leaveGuardRef]);
   const [locked, setLocked] = useState(room.locked);
   const [links, setLinks] = useState<History['links']>();
   const [error, setError] = useState('');
@@ -728,7 +796,7 @@ function ChatRoomView({
         ? 'Đang xác minh quyền và lịch sử'
         : '';
   return (
-    <article ref={container} className="panel min-w-0 grid gap-3">
+    <article ref={container} className="panel chat-room min-w-0 grid gap-3">
       <dialog
         ref={leaveDialog}
         aria-labelledby="discard-draft-title"
@@ -792,7 +860,7 @@ function ChatRoomView({
         </button>
       )}
       {(links?.task || links?.productLine) && (
-        <details>
+        <details open className="pinned-task">
           <summary>Công việc & hạng mục liên quan</summary>
           {links.task && (
             <div>
@@ -811,7 +879,9 @@ function ChatRoomView({
           )}
           {links.productLine && (
             <div>
-              <Link href={`/projects/${projectId}/products`}>
+              <Link
+                href={`/projects/${projectId}/products/${links.productLine.id}`}
+              >
                 {links.productLine.code}
               </Link>
               <p>
@@ -867,7 +937,10 @@ function ChatRoomView({
           </button>
         )}
         {messages.map((m) => (
-          <div key={m.id} className="my-3 rounded border p-3">
+          <div
+            key={m.id}
+            className={`chat-message ${m.authorId === actor.userId ? 'own' : ''}`}
+          >
             <small>
               {m.authorId === actor.userId
                 ? 'Bạn'

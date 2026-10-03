@@ -6,7 +6,10 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
+import {
+  BusinessEntityPolicy,
+  projectWhereForPermissions,
+} from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
 import { PrismaService } from '../prisma.service';
 import {
@@ -32,18 +35,41 @@ export class ContractsService {
     contractId: string,
   ) {
     await this.policy.assertView(actor, 'Project', projectId);
-    return this.get(actor, projectId, contractId);
+    return this.contract(actor, projectId, contractId);
   }
   async list(actor: CurrentActor, projectId: string) {
     return this.prisma.contract.findMany({
-      where: { organizationId: actor.organizationId, projectId },
+      where: {
+        organizationId: actor.organizationId,
+        projectId,
+        project: {
+          ...projectWhereForPermissions(actor, 'contract.read'),
+          deletedAt: undefined,
+        },
+      },
       include: { appendices: true, guarantees: true },
       orderBy: { updatedAt: 'desc' },
     });
   }
-  async get(actor: CurrentActor, projectId: string, id: string) {
+  get(actor: CurrentActor, projectId: string, id: string) {
+    return this.contract(actor, projectId, id, {
+      ...projectWhereForPermissions(actor, 'contract.read'),
+      deletedAt: undefined,
+    });
+  }
+  private async contract(
+    actor: CurrentActor,
+    projectId: string,
+    id: string,
+    project?: Prisma.ProjectWhereInput,
+  ) {
     const item = await this.prisma.contract.findFirst({
-      where: { id, organizationId: actor.organizationId, projectId },
+      where: {
+        id,
+        organizationId: actor.organizationId,
+        projectId,
+        project,
+      },
       include: {
         appendices: { orderBy: { createdAt: 'desc' } },
         valueHistory: { orderBy: { effectiveDate: 'desc' } },
@@ -438,7 +464,16 @@ export class ContractsService {
 
   async receivables(actor: CurrentActor, projectId: string) {
     const items = await this.prisma.customerPaymentSchedule.findMany({
-      where: { organizationId: actor.organizationId, projectId },
+      where: {
+        organizationId: actor.organizationId,
+        projectId,
+        contract: {
+          project: {
+            ...projectWhereForPermissions(actor, 'receivable.read'),
+            deletedAt: undefined,
+          },
+        },
+      },
       orderBy: { dueDate: 'asc' },
     });
     const now = Date.now();

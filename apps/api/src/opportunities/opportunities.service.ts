@@ -1,11 +1,13 @@
 import {
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { OpportunityStage, Prisma } from '@prisma/client';
+import { projectWhereForPermissions } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma.service';
@@ -62,6 +64,8 @@ export class OpportunitiesService {
     query: {
       page: number;
       pageSize: number;
+      active?: boolean;
+      financial?: boolean;
       search?: string;
       stage?: OpportunityStage;
       ownerId?: string;
@@ -75,14 +79,36 @@ export class OpportunitiesService {
       direction?: 'asc' | 'desc';
     },
   ) {
+    const financial = actor.permissions.includes('estimate.read');
+    const needsFinancial =
+      query.financial ||
+      query.valueMin !== undefined ||
+      query.valueMax !== undefined ||
+      query.sort === 'estimatedValue';
+    if (needsFinancial && !financial)
+      throw new ForbiddenException('Chưa được cấp quyền đọc giá trị');
     const where: Prisma.OpportunityWhereInput = {
       AND: [
         this.visibleWhere(actor),
+        {
+          OR: [
+            { project: null },
+            {
+              project: projectWhereForPermissions(
+                actor,
+                needsFinancial
+                  ? ['crm.opportunity.read', 'estimate.read']
+                  : 'crm.opportunity.read',
+              ),
+            },
+          ],
+        },
         query.search
           ? { name: { contains: query.search, mode: 'insensitive' } }
           : {},
       ],
-      stage: query.stage,
+      stage:
+        query.stage ?? (query.active ? { notIn: ['WON', 'LOST'] } : undefined),
       ownerId: query.ownerId,
       departmentId: query.departmentId,
       customerId: query.customerId,
@@ -105,8 +131,26 @@ export class OpportunitiesService {
       }),
       this.prisma.opportunity.count({ where }),
     ]);
+    const allowedFinancialProjects = financial
+      ? await this.prisma.project.findMany({
+          where: {
+            ...projectWhereForPermissions(actor, 'estimate.read'),
+            id: {
+              in: items.flatMap((item) =>
+                item.project ? [item.project.id] : [],
+              ),
+            },
+          },
+          select: { id: true },
+        })
+      : [];
+    const ids = new Set(allowedFinancialProjects.map((p) => p.id));
     return {
-      items,
+      items: items.map((item) => {
+        if (financial && (!item.project || ids.has(item.project.id)))
+          return item;
+        return { ...item, estimatedValue: undefined };
+      }),
       page: query.page,
       pageSize: query.pageSize,
       total,
@@ -115,7 +159,23 @@ export class OpportunitiesService {
   }
   async get(actor: CurrentActor, id: string) {
     const item = await this.prisma.opportunity.findFirst({
-      where: { ...this.visibleWhere(actor), id },
+      where: {
+        ...this.visibleWhere(actor),
+        id,
+        AND: [
+          {
+            OR: [
+              { project: null },
+              {
+                project: projectWhereForPermissions(
+                  actor,
+                  'crm.opportunity.read',
+                ),
+              },
+            ],
+          },
+        ],
+      },
       include: { ...this.include(), lead: true },
     });
     if (!item) throw new NotFoundException('Opportunity not found');
@@ -128,7 +188,23 @@ export class OpportunitiesService {
       include: { actor: { select: { id: true, displayName: true } } },
       orderBy: { createdAt: 'desc' },
     });
-    return { ...item, activity };
+    const financial =
+      actor.permissions.includes('estimate.read') &&
+      (!item.project ||
+        Boolean(
+          await this.prisma.project.findFirst({
+            where: {
+              ...projectWhereForPermissions(actor, 'estimate.read'),
+              id: item.project.id,
+            },
+            select: { id: true },
+          }),
+        ));
+    return {
+      ...item,
+      estimatedValue: financial ? item.estimatedValue : undefined,
+      activity,
+    };
   }
   async create(actor: CurrentActor, data: CreateOpportunityDto) {
     await this.references(actor, data);

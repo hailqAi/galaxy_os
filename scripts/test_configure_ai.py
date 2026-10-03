@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import hashlib
+import uuid
 import os
 from pathlib import Path
 import tempfile
@@ -26,6 +28,24 @@ class SecretConfigTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 config.save_provider(path, 'kira', 'synthetic-kira', 'wrong.example')
             self.assertEqual(path.read_bytes(), old)
+    def test_evidence_compare_and_swap_keeps_revision_and_other_provider(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'providers.json'
+            config.save_provider(path, 'mistral', 'synthetic-mistral', 'api.mistral.ai')
+            state = config.read_private(path)['providers']['mistral']
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            evidence = dict(revision=state['revision'], provider='mistral', requestedModel='mistral-medium-3-5', returnedModel=None, capability='text', fixtureVersion='galaxy-ai-activation-v1', testedAt='2026-10-04T00:00:00.000Z', requestId=str(uuid.uuid4()), result='PASS', httpStatus=200, usage=None)
+            config.record_test(path, 'mistral', digest, evidence)
+            saved = config.read_private(path)['providers']['mistral']
+            self.assertEqual(saved['revision'], state['revision'])
+            self.assertEqual(saved['tests'], [evidence])
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            config.save_provider(path, 'kira', 'synthetic-kira', 'kiraai.vn')
+            before = path.read_bytes()
+            with self.assertRaisesRegex(ValueError, 'CONFIG_CHANGED'):
+                config.record_test(path, 'mistral', digest, evidence)
+            self.assertEqual(path.read_bytes(), before)
+
     def test_hidden_prompt_fails_before_echo_fallback(self):
         def prompt(_):
             warnings.warn('synthetic echo fallback', config.getpass.GetPassWarning)
