@@ -69,3 +69,59 @@ FileAsset/Document AI trong Project; không diễn giải “toàn hồ sơ” l
 loại dữ liệu. UI báo trạng thái nguồn chưa đọc được/unsupported; tổng toàn tập
 trả NEEDS_REPORT khi chưa có domain read đủ tập. Các mở rộng này cần task riêng,
 không gửi thêm corpus ra provider chỉ vì đã bật panel.
+
+## Mở rộng đa nhà cung cấp — 2026-10-03
+
+Phạm vi do chủ dự án giao và chỉ định thực thi inline T1–T5: Gemini 3.8 Flash
+(`google_gemini`), Mistral Medium 3.5 (`mistral`), Kira 3.5 Pro (`kira`).
+Giữ ProjectChat/ChatAiConversation/ChatAiAnswer/SourceIndex/Dependency.
+Không xây gateway, memory, index hay provider state song song.
+
+- Registry backend tách công bố/capability, key thay thế, admin enable,
+  account model access, live evidence, quyền người hỏi và egress. UI đọc registry.
+- Dùng Node fetch hiện hữu, endpoint cố định, redirect:error, một lần gọi;
+  Google Interactions native store:false; Mistral/Kira Chat Completions.
+  Không tự fallback, không lưu/replay thought/signature hoặc raw response.
+- Cấu hình JSON riêng ngoài Git/artifact, mode0600, đọc mới mỗi gate. Lệnh
+  terminal getpass nhập khóa thay thế, không truyền key qua argv/UI HTTP.
+  Các biến tham chiếu GEMINI_API_KEY/MISTRAL_API_KEY/KIRA_API_KEY giữ ở file riêng.
+- Pilot chỉ synthetic/public-approved: quản trị duyệt Project và từng source
+  ID/version; người hỏi xác nhận câu hỏi thuộc phạm vi pilot. READ/PUBLISHED
+  không thay egress approval. Kiểm toàn bộ lịch sử được dùng và dependency
+  trước outbound/delivery/history; bất kỳ nguồn bị cấm chặn cả câu trả lời.
+- Chốt provider/model/revision/reasoning/data classification và nguồn trong
+  metadata JSON có version của ChatAiAnswer. Tái sử dụng cột model/usage;
+  không cần migration chỉ để chứa metadata. Giữ legacy rows có schema cũ.
+- Model selection riêng actor/Project, request key pin toàn payload. Đổi model
+  không đổi conversation. Context mỗi lượt dựng từ lịch sử chuẩn và nguồn có
+  quyền, không chia sẻ opaque state nhà cung cấp.
+- Reservation PostgreSQL advisory lock chung theo provider/account, giới hạn
+  concurrency, bytes input và output token/lượt. Chủ dự án chọn không giới hạn
+  lượt/ngày (`null`); không tự nạp tiền/bật billing. Timeout/cancel vẫn
+  giữ reservation; usage thực lưu riêng, không bịa tiền hoặc exactly-once.
+- Text và lexical retrieval trước. Native Gemini image/PDF có contract/size/
+  MIME/checksum/nguồn/version/page riêng; capability chỉ bật khi có evidence
+  cần thiết. Không provider file handle lâu dài. Mistral/Kira text-only ban đầu.
+  Không có extractor Word/Excel tại nền AI: giữ unsupported, không tuyên bố đọc đủ.
+- Cấu hình quản trị hiển thị host, policy, key state, budget và kiểm thử;
+  backend yêu cầu ACCESS_ADMIN. Không endpoint trả key. Thay secret không
+  yêu cầu restart toàn bộ stack; API đọc file đã chỉ định bởi service config.
+- Build snapshot mới, test cô lập, cutover Web/API cùng release qua systemd;
+  giữ Edge/keeper/public=false, DB/storage/account và bản rollback.
+
+Nguồn kỹ thuật đối chiếu ngày 2026-10-03:
+[Google models](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash),
+[Interactions](https://ai.google.dev/gemini-api/docs/interactions-overview),
+[API](https://ai.google.dev/api/interactions-api),
+[thinking](https://ai.google.dev/gemini-api/docs/thinking),
+[PDF](https://ai.google.dev/gemini-api/docs/document-processing),
+[key](https://ai.google.dev/gemini-api/docs/api-key),
+[terms](https://ai.google.dev/gemini-api/terms),
+[Mistral chat](https://docs.mistral.ai/studio/conversations/chat-completion),
+[reasoning](https://docs.mistral.ai/studio/conversations/reasoning),
+[models](https://docs.mistral.ai/api/endpoint/models),
+[Kira model/API](https://kiraai.vn/models/kira-3.5-pro/),
+[policy](https://kiraai.vn/chinh-sach/). Kira documents trả lỗi khi đọc;
+không suy ra upstream/effort/file từ OpenAI compatibility. Google unpaid/unknown
+không được nhận nội dung mật/cá nhân; Mistral retention/training và account tier
+chưa xác minh; Kira qua trung gian, mặc định chỉ pilot.

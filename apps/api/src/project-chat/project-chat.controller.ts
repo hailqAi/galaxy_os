@@ -85,6 +85,12 @@ export class ProjectChatController {
     @Inject(ProjectChatService) private readonly service: ProjectChatService,
     @Inject(FilesService) private readonly files: FilesService,
   ) {}
+  @Get('projects/:id/ai/settings') aiSettings(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.ai.settings(actor, id);
+  }
   @Post('projects/:id/ai/index') aiIndex(
     @Actor() actor: CurrentActor,
     @Param('id', ParseUUIDPipe) id: string,

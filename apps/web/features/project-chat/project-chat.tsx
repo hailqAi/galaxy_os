@@ -257,6 +257,7 @@ export function ProjectChat({ projectId }: { projectId: string }) {
                 projectId={projectId}
                 actorId={actor.userId}
                 group={group}
+                canConfigure={data.authorityActions.includes('ACCESS_ADMIN')}
                 onRevoked={revoked}
               />
             )}

@@ -46,3 +46,55 @@ nguồn không đọc được, model/URL ngoài allowlist. N1/N2 không tự c�
 - M3_IMPLEMENTED; LIVE_PROVIDER NOT_RUN, M3_LIVE_VERIFIED NOT_VERIFIED. Main allowProjectData=false/maxRequests0.
 - NEXT: cấu hình provider/backend và ngân sách, live smoke synthetic được phép; không cần viết lại module hoặc migration.
 - [Handoff](../M2/HANDOFF.md) là checkpoint tiếp tục duy nhất; [VERIFICATION](../M2/VERIFICATION.md) giữ evidence và giới hạn.
+
+## T1–T5 đa provider — thực thi inline 2026-10-03
+
+Spec: [DESIGN](DESIGN.md), mục mở rộng, và yêu cầu hiện tại của chủ dự án.
+Dùng superpowers:executing-plans, TDD từng task; một writer inline, một reviewer
+Astra khi cần. Không lặp M0/M2, không push/merge. Metadata model UNVERIFIED.
+
+### Task 1: Registry và cấu hình bí mật
+
+- [x] RED: registry từ chối key thiếu/không thay, model lạ, egress chưa duyệt,
+      config permissions sai; command hidden input không lộ/ghi đè key khác.
+- [x] GREEN: `ai-registry.ts`, `scripts/configure-ai.py` và test cùng vị trí.
+      Registry/config là interface T2/T3/T4 dùng; revision không chứa secret.
+- [x] Kiểm: API Vitest registry + Python unittest configure; PASS.
+
+### Task 2: Adapter và lifecycle
+
+- [x] RED: native Google stateless, Mistral/Kira đúng host/schema, không thought,
+      sai effort/401/403/404/429/5xx/timeout; requested/returned model/usage.
+- [x] GREEN: mở rộng `ai-provider.ts`; `project-ai.service.ts` chốt metadata,
+      idempotency, quota và egress gates. DTO/controller kiểm input ở backend.
+- [x] Kiểm: provider unit và M3 integration PostgreSQL cô lập; PASS.
+
+### Task 3: Selector và cấu hình quản trị
+
+- [x] RED: selector disabled có lý do, answer nhãn đúng, đổi model không đổi
+      conversation/request đã gửi, reload/actor isolation.
+- [x] GREEN: `project-ai.tsx` + test; UI lấy registry từ API, admin status
+      guarded ACCESS_ADMIN. Không redesign, không secret browser.
+- [x] Kiểm: Web unit + Chrome154: 3/3 M3 PASS; live vẫn BLOCKED_BY_CREDENTIALS.
+
+### Task 4: Nguồn/file và multi-turn
+
+- [x] RED: đổi provider không mang nguồn cấm, history/revoke/expiry/config
+      disable/race, text-only không nhận binary, native magic/size/version/page.
+- [x] GREEN: cùng service/sourceIndex/dependency, native Gemini riêng; giữ
+      unsupported và MISSING_BINARY thật. Không OCR dịch vụ khác tự động.
+- [x] Kiểm: targeted M3/M2 và contract media; live phải có key+budget.
+
+### Task 5: Kiểm thử, review, release và bàn giao
+
+- [x] Full lint/typecheck/test/build fixture/format + runtime/release regression.
+      API full chạy env cô lập, không reset DB, không lặp chiến dịch clock/migration.
+- [x] Correctness/security/auth/UX + Ponytail diff review, sửa findings.
+- [x] Live chỉ sau khóa thay thế nhập local và budget xác nhận, fixture được
+      phép; chưa có khóa ghi BLOCKED_BY_CREDENTIALS từng provider.
+- [ ] Commit local từng file đã review; build snapshot cùng Web/API, kiểm
+      schema tương thích, chuyển có kiểm soát, giữ public closed và rollback.
+- [ ] M3 VERIFICATION/HANDOFF + STATUS/PROJECT_STATUS ghi kết quả thực.
+
+Review focus: config/key bị đổi giữa request; credential redirect; egress của
+lịch sử dẫn xuất; budget nhiều actor/Project cùng provider; cancel/late output.

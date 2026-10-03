@@ -9,6 +9,7 @@ export type TextSource = {
   text: string;
 };
 export type SourceChunk = TextSource & {
+  page?: number;
   handle: string;
   checksum: string;
   startLine: number;

@@ -185,6 +185,21 @@ export class ChatAiConversationDto extends ChatAiScopeDto {
   @IsUUID('4') clientKey!: string;
 }
 export class ChatAiQuestionDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  sourceIds?: string[];
+  @IsOptional()
+  @IsIn(['gemini-3.8-flash', 'mistral-medium-3-5', 'kira-3.5-pro'])
+  model?: string;
+  @IsOptional()
+  @IsIn(['default', 'none', 'low', 'medium', 'high'])
+  reasoning?: string;
+  @IsOptional()
+  @IsIn(['SYNTHETIC_PUBLIC_APPROVED'])
+  dataClassification?: string;
   @IsUUID('4') clientKey!: string;
   @IsString() @Length(1, 8000) question!: string;
 }

@@ -1,4 +1,6 @@
 import { expect, type Page } from '@playwright/test';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { AI_MODELS } from '../../../api/src/project-chat/ai-registry';
 import { randomUUID } from 'node:crypto';
 import { test } from './m2-chrome-fixture';
 import {
@@ -54,7 +56,42 @@ test.beforeAll(async () => {
     },
     'sender',
   );
+  await approveSyntheticSources();
 });
+async function approveSyntheticSources() {
+  await post(
+    `/projects/${fixture.projectId}/ai/index`,
+    { scope: 'ALL' },
+    'sender',
+  );
+  const sources = await db.chatAiSourceIndex.findMany({
+    where: { projectId: fixture.projectId },
+  });
+  const providers = Object.fromEntries(
+    AI_MODELS.map((m) => [
+      m.provider,
+      {
+        revision: 'browser-r1',
+        dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+        [m.keyName]: 'm3-browser-synthetic-only',
+        enabled: true,
+        replacementConfirmed: true,
+        approvedProjects: [
+          {
+            organizationId: sources[0]!.organizationId,
+            projectId: fixture.projectId,
+          },
+        ],
+        approvedSources: sources.map((s) => ({ id: s.id, version: s.version })),
+      },
+    ]),
+  );
+  writeFileSync(
+    process.env.G00_TEST_ROOT + '/browser-ai.json',
+    JSON.stringify({ providers }),
+    { mode: 0o600 },
+  );
+}
 test.afterAll(async () => {
   await db.$disconnect();
 });
@@ -84,6 +121,7 @@ test('private AI uses old sources, persists history and clears revoked derived c
     new RegExp(`/projects/${fixture.projectId}/work$`),
   );
   const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
+  await panel.getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ }).check();
   await expect(panel).toBeVisible();
   await panel
     .getByLabel('Câu hỏi AI', { exact: true })
@@ -111,6 +149,91 @@ test('private AI uses old sources, persists history and clears revoked derived c
   await page.reload();
   await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
   await expect(page).toHaveURL(/\?ai=[\da-f-]+/);
+  await panel.getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ }).check();
+  const conversationId = new URL(page.url()).searchParams.get('ai');
+  const sourceCount = await db.chatAiSourceIndex.count({
+    where: { projectId: fixture.projectId },
+  });
+  for (const model of ['kira-3.5-pro', 'mistral-medium-3-5']) {
+    await panel.getByLabel('Model AI', { exact: true }).selectOption(model);
+    await panel
+      .getByLabel('Câu hỏi AI', { exact: true })
+      .fill('GH-M3-42 tiếp theo?');
+    await panel.getByRole('button', { name: 'Hỏi AI', exact: true }).click();
+    await expect(panel.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue(
+      '',
+    );
+    expect(new URL(page.url()).searchParams.get('ai')).toBe(conversationId);
+  }
+  expect(
+    await db.chatAiSourceIndex.count({
+      where: { projectId: fixture.projectId },
+    }),
+  ).toBe(sourceCount);
+  expect(
+    (
+      await db.chatAiAnswer.findMany({
+        where: { conversationId: conversationId! },
+        orderBy: { createdAt: 'asc' },
+      })
+    ).map((a) => a.model),
+  ).toEqual(['gemini-3.8-flash', 'kira-3.5-pro', 'mistral-medium-3-5']);
+  // Lost POST response must retry the pinned model and preserve a different draft.
+  await panel
+    .getByLabel('Model AI', { exact: true })
+    .selectOption('gemini-3.8-flash');
+  const pattern = /\/ai\/conversations\/[^/]+\/answers$/;
+  await page.route(pattern, async (route) => {
+    await route.fetch();
+    await route.abort('failed');
+    await page.unroute(pattern);
+  });
+  await panel
+    .getByLabel('Câu hỏi AI', { exact: true })
+    .fill('GH-M3-42 retry A?');
+  await panel.getByRole('button', { name: 'Hỏi AI', exact: true }).click();
+  await expect(
+    panel.getByRole('button', { name: 'Thử lại lượt đã chốt' }),
+  ).toBeVisible();
+  await panel
+    .getByLabel('Model AI', { exact: true })
+    .selectOption('kira-3.5-pro');
+  await panel.getByLabel('Câu hỏi AI', { exact: true }).fill('Nháp B chưa gửi');
+  await panel.getByRole('button', { name: 'Thử lại lượt đã chốt' }).click();
+  await expect(
+    panel.getByRole('button', { name: 'Thử lại lượt đã chốt' }),
+  ).toHaveCount(0);
+  await expect(panel.getByLabel('Câu hỏi AI', { exact: true })).toBeEnabled();
+  await expect(panel.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue(
+    'Nháp B chưa gửi',
+  );
+  expect(
+    (
+      await db.chatAiAnswer.findFirstOrThrow({
+        where: {
+          conversationId: conversationId!,
+          question: 'GH-M3-42 retry A?',
+        },
+      })
+    ).model,
+  ).toBe('gemini-3.8-flash');
+  const configPath = process.env.G00_TEST_ROOT + '/browser-ai.json';
+  const configText = readFileSync(configPath, 'utf8'),
+    config = JSON.parse(configText);
+  config.providers.kira.enabled = false;
+  writeFileSync(configPath, JSON.stringify(config));
+  await page.reload();
+  await expect(panel.getByLabel('Model AI', { exact: true })).toHaveValue(
+    'kira-3.5-pro',
+  );
+  await expect(
+    panel.getByRole('button', { name: 'Hỏi AI', exact: true }),
+  ).toBeDisabled();
+  writeFileSync(configPath, configText);
+  await panel
+    .getByLabel('Model AI', { exact: true })
+    .selectOption('gemini-3.8-flash');
+  await panel.getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ }).check();
   await panel.getByRole('button', { name: 'Chat AI mới', exact: true }).click();
   await panel.getByLabel('Phạm vi AI', { exact: true }).selectOption('ALL');
   await panel
@@ -150,8 +273,10 @@ test('slow denied polling removes old-account answers and drafts', async ({
     { clientKey: randomUUID(), body: 'SLOW-M3-42 nội dung riêng mới 900 mm.' },
     'sender',
   );
+  await approveSyntheticSources();
   await login(page);
   const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
+  await panel.getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ }).check();
   await panel
     .getByLabel('Câu hỏi AI', { exact: true })
     .fill('SLOW-M3-42 nội dung?');
@@ -203,6 +328,7 @@ test('switching between AI-enabled actors discards the old private conversation 
   });
   await login(page);
   const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
+  await panel.getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ }).check();
   await panel
     .getByLabel('Câu hỏi AI', { exact: true })
     .fill('SLOW-M3-42 thông tin?');

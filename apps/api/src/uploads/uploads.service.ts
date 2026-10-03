@@ -106,7 +106,7 @@ type SubmitUploadsResult = {
   }[];
 };
 
-function validUploadHeader(
+export function validUploadHeader(
   extension: keyof typeof uploadTypes,
   header: Buffer,
 ) {

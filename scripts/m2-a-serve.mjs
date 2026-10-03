@@ -65,6 +65,8 @@ const child = spawn(
             ...(productionWeb
               ? {
                   APP_PUBLIC_ORIGIN: 'https://localhost:33003',
+                  GALAXY_INTERNAL_HTTP_ORIGINS:
+                    'http://localhost:33002,http://127.0.0.1:33002',
                   GALAXY_PUBLIC_ACCESS: 'true',
                   GALAXY_EDGE_PROOF:
                     'm2-isolated-fixture-edge-proof-not-for-main-20260930',
@@ -76,11 +78,7 @@ const child = spawn(
             ...(clockMonitor ? { M2_CLOCK_OBSERVE: 'true' } : {}),
             ...(aiFixture
               ? {
-                  GALAXY_AI_API_KEY: 'm3-browser-synthetic-only',
-                  GALAXY_AI_MODEL: 'm3-browser-fixture',
-                  GALAXY_AI_ALLOWED_MODELS: 'm3-browser-fixture',
-                  GALAXY_AI_MAX_REQUESTS_PER_DAY: '100',
-                  GALAXY_AI_ALLOW_PROJECT_DATA: 'true',
+                  GALAXY_AI_CONFIG_FILE: env.G00_TEST_ROOT + '/browser-ai.json',
                 }
               : {}),
           },

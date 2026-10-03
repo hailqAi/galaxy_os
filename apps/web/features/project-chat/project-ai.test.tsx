@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
-import { AiAnswer, aiStatusLabel } from './project-ai';
+import { AiAnswer, aiStatusLabel, ModelSelector } from './project-ai';
 
 it('renders truthful AI state and escaped answer with versioned backend citations', () => {
   expect(aiStatusLabel('NOT_CONFIGURED')).toContain('Chưa cấu hình');
@@ -59,4 +59,64 @@ it('never renders derived text or citations for revoked or cancelled answers', (
     if (status === 'ACCESS_REVOKED')
       expect(html).not.toContain('old-private-question');
   }
+});
+
+it('renders model identity and actionable errors without hiding provider differences', () => {
+  const html = renderToStaticMarkup(
+    createElement(AiAnswer, {
+      answer: {
+        id: 'a',
+        status: 'COMPLETED',
+        question: 'Mẫu?',
+        answer: '900 mm',
+        sources: [],
+        model: 'kira-3.5-pro',
+        modelLabel: 'Kira 3.5 Pro',
+        provider: 'kira',
+        providerLabel: 'Kira',
+        createdAt: '2026-10-03T00:00:00Z',
+        usage: { input_tokens: 40, output_tokens: 20 },
+      },
+      onSource: () => {},
+      onCancel: () => {},
+      onRun: () => {},
+    }),
+  );
+  expect(html).toContain('Kira 3.5 Pro');
+  expect(html).not.toContain('Google trực tiếp');
+  expect(html).toContain('40');
+  expect(aiStatusLabel('DATA_POLICY_BLOCKED')).toContain('chưa được phép');
+  expect(aiStatusLabel('INVALID_KEY')).toContain('khóa');
+});
+
+it('keeps unavailable models visible and disabled with reasons', () => {
+  const model = {
+    id: 'kira-3.5-pro',
+    provider: 'kira',
+    label: 'Kira 3.5 Pro',
+    providerLabel: 'Kira',
+    host: 'kiraai.vn',
+    available: false,
+    reason: 'NOT_CONFIGURED',
+    credentialConfigured: false,
+    adminEnabled: false,
+    accountVisible: false,
+    textLiveVerified: false,
+    revision: null,
+    capabilities: {
+      reasoningModes: ['default'],
+      imageInput: false,
+      pdfInput: false,
+    },
+    limits: { requestsPerDay: null, concurrent: 1, outputTokens: 8192 },
+  };
+  const html = renderToStaticMarkup(
+    createElement(ModelSelector, {
+      models: [model],
+      value: '',
+      onChange: () => {},
+    }),
+  );
+  expect(html).toMatch(/<option[^>]*value="kira-3.5-pro"[^>]*disabled=""/);
+  expect(html).toContain('Chưa cấu hình');
 });

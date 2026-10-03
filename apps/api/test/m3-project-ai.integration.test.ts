@@ -3,6 +3,10 @@ import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
 import { hash } from 'bcryptjs';
 import { createHash, randomUUID } from 'node:crypto';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { AI_MODELS } from '../src/project-chat/ai-registry';
 import { chunks } from '../src/project-chat/ai-source';
 import request from 'supertest';
 import {
@@ -16,6 +20,8 @@ import {
 } from 'vitest';
 import { assertG00Isolation } from '../scripts/g00-isolated-environment.mjs';
 import { AppModule } from '../src/app.module';
+import { ProjectAiService } from '../src/project-chat/project-ai.service';
+import { providerConfig } from '../src/project-chat/ai-provider';
 import { FileStorage } from '../src/files/file-storage';
 
 const isolated = assertG00Isolation();
@@ -44,6 +50,14 @@ describe.sequential(
         .set('X-Chat-Actor', users[who]!.id)
         .send(body);
     const configured = () => {
+      // Baseline ACL/lifecycle fixtures inject their historical adapter boundary only in tests.
+      vi.spyOn(
+        app.get(ProjectAiService) as unknown as { config: () => unknown },
+        'config',
+      ).mockImplementation(() => ({
+        ...providerConfig(process.env)!,
+        daily: Number(process.env.GALAXY_AI_MAX_REQUESTS_PER_DAY),
+      }));
       vi.stubEnv('GALAXY_AI_API_KEY', 'synthetic-no-network');
       vi.stubEnv('GALAXY_AI_MODEL', 'test-model');
       vi.stubEnv('GALAXY_AI_ALLOWED_MODELS', 'test-model');
@@ -314,12 +328,544 @@ describe.sequential(
       }
     });
     afterEach(() => {
+      vi.restoreAllMocks();
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();
     });
     afterAll(async () => {
       await app?.close();
       await db.$disconnect();
+    });
+
+    it('never uses legacy credentials for an unselected model', async () => {
+      vi.stubEnv('GALAXY_AI_API_KEY', 'synthetic-no-network');
+      vi.stubEnv('GALAXY_AI_MODEL', 'test-model');
+      vi.stubEnv('GALAXY_AI_ALLOWED_MODELS', 'test-model');
+      vi.stubEnv('GALAXY_AI_MAX_REQUESTS_PER_DAY', '100');
+      vi.stubEnv('GALAXY_AI_ALLOW_PROJECT_DATA', 'true');
+      const transport = vi.fn();
+      vi.stubGlobal('fetch', transport);
+      const scenario = await aiScenario();
+      const answer = await scenario.ask();
+      const result = await scenario
+        .post(`/answers/${answer.id}/run`, {})
+        .expect(201);
+      expect(result.body.status).toBe('NOT_CONFIGURED');
+      expect(transport).not.toHaveBeenCalled();
+    });
+
+    it('holds cancelled provider reservations and hides terminal history after policy revocation', async () => {
+      const scenario = await aiScenario();
+      await scenario.post('/index', { scope: 'ALL' }).expect(201);
+      const sources = await db.chatAiSourceIndex.findMany({
+        where: { projectId: scenario.projectId },
+      });
+      const dir = mkdtempSync(join(tmpdir(), 'm3-reservation-')),
+        path = join(dir, 'config.json');
+      const state = {
+        revision: 'r1',
+        MISTRAL_API_KEY: 'synthetic-only',
+        replacementConfirmed: true,
+        enabled: true,
+        maxConcurrent: 1,
+        maxRequestsPerDay: null,
+        dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+        approvedProjects: [{ organizationId, projectId: scenario.projectId }],
+        approvedSources: sources.map((s) => ({ id: s.id, version: s.version })),
+      };
+      const save = () =>
+        writeFileSync(path, JSON.stringify({ providers: { mistral: state } }), {
+          mode: 0o600,
+        });
+      save();
+      vi.stubEnv('GALAXY_AI_CONFIG_FILE', path);
+      let release!: () => void, entered!: () => void;
+      const started = new Promise<void>((r) => {
+          entered = r;
+        }),
+        barrier = new Promise<void>((r) => {
+          release = r;
+        });
+      const transport = vi.fn(async () => {
+        entered();
+        await barrier;
+        throw new Error('synthetic timeout');
+      });
+      vi.stubGlobal('fetch', transport);
+      try {
+        const c = await scenario
+          .post('/conversations', { scope: 'ALL', clientKey: randomUUID() })
+          .expect(201);
+        const ask = async () =>
+          (
+            await scenario
+              .post(`/conversations/${c.body.id}/answers`, {
+                clientKey: randomUUID(),
+                question: scenario.code + '?',
+                model: 'mistral-medium-3-5',
+                dataClassification: 'SYNTHETIC_PUBLIC_APPROVED',
+              })
+              .expect(201)
+          ).body;
+        const first = await ask(),
+          second = await ask();
+        const running = scenario
+          .post(`/answers/${first.id}/run`, {})
+          .then((r) => r);
+        await started;
+        await scenario.post(`/answers/${first.id}/cancel`, {}).expect(201);
+        release();
+        await running;
+        const blocked = await scenario
+          .post(`/answers/${second.id}/run`, {})
+          .expect(201);
+        expect(blocked.body.errorCode).toBe('CONCURRENCY_LIMIT');
+        expect(transport).toHaveBeenCalledTimes(1);
+        state.enabled = false;
+        save();
+        const history = await scenario
+          .get(`/conversations/${c.body.id}`)
+          .expect(200);
+        expect(
+          history.body.answers.every(
+            (a: { question: string | null }) => a.question === null,
+          ),
+        ).toBe(true);
+      } finally {
+        release();
+        await db.chatAiAnswer.updateMany({
+          where: { projectId: scenario.projectId },
+          data: { leaseUntil: null },
+        });
+        rmSync(dir, { recursive: true });
+      }
+    });
+
+    it('pins model/revision, switches within one conversation and blocks revoked egress before replay', async () => {
+      const scenario = await aiScenario();
+      await scenario.post('/index', { scope: 'ALL' }).expect(201);
+      const indexes = await db.chatAiSourceIndex.findMany({
+        where: { projectId: scenario.projectId },
+      });
+      const dir = mkdtempSync(join(tmpdir(), 'm3-multi-'));
+      const configPath = join(dir, 'providers.json');
+      const providers = Object.fromEntries(
+        AI_MODELS.map((m) => [
+          m.provider,
+          {
+            revision: 'r1',
+            [m.keyName]: 'synthetic-only-' + m.provider,
+            replacementConfirmed: true,
+            enabled: true,
+            dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+            maxOutputTokens: 8192,
+            approvedProjects: [
+              { organizationId, projectId: scenario.projectId },
+            ],
+            approvedSources: indexes.map((s) => ({
+              id: s.id,
+              version: s.version,
+            })),
+          },
+        ]),
+      );
+      const save = () =>
+        writeFileSync(configPath, JSON.stringify({ providers }), {
+          mode: 0o600,
+        });
+      save();
+      vi.stubEnv('GALAXY_AI_CONFIG_FILE', configPath);
+      try {
+        let calls = 0;
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(async (_url, init) => {
+            calls++;
+            const body = JSON.parse(init.body);
+            const payload = JSON.parse(
+              body.input ? body.input[0].text : body.messages[1].content,
+            );
+            expect(JSON.stringify(payload)).toContain(scenario.code);
+            if (calls === 2)
+              expect(payload.history).toEqual([
+                {
+                  question: scenario.code + ' kích thước?',
+                  answer: 'Nguồn mẫu ghi 400 mm; chưa duyệt.',
+                },
+              ]);
+            const text = JSON.stringify({
+              answer: 'Nguồn mẫu ghi 400 mm; chưa duyệt.',
+              citations: [payload.sources[0].handle],
+              uncertainty: 'Mẫu thử.',
+            });
+            return new Response(
+              JSON.stringify(
+                body.input
+                  ? {
+                      status: 'completed',
+                      model: body.model,
+                      steps: [
+                        {
+                          type: 'model_output',
+                          content: [{ type: 'text', text }],
+                        },
+                      ],
+                    }
+                  : {
+                      model: body.model,
+                      choices: [
+                        { finish_reason: 'stop', message: { content: text } },
+                      ],
+                    },
+              ),
+            );
+          }),
+        );
+        const c = await scenario
+          .post('/conversations', { scope: 'ALL', clientKey: randomUUID() })
+          .expect(201);
+        const payload = {
+          clientKey: randomUUID(),
+          question: scenario.code + ' kích thước?',
+          model: 'gemini-3.8-flash',
+          reasoning: 'high',
+          dataClassification: 'SYNTHETIC_PUBLIC_APPROVED',
+        };
+        const path = `/conversations/${c.body.id}/answers`;
+        const a = await scenario.post(path, payload).expect(201);
+        expect((await scenario.post(path, payload).expect(201)).body.id).toBe(
+          a.body.id,
+        );
+        await scenario
+          .post(path, {
+            ...payload,
+            model: 'kira-3.5-pro',
+            reasoning: 'default',
+          })
+          .expect(409);
+        const first = await scenario
+          .post(`/answers/${a.body.id}/run`, {})
+          .expect(201);
+        expect(first.body).toMatchObject({
+          status: 'COMPLETED',
+          provider: 'google_gemini',
+          model: 'gemini-3.8-flash',
+          returnedModel: 'gemini-3.8-flash',
+        });
+        const b = await scenario
+          .post(path, {
+            ...payload,
+            clientKey: randomUUID(),
+            model: 'kira-3.5-pro',
+            reasoning: 'default',
+          })
+          .expect(201);
+        const second = await scenario
+          .post(`/answers/${b.body.id}/run`, {})
+          .expect(201);
+        expect(second.body).toMatchObject({
+          status: 'COMPLETED',
+          provider: 'kira',
+        });
+        expect(
+          await db.chatAiConversation.count({
+            where: { projectId: scenario.projectId },
+          }),
+        ).toBe(1);
+        expect(
+          await db.chatAiSourceIndex.count({
+            where: { projectId: scenario.projectId },
+          }),
+        ).toBe(indexes.length);
+        providers.kira!.approvedSources = [];
+        save();
+        const hidden = await scenario
+          .get(`/conversations/${c.body.id}`)
+          .expect(200);
+        expect(hidden.body.answers[1]).toMatchObject({
+          status: 'DATA_POLICY_BLOCKED',
+          answer: null,
+          question: null,
+          sources: [],
+        });
+        await scenario
+          .post(path, {
+            ...payload,
+            clientKey: b.body.clientKey ?? payload.clientKey,
+          })
+          .expect(201);
+        expect(calls).toBe(2);
+      } finally {
+        rmSync(dir, { recursive: true });
+      }
+    });
+
+    it('blocks changed configuration and unapproved sources without a provider request', async () => {
+      const scenario = await aiScenario();
+      const dir = mkdtempSync(join(tmpdir(), 'm3-egress-'));
+      const path = join(dir, 'providers.json');
+      const state = {
+        revision: 'r1',
+        KIRA_API_KEY: 'synthetic-kira',
+        replacementConfirmed: true,
+        enabled: true,
+        dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+        approvedProjects: [{ organizationId, projectId: scenario.projectId }],
+        approvedSources: [],
+      };
+      const save = () =>
+        writeFileSync(path, JSON.stringify({ providers: { kira: state } }), {
+          mode: 0o600,
+        });
+      save();
+      vi.stubEnv('GALAXY_AI_CONFIG_FILE', path);
+      const transport = vi.fn();
+      vi.stubGlobal('fetch', transport);
+      try {
+        const c = await scenario
+          .post('/conversations', { scope: 'ALL', clientKey: randomUUID() })
+          .expect(201);
+        const ask = () =>
+          scenario
+            .post(`/conversations/${c.body.id}/answers`, {
+              clientKey: randomUUID(),
+              question: scenario.code + '?',
+              model: 'kira-3.5-pro',
+              dataClassification: 'SYNTHETIC_PUBLIC_APPROVED',
+            })
+            .expect(201);
+        const a = await ask();
+        expect(
+          (await scenario.post(`/answers/${a.body.id}/run`, {}).expect(201))
+            .body.status,
+        ).toBe('DATA_POLICY_BLOCKED');
+        const b = await ask();
+        state.revision = 'r2';
+        save();
+        expect(
+          (await scenario.post(`/answers/${b.body.id}/run`, {}).expect(201))
+            .body.errorCode,
+        ).toBe('CONFIG_CHANGED');
+        expect(transport).not.toHaveBeenCalled();
+      } finally {
+        rmSync(dir, { recursive: true });
+      }
+    });
+
+    it('fences key changes during provider I/O and restricts admin settings', async () => {
+      const scenario = await aiScenario();
+      await scenario.post('/index', { scope: 'ALL' }).expect(201);
+      const sources = await db.chatAiSourceIndex.findMany({
+        where: { projectId: scenario.projectId },
+      });
+      const dir = mkdtempSync(join(tmpdir(), 'm3-key-race-')),
+        path = join(dir, 'providers.json');
+      const state = {
+        revision: 'same-manual-revision',
+        KIRA_API_KEY: 'synthetic-first',
+        replacementConfirmed: true,
+        enabled: true,
+        dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+        approvedProjects: [{ organizationId, projectId: scenario.projectId }],
+        approvedSources: sources.map((s) => ({ id: s.id, version: s.version })),
+      };
+      const save = () =>
+        writeFileSync(path, JSON.stringify({ providers: { kira: state } }), {
+          mode: 0o600,
+        });
+      save();
+      vi.stubEnv('GALAXY_AI_CONFIG_FILE', path);
+      try {
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(async (_url, init) => {
+            const payload = JSON.parse(
+              JSON.parse(init.body).messages[1].content,
+            );
+            state.KIRA_API_KEY = 'synthetic-rotated';
+            save();
+            return new Response(
+              JSON.stringify({
+                model: 'kira-3.5-pro',
+                choices: [
+                  {
+                    finish_reason: 'stop',
+                    message: {
+                      content: JSON.stringify({
+                        answer: 'Must not deliver',
+                        citations: [payload.sources[0].handle],
+                        uncertainty: '',
+                      }),
+                    },
+                  },
+                ],
+              }),
+            );
+          }),
+        );
+        const c = await scenario
+          .post('/conversations', { scope: 'ALL', clientKey: randomUUID() })
+          .expect(201);
+        const a = await scenario
+          .post(`/conversations/${c.body.id}/answers`, {
+            clientKey: randomUUID(),
+            question: scenario.code + '?',
+            model: 'kira-3.5-pro',
+            dataClassification: 'SYNTHETIC_PUBLIC_APPROVED',
+          })
+          .expect(201);
+        const result = await scenario
+          .post(`/answers/${a.body.id}/run`, {})
+          .expect(201);
+        expect(result.body.answer).toBeNull();
+        expect(result.body.errorCode).toBe('CONFIG_CHANGED');
+        const settings = await scenario.get('/settings').expect(200);
+        expect(JSON.stringify(settings.body)).not.toContain('synthetic-');
+        await db.chatProjectGrant.update({
+          where: { id: scenario.admin.id },
+          data: { actions: ['INVOKE'] },
+        });
+        await scenario.get('/settings').expect(404);
+      } finally {
+        rmSync(dir, { recursive: true });
+      }
+    });
+
+    it('sends only explicit native Gemini versions and rejects the same binary for a text-only model', async () => {
+      const scenario = await aiScenario();
+      const bytes = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhGQAAAAASUVORK5CYII=',
+        'base64',
+      );
+      const binary = await app.get(FileStorage).put(organizationId, bytes);
+      const file = await db.fileAsset.create({
+        data: {
+          organizationId,
+          uploadedById: users.owner!.id,
+          originalFilename: 'sample.png',
+          storedFilename: 'sample.png',
+          mimeType: 'image/png',
+          sizeBytes: BigInt(bytes.length),
+          storageKey: binary,
+          checksum: createHash('sha256').update(bytes).digest('hex'),
+          category: 'PROJECT',
+        },
+      });
+      const link = await db.chatFile.create({
+        data: {
+          organizationId,
+          projectId: scenario.projectId,
+          roomId: scenario.rooms[0]!.room.id,
+          actorId: users.owner!.id,
+          clientKey: randomUUID(),
+          payloadHash: randomUUID(),
+          fileAssetId: file.id,
+          version: 1,
+          origin: 'UPLOAD',
+        },
+      });
+      await scenario.post('/index', { scope: 'ALL' }).expect(201);
+      const indexes = await db.chatAiSourceIndex.findMany({
+          where: { projectId: scenario.projectId },
+        }),
+        image = indexes.find((i) => i.chatFileId === link.id)!;
+      const dir = mkdtempSync(join(tmpdir(), 'm3-media-')),
+        path = join(dir, 'providers.json');
+      const common = {
+        revision: 'r1',
+        replacementConfirmed: true,
+        enabled: true,
+        dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+        imageLiveVerified: true,
+        approvedProjects: [{ organizationId, projectId: scenario.projectId }],
+        approvedSources: indexes.map((i) => ({ id: i.id, version: i.version })),
+      };
+      writeFileSync(
+        path,
+        JSON.stringify({
+          providers: {
+            google_gemini: { ...common, GEMINI_API_KEY: 'synthetic-google' },
+            kira: { ...common, KIRA_API_KEY: 'synthetic-kira' },
+          },
+        }),
+        { mode: 0o600 },
+      );
+      vi.stubEnv('GALAXY_AI_CONFIG_FILE', path);
+      let calls = 0;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (_url, init) => {
+          calls++;
+          const body = JSON.parse(init.body),
+            raw = body.input.find((p: { type: string }) => p.type === 'image');
+          expect(Buffer.from(raw.data, 'base64')).toEqual(bytes);
+          const context = JSON.parse(body.input[0].text),
+            source = context.sources.find((s: { text: string }) =>
+              s.text.includes('sample.png'),
+            );
+          return new Response(
+            JSON.stringify({
+              status: 'completed',
+              model: 'gemini-3.8-flash',
+              steps: [
+                {
+                  type: 'model_output',
+                  content: [
+                    {
+                      type: 'text',
+                      text: JSON.stringify({
+                        answer:
+                          'Ảnh mẫu một điểm; không suy kích thước vật thật.',
+                        citations: [source.handle],
+                        uncertainty: 'Không có số đo.',
+                      }),
+                    },
+                  ],
+                },
+              ],
+            }),
+          );
+        }),
+      );
+      try {
+        const c = await scenario
+          .post('/conversations', { scope: 'ALL', clientKey: randomUUID() })
+          .expect(201);
+        const ask = (model: string) =>
+          scenario
+            .post(`/conversations/${c.body.id}/answers`, {
+              clientKey: randomUUID(),
+              question: 'Mô tả ảnh mẫu?',
+              model,
+              dataClassification: 'SYNTHETIC_PUBLIC_APPROVED',
+              sourceIds: [image.id],
+            })
+            .expect(201);
+        const a = await ask('gemini-3.8-flash');
+        const result = await scenario
+          .post(`/answers/${a.body.id}/run`, {})
+          .expect(201);
+        expect(result.body.status).toBe('COMPLETED');
+        expect(result.body.sources[0]).toMatchObject({
+          version: image.version,
+          page: 1,
+        });
+        const citation = await scenario
+          .get(`/answers/${a.body.id}/sources/${result.body.sources[0].handle}`)
+          .expect(200);
+        expect(citation.body).toMatchObject({
+          version: image.version,
+          page: 1,
+        });
+        const b = await ask('kira-3.5-pro');
+        expect(
+          (await scenario.post(`/answers/${b.body.id}/run`, {}).expect(201))
+            .body.errorCode,
+        ).toBe('UNSUPPORTED_FILE');
+        expect(calls).toBe(1);
+      } finally {
+        rmSync(dir, { recursive: true });
+      }
     });
 
     it('requires independent INVOKE and INTERNAL membership and reports missing provider truthfully', async () => {
@@ -605,6 +1151,7 @@ describe.sequential(
             createdAt: message.createdAt,
           })),
         });
+        configured();
         vi.stubEnv('GALAXY_AI_API_KEY', 'synthetic-no-network');
         vi.stubEnv('GALAXY_AI_MODEL', 'test-model');
         vi.stubEnv('GALAXY_AI_ALLOWED_MODELS', 'test-model');
@@ -1330,6 +1877,7 @@ describe.sequential(
     });
 
     it('uses backend citation handles, stores all dependencies and prevents duplicate provider calls', async () => {
+      configured();
       vi.stubEnv('GALAXY_AI_API_KEY', 'synthetic-no-network');
       vi.stubEnv('GALAXY_AI_MODEL', 'test-model');
       vi.stubEnv('GALAXY_AI_ALLOWED_MODELS', 'test-model');
