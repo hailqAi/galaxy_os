@@ -23,6 +23,11 @@ sang provider. Giữ source tách artifact và public closed.
 | Chrome154 M3 production fixture                          | 3/3 PASS; assertion nháp sau khi retry hoàn tất                                     |
 | Review correctness/security/auth/UX + Ponytail           | Không còn Important/Critical sau sửa; reviewer read-only, model metadata UNVERIFIED |
 
+Sau full regression, bản sửa cuối chỉ đổi nhãn lỗi Web và fallback trạng thái.
+Web547, lint/typecheck/format, Chrome M3 production3 đã chạy lại và PASS; API/M2
+không đổi source so với lượt full regression. Build snapshot cuối từ commit sạch
+`d8ce57d` và kiểm Chrome main trên đúng release cuối.
+
 Log đã giới hạn thông tin: `.runtime/ai-multi-evidence/` trong worktree (ignored).
 Các log chính: `full-test-final.log`, `lint-final.log`, `typecheck-final.log`,
 `format-final.log`, `python-final.log`, `browser-m2-production.log`,
@@ -72,15 +77,15 @@ policy lại khi chuyển model; dữ liệu doanh nghiệp không được gử
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | BASELINE_RELEASE           | `local-f93ef7df2fbc`                                                                                                  |
 | WORKTREE / BRANCH          | `/home/galaxy_os/.worktrees/m2-a-20260928` / `m2/project-chat-20260928`                                               |
-| CODE_SHA / TESTED_SHA      | `f8a51aacc7dd9ca9ad353842ca1f1f20f321d947`                                                                            |
-| TESTED_TREE                | `682ae67171ad42c61a56d716ea14d0632073808b`                                                                            |
+| CODE_SHA / TESTED_SHA      | `d8ce57d0bb5c1faeabfe7f9f1fab5698af8a732b`                                                                            |
+| TESTED_TREE                | `ccf923f8a10260d6cc6e0f5dc61b2e17e68c2519`                                                                            |
 | DOCS_COMMIT_SHA            | Commit cập nhật báo cáo này; SHA chính xác ghi trong phản hồi bàn giao, không tự ghi hash vào nội dung tạo ra hash đó |
-| DEPLOYED_LOCAL_RELEASE     | `local-665429741c6f`                                                                                                  |
-| SOURCE_DIGEST              | `665429741c6fbdb9a03e392b4de36642a4f8b6383e8d274edf5e9ea7279f3bf6`                                                    |
-| WEB_BUILD_ID               | `WElPBvqSwo1rB4-KZF68S`                                                                                               |
-| ARTIFACT                   | `/home/galaxy_os/.runtime/releases/ai-multi-20261003` — build Web/API/Edge PASS từ source commit sạch                 |
+| DEPLOYED_LOCAL_RELEASE     | `local-b5045512d8b0`                                                                                                  |
+| SOURCE_DIGEST              | `b5045512d8b0246bb164326f8e9d2f740029d63e724a2c1713357757769c0c59`                                                    |
+| WEB_BUILD_ID               | `k57b305NIZtnpq1v4bAsA`                                                                                               |
+| ARTIFACT                   | `/home/galaxy_os/.runtime/releases/ai-multi-20261003-r2` — build Web/API/Edge PASS từ source commit sạch              |
 | SCHEMA                     | 83 migration, fingerprint giữ nguyên; không migration/ledger/DB restore                                               |
-| SYSTEMD                    | API361132, Web361133 READY; root `local:up` tái sử dụng nguyên PID                                                    |
+| SYSTEMD                    | API367712, Web367713 READY; root `local:up` tái sử dụng nguyên PID                                                    |
 | SECRETS_AND_EGRESS_STATUS  | API process nhận đúng `GALAXY_AI_CONFIG_FILE`; không có3key trong Web env; key file chưa có, không ghi placeholder    |
 | MODEL_SELECTOR_STATUS      | Chrome154 tại `http://localhost:3000/` PASS:3 lựa chọn disabled đúng NOT_CONFIGURED; admin settings200; reload PASS   |
 | MODEL_SWITCH_MEMORY_STATUS | MOCK/CHROME_FIXTURE_VERIFIED: giữ conversation/index/history đúng quyền, không copy room/Project                      |
@@ -100,14 +105,14 @@ tiếp trên runtime main, screenshot chỉ panel (không secret/nội dung Proj
 Các thao tác gửi/đổi model/mở nguồn có dữ liệu dùng Chrome fixture riêng; main chưa
 có key nên nút gửi disabled đúng nghĩa, không giả call thật.
 
-Receipt: `release-build.log`, `cutover.log`, `deployed-status.json`,
+Receipt: `release-build-final.log`, `cutover-final.log`, `deployed-status.json`,
 `deployed-artifacts.log`, `systemd-config.json`, `main-browser.json`,
-`root-local-up.json` trong thư mục evidence ignored. Artifact verifier báo
+`root-local-up.json`, `lan-health.json` trong thư mục evidence ignored. Artifact verifier báo
 `ARTIFACTS_VERIFIED`; schema preflight read-only so sánh đúng baseline. Source edit/
 commit docs sau build không đổi artifact đang phục vụ. Thiếu3key không làm health lỗi.
 
 Rollback code/config đã chuẩn bị tại
-`/home/galaxy_os/.runtime/ai-multi-20261003/rollback/`: giữ manifest và2unit cũ,
+`/home/galaxy_os/.runtime/ai-multi-20261003-r2/rollback/`: giữ manifest và2unit cũ,
 artifact/private env baseline vẫn còn. Cutover giữ lifecycle lock chung với keeper,
 chỉ dừng đúng2user-unit đã xác minh owner rồi đổi manifest/unit, daemon-reload,
 start và kiểm health; không sửa Edge/DB/storage. Rollback thực không cần chạy vì

@@ -99,7 +99,7 @@ Astra khi cần. Không lặp M0/M2, không push/merge. Metadata model UNVERIFIE
 Review focus: config/key bị đổi giữa request; credential redirect; egress của
 lịch sử dẫn xuất; budget nhiều actor/Project cùng provider; cancel/late output.
 
-Checkpoint cuối: code `f8a51aa`, release `local-665429741c6f` READY dưới systemd.
+Checkpoint cuối: code `d8ce57d`, release `local-b5045512d8b0` READY dưới systemd.
 Chrome main3000 và production fixture24 PASS; live3provider BLOCKED_BY_CREDENTIALS.
 Chi tiết/hash đầy đủ tại [VERIFICATION](VERIFICATION.md). Dừng triển khai tại đây
 để bàn giao Figma; không coi live đã hoàn tất khi thiếu khóa.

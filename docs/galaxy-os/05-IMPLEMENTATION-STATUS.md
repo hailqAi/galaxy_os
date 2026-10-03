@@ -2,10 +2,10 @@
 
 ## AI đa nhà cung cấp — 2026-10-03 — LOCAL_DEPLOYED / LIVE_BLOCKED
 
-Code/tested `f8a51aacc7dd9ca9ad353842ca1f1f20f321d947`, tree
-`682ae67171ad42c61a56d716ea14d0632073808b`; release local `local-665429741c6f`,
-Web BUILD_ID `WElPBvqSwo1rB4-KZF68S`. Web/API cùng snapshot sạch, user systemd
-READY; API361132/Web361133; Edge308598 và Windows keeper giữ nguyên.
+Code/tested `d8ce57d0bb5c1faeabfe7f9f1fab5698af8a732b`, tree
+`ccf923f8a10260d6cc6e0f5dc61b2e17e68c2519`; release local `local-b5045512d8b0`,
+Web BUILD_ID `k57b305NIZtnpq1v4bAsA`. Web/API cùng snapshot sạch, user systemd
+READY; API367712/Web367713; Edge308598 và Windows keeper giữ nguyên.
 Schema83/DB/storage/account giữ nguyên; public HTTPS503, không DNS/WAN mới.
 
 Project → Làm việc → Hỏi AI tại localhost3000 có Gemini3.8Flash, MistralMedium3.5,
@@ -20,7 +20,7 @@ Cả3provider **BLOCKED_BY_CREDENTIALS**, chưa model access/text/RAG live; Gemi
 không OCR/tạo ảnh/video. Pilot synthetic/public-approved, chưa duyệt dữ liệu
 nghiệp vụ của9Project; không index/upload/tạo room demo trên main.
 
-Fresh checks: fullAPI1246/Web547/Edge5/document-service1; runtime/secret36;
+Hồi quy: API1246/Edge5/document-service1; Web547 chạy lại sau sửa UI; runtime/secret36;
 Chrome production M2/M3 24; lint/typecheck/format/build/artifact/schema PASS.
 Chrome main154 với session người dùng tự đăng nhập lại:9Project/300permission/
 0room, dropdown disabled đúng thiếu key, settings200 và reload PASS. LAN health200.
