@@ -12,6 +12,7 @@ import sys
 import tempfile
 import uuid
 import warnings
+import stat as stat_module
 
 PROVIDERS = {
     'google_gemini': ('GEMINI_API_KEY', 'generativelanguage.googleapis.com'),
@@ -25,12 +26,12 @@ def read_private(path, metadata=False):
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     try:
         stat = os.fstat(fd)
-        if stat.st_uid != os.getuid() or stat.st_mode & 0o077:
-            raise ValueError('File cấu hình cần đúng owner và quyền 0600')
+        if not stat_module.S_ISREG(stat.st_mode) or stat.st_size > 262144 or stat.st_uid != os.getuid() or stat.st_mode & 0o077:
+            raise ValueError('STORE_UNREADABLE')
         with os.fdopen(fd, 'r', closefd=False) as stream:
             raw = stream.read()
             data = json.loads(raw)
-        if not isinstance(data.get('providers'), dict):
+        if not isinstance(data, dict) or set(data) != {'providers'} or not isinstance(data.get('providers'), dict):
             raise ValueError('Cấu hình không hợp lệ; không ghi đè')
         return (data, hashlib.sha256(raw.encode()).hexdigest()) if metadata else data
     finally:
@@ -79,21 +80,39 @@ def save_provider(path, provider, key, host):
         }
     update(path, change)
 
-def record_test(path, provider, expected_digest, evidence):
-    # Chỉ metadata do backend tạo; không nhận secret hoặc dữ liệu Project qua đường này.
+def valid_evidence(evidence, provider):
     models = dict(google_gemini='gemini-3.8-flash', mistral='mistral-medium-3-5', kira='kira-3.5-pro')
     fields = {'revision', 'provider', 'requestedModel', 'returnedModel', 'capability', 'fixtureVersion', 'testedAt', 'requestId', 'result', 'httpStatus', 'usage'}
     if (not isinstance(evidence, dict) or set(evidence) != fields or
-        evidence['provider'] != provider or evidence['requestedModel'] != models[provider] or
+        provider not in models or evidence['provider'] != provider or evidence['requestedModel'] != models[provider] or
+        not isinstance(evidence['revision'], str) or not 1 <= len(evidence['revision']) <= 100 or
+        (evidence['returnedModel'] is not None and (not isinstance(evidence['returnedModel'], str) or len(evidence['returnedModel']) > 200)) or
         evidence['capability'] not in ['text', 'image', 'pdf'] or
         (provider != 'google_gemini' and evidence['capability'] != 'text') or
         evidence['fixtureVersion'] != 'galaxy-ai-activation-v1' or
+        not isinstance(evidence['result'], str) or
         not re.fullmatch(r'[A-Z_]{1,80}', evidence['result']) or
-        not re.fullmatch(r'[a-f0-9]{64}', expected_digest)):
-        raise ValueError('INVALID_EVIDENCE')
-    uuid.UUID(evidence['requestId'])
-    datetime.fromisoformat(evidence['testedAt'].replace('Z', '+00:00'))
-    if len(json.dumps(evidence)) > 4096:
+        not isinstance(evidence['requestId'], str) or
+        not isinstance(evidence['testedAt'], str) or
+        not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z', evidence['testedAt']) or
+        (evidence['httpStatus'] is not None and (type(evidence['httpStatus']) is not int or not 100 <= evidence['httpStatus'] <= 599))):
+        return False
+    usage = evidence['usage']
+    if usage is not None and (not isinstance(usage, dict) or
+        not {'input_tokens', 'output_tokens'} <= set(usage) or
+        set(usage) - {'input_tokens', 'output_tokens', 'thought_tokens'} or
+        any(type(v) is not int or not 0 <= v <= 9007199254740991 for v in usage.values())):
+        return False
+    try:
+        request_id = uuid.UUID(evidence['requestId'])
+        datetime.fromisoformat(evidence['testedAt'].replace('Z', '+00:00'))
+        return str(request_id) == evidence['requestId'].lower() and len(json.dumps(evidence)) <= 4096
+    except ValueError:
+        return False
+
+def record_test(path, provider, expected_digest, evidence):
+    # Chỉ metadata do backend tạo; không nhận secret hoặc dữ liệu Project qua đường này.
+    if not valid_evidence(evidence, provider) or not isinstance(expected_digest, str) or not re.fullmatch(r'[a-f0-9]{64}', expected_digest):
         raise ValueError('INVALID_EVIDENCE')
     def change(providers):
         state = providers.get(provider)
@@ -115,12 +134,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['key', 'enable', 'disable', 'approve-source', 'approve-project', 'status', 'record-test'])
     parser.add_argument('--provider', choices=PROVIDERS, required=True)
-    parser.add_argument('--file', type=Path, default=Path('/home/galaxy_os/.runtime/ai-providers.json'))
+    parser.add_argument('--file', type=Path, default=Path(os.environ.get('GALAXY_AI_CONFIG_FILE') or '/home/galaxy_os/.runtime/ai-providers.json'))
     parser.add_argument('--organization')
     parser.add_argument('--project')
     parser.add_argument('--source')
     parser.add_argument('--version')
     args = parser.parse_args()
+    if not args.file.is_absolute():
+        raise ValueError('Đường cấu hình cần tuyệt đối')
     if args.action == 'record-test':
         payload = json.loads(sys.stdin.read(16385))
         if set(payload) != {'expectedDigest', 'evidence'}:
@@ -141,10 +162,50 @@ def main():
         print('Đã lưu khóa riêng 0600; kết nối vẫn tắt. API đọc file mới ở lượt kế tiếp.')
         return
     if args.action == 'status':
-        state = read_private(args.file)['providers'].get(args.provider, {})
-        tests = [t for t in state.get('tests', []) if t['revision'] == state.get('revision') and t['result'] == 'PASS']
+        state, owner, mode, schema_valid, credential_present = {}, None, None, False, False
+        try:
+            info = args.file.lstat()
+            owner, mode = info.st_uid, oct(stat_module.S_IMODE(info.st_mode))
+            data = read_private(args.file)
+            schema_valid = True
+            providers = data['providers']
+            state = providers.get(args.provider, {})
+            credential_present = isinstance(state, dict) and isinstance(state.get(PROVIDERS[args.provider][0]), str) and bool(state[PROVIDERS[args.provider][0]].strip())
+            allowed_fields = {'revision', 'GEMINI_API_KEY', 'MISTRAL_API_KEY', 'KIRA_API_KEY', 'replacementConfirmed', 'enabled', 'modelAccessVerified', 'textLiveVerified', 'imageLiveVerified', 'pdfLiveVerified', 'lastTest', 'tests', 'dataPolicy', 'maxRequestsPerDay', 'maxConcurrent', 'maxOutputTokens', 'approvedProjects', 'approvedSources'}
+            limits = {'maxRequestsPerDay': (1, 100000, True), 'maxConcurrent': (1, 4, False), 'maxOutputTokens': (256, 65536, False)}
+            if not isinstance(state, dict):
+                state, diagnostic = {}, 'INVALID_CONFIG'
+            elif (set(state) - allowed_fields or
+                  any(k in state and type(state[k]) is not bool for k in ['enabled', 'replacementConfirmed']) or
+                  (credential_present and not all(k in state for k in ['revision', 'dataPolicy'])) or
+                  any(k in state and state[k] is not None and type(state[k]) is not int for k in ['maxRequestsPerDay', 'maxConcurrent', 'maxOutputTokens']) or
+                  any(k in state and ((state[k] is None and not nullable) or (state[k] is not None and not low <= state[k] <= high)) for k, (low, high, nullable) in limits.items()) or
+                  ('revision' in state and (not isinstance(state['revision'], str) or not 1 <= len(state['revision']) <= 100)) or
+                  ('lastTest' in state and (not isinstance(state['lastTest'], str) or not re.fullmatch(r'[A-Z_]{1,80}', state['lastTest']))) or
+                  any(isinstance(state.get(k), str) and state[k] == state.get(key_name) for k in ['revision', 'lastTest', 'dataPolicy'] for key_name, _ in PROVIDERS.values()) or
+                  ('dataPolicy' in state and state['dataPolicy'] != 'SYNTHETIC_PUBLIC_APPROVED') or
+                  not isinstance(state.get('tests', []), list) or
+                  len(state.get('tests', [])) > 3 or
+                  any(not valid_evidence(t, args.provider) or t['result'] in [state.get(key_name) for key_name, _ in PROVIDERS.values()] for t in state.get('tests', []))):
+                state, diagnostic = {}, 'INVALID_CONFIG'
+            elif args.provider not in providers:
+                diagnostic = 'STORE_INVALID_FORMAT' if set(providers) - set(PROVIDERS) else 'PROVIDER_ENTRY_MISSING' if providers else 'EMPTY_STORE'
+            elif not credential_present:
+                diagnostic = 'CREDENTIAL_EMPTY'
+            elif not state.get('replacementConfirmed'):
+                diagnostic = 'CREDENTIAL_NOT_CONFIRMED'
+            else:
+                diagnostic = 'LOADED'
+        except FileNotFoundError:
+            diagnostic = 'CREDENTIAL_NOT_LOADED'
+        except OSError:
+            diagnostic = 'STORE_UNREADABLE'
+        except (ValueError, UnicodeError) as error:
+            diagnostic = 'STORE_UNREADABLE' if str(error) == 'STORE_UNREADABLE' else 'STORE_INVALID_FORMAT'
+        current_tests = [t for t in state.get('tests', []) if t['revision'] == state.get('revision')]
+        tests = [t for t in current_tests if t['result'] == 'PASS']
         result = {k: state.get(k) for k in ['revision', 'enabled', 'replacementConfirmed', 'dataPolicy', 'maxRequestsPerDay', 'maxConcurrent', 'maxOutputTokens']}
-        result.update(credentialConfigured=bool(state.get(PROVIDERS[args.provider][0]) and state.get('replacementConfirmed')), modelAccessVerified=bool(tests), textLiveVerified=any(t['capability'] == 'text' for t in tests), imageLiveVerified=any(t['capability'] == 'image' for t in tests), pdfLiveVerified=any(t['capability'] == 'pdf' for t in tests), lastTest=state.get('lastTest', 'NOT_RUN'))
+        result.update(storePath=str(args.file), ownerUid=owner, mode=mode, rootSchemaValid=schema_valid, credentialState=diagnostic, configLoaded=schema_valid, credentialPresent=credential_present, credentialConfigured=diagnostic == 'LOADED', modelAccessVerified=bool(tests), textLiveVerified=any(t.get('capability') == 'text' for t in tests), imageLiveVerified=any(t.get('capability') == 'image' for t in tests), pdfLiveVerified=any(t.get('capability') == 'pdf' for t in tests), lastTest=current_tests[-1]['result'] if current_tests else 'NOT_RUN')
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
     def change(providers):

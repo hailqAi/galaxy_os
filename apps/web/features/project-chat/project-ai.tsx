@@ -32,6 +32,8 @@ type ModelChoice = {
   available: boolean;
   reason: string | null;
   credentialConfigured: boolean;
+  credentialPresent: boolean;
+  credentialState: string;
   providerReady: boolean;
   providerReason: string | null;
   sourcePolicy: string;
@@ -94,6 +96,16 @@ export const aiStatusLabel = (
     MISSING_CREDENTIAL: 'Chưa có khóa thay thế cho nhà cung cấp này',
     CREDENTIAL_NOT_LOADED:
       'API chưa nạp được cấu hình; quản trị cần kiểm tra đường dẫn và quyền file',
+    STORE_UNREADABLE:
+      'Không đọc được kho khóa; quản trị cần kiểm tra owner và quyền file',
+    STORE_INVALID_FORMAT:
+      'Kho khóa sai định dạng; quản trị cần kiểm tra file cấu hình',
+    EMPTY_STORE: 'Kho khóa chưa có nhà cung cấp nào',
+    PROVIDER_ENTRY_MISSING:
+      'Chưa có cấu hình cho nhà cung cấp này trong kho khóa',
+    CREDENTIAL_EMPTY: 'Mục nhà cung cấp có khóa rỗng; cần nhập khóa thay thế',
+    CREDENTIAL_NOT_CONFIRMED:
+      'Kho khóa đã có khóa, nhưng chưa xác nhận là khóa thay thế',
     INVALID_CREDENTIAL:
       'Nhà cung cấp từ chối credential; cần thay khóa tại terminal',
     MODEL_NOT_AVAILABLE: 'Model chưa khả dụng với quyền tài khoản này',
@@ -102,7 +114,7 @@ export const aiStatusLabel = (
       'Tài khoản nhà cung cấp thiếu hạn mức hoặc cần xử lý thanh toán',
     NETWORK_OR_TLS: 'Không kết nối được nhà cung cấp; cần kiểm tra mạng/TLS',
     EGRESS_POLICY_DENIED:
-      'Model đã kết nối, nhưng nguồn này chưa được phép gửi đến nhà cung cấp đã chọn',
+      'Project hoặc nguồn chưa được phép gửi đến nhà cung cấp đã chọn',
     ADAPTER_RESPONSE_ERROR:
       'Phản hồi hoặc trích nguồn không đúng contract; chưa phát hành câu trả lời',
     MODEL_RETURNED_DIFFERENT:
@@ -168,6 +180,15 @@ export const aiStatusLabel = (
     INVALID: 'Không đọc được nội dung UTF-8',
     TOO_LARGE: 'Nguồn vượt giới hạn đọc',
   })[status] ?? fallback;
+
+const modelStatusLabel = (model: ModelChoice) =>
+  model.credentialState && model.credentialState !== 'LOADED'
+    ? aiStatusLabel(model.credentialState)
+    : model.providerReason || model.reason
+      ? aiStatusLabel(model.providerReason ?? model.reason!)
+      : model.textLiveVerified
+        ? 'Văn bản đã kiểm chứng live'
+        : 'Cấu hình đã nạp; văn bản chưa kiểm chứng live';
 
 export function AiAnswer({
   answer,
@@ -264,7 +285,7 @@ export function ModelSelector({
         {models.map((model) => (
           <option key={model.id} value={model.id} disabled={!model.available}>
             {model.label} · {model.providerLabel}
-            {model.reason ? ` — ${aiStatusLabel(model.reason)}` : ''}
+            {` — ${modelStatusLabel(model)}`}
           </option>
         ))}
       </select>
@@ -484,6 +505,9 @@ export function ProjectAi({
           return;
         setProvider(result.provider);
         setModels(result.models ?? []);
+        setSettings((current) =>
+          current === undefined ? current : (result.models ?? []),
+        );
         if (!modelInitialized.current && result.models) {
           modelInitialized.current = true;
           let saved: string | null = null;
@@ -782,10 +806,7 @@ export function ProjectAi({
         </div>
         {chosenModel && (
           <p role="status">
-            {chosenModel.reason
-              ? aiStatusLabel(chosenModel.reason)
-              : 'Model áp dụng cho lượt gửi tiếp theo.'}{' '}
-            Văn bản theo nguồn; ảnh/PDF:{' '}
+            {modelStatusLabel(chosenModel)} Văn bản theo nguồn; ảnh/PDF:{' '}
             {chosenModel.capabilities.imageInput ||
             chosenModel.capabilities.pdfInput
               ? 'xem khả năng đã được kiểm chứng'
@@ -799,17 +820,19 @@ export function ProjectAi({
         {canConfigure && (
           <details
             onToggle={(event) => {
-              if (event.currentTarget.open)
+              if (!event.currentTarget.open) setSettings(undefined);
+              else
                 void call<{ models: ModelChoice[] }>('/settings')
                   .then((result) => setSettings(result.models))
-                  .catch((cause) =>
+                  .catch((cause) => {
+                    setSettings(undefined);
                     setError(
                       aiStatusLabel(
                         (cause as Error).message,
                         (cause as Error).message,
                       ),
-                    ),
-                  );
+                    );
+                  });
             }}
           >
             <summary>Cấu hình nhà cung cấp và hạn mức</summary>
@@ -822,11 +845,15 @@ export function ProjectAi({
               <div key={item.id} className="my-3 rounded border p-3 text-xs">
                 <strong>{item.label}</strong> · {item.host}
                 <p>
-                  {item.providerReason
-                    ? aiStatusLabel(item.providerReason)
-                    : 'API đã nạp credential và provider được bật'}{' '}
-                  · revision {item.revision ?? 'chưa có'}
+                  {modelStatusLabel(item)} · revision{' '}
+                  {item.revision ?? 'chưa có'}
                 </p>
+                {item.credentialPresent && (
+                  <p>
+                    Đã thấy giá trị khóa trong file; quyền model cần kiểm thử
+                    riêng.
+                  </p>
+                )}
                 <p>
                   {item.textLiveVerified
                     ? 'Văn bản đã kiểm chứng live'

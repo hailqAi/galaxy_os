@@ -50,6 +50,51 @@ it('keeps three disabled choices without credentials and never exposes keys', ()
     'EGRESS_POLICY_DENIED',
   );
 });
+it('reports safe store diagnostics and rejects unknown aliases without hiding valid providers', () => {
+  const env = { GALAXY_AI_CONFIG_FILE: path };
+  const read = () => modelChoices(readAiConfig(env), 'org', 'project');
+  expect(read()[0]).toMatchObject({ credentialState: 'CREDENTIAL_NOT_LOADED' });
+  for (const [document, expected] of [
+    [{ providers: {} }, 'EMPTY_STORE'],
+    [{ providers: { mistral: {} } }, 'PROVIDER_ENTRY_MISSING'],
+    [
+      { providers: { google_gemini: { ...provider, GEMINI_API_KEY: '' } } },
+      'CREDENTIAL_EMPTY',
+    ],
+    [{ providers: { gemini: provider } }, 'STORE_INVALID_FORMAT'],
+    [[], 'STORE_INVALID_FORMAT'],
+  ] as const) {
+    writeFileSync(path, JSON.stringify(document), { mode: 0o600 });
+    expect(read()[0]).toMatchObject({ credentialState: expected });
+  }
+  writeFileSync(
+    path,
+    JSON.stringify({ providers: { ...fixture(), gemini: provider } }),
+  );
+  expect(read()[0]).toMatchObject({
+    credentialConfigured: true,
+    credentialState: 'LOADED',
+  });
+  expect(read()[1]).toMatchObject({ credentialState: 'STORE_INVALID_FORMAT' });
+  writeFileSync(
+    path,
+    JSON.stringify({
+      providers: {
+        google_gemini: { ...provider, replacementConfirmed: false },
+      },
+    }),
+  );
+  expect(read()[0]).toMatchObject({
+    credentialPresent: true,
+    credentialConfigured: false,
+    credentialState: 'CREDENTIAL_NOT_CONFIRMED',
+  });
+  expect(JSON.stringify(read())).not.toContain('synthetic-replacement');
+  writeFileSync(path, '{');
+  expect(read()[0]).toMatchObject({ credentialState: 'STORE_INVALID_FORMAT' });
+  chmodSync(path, 0o644);
+  expect(read()[0]).toMatchObject({ credentialState: 'STORE_UNREADABLE' });
+});
 it('requires replacement credentials, exact registry model and source egress independent of READ', () => {
   expect(() => configuredModel(fixture(), 'unknown')).toThrow();
   expect(() =>
@@ -73,6 +118,33 @@ it('requires replacement credentials, exact registry model and source egress ind
     assertEgress(c, 'org', 'other', 'SYNTHETIC_PUBLIC_APPROVED', []),
   ).toThrow();
   expect(() => assertEgress(c, 'org', 'project', undefined, [])).toThrow();
+});
+it('never authorizes a whitespace-only credential', () => {
+  const config = { google_gemini: { ...provider, GEMINI_API_KEY: '   ' } };
+  expect(() => configuredModel(config, 'gemini-3.8-flash')).toThrow(
+    'MISSING_CREDENTIAL',
+  );
+  expect(modelChoices(config, 'org', 'project')[0]).toMatchObject({
+    credentialPresent: false,
+    credentialConfigured: false,
+    providerReady: false,
+  });
+});
+it('does not return credentials copied into provider metadata', () => {
+  const privateValue = 'SYNTHETIC_SECRET_DO_NOT_USE';
+  const config = {
+    google_gemini: {
+      ...provider,
+      GEMINI_API_KEY: privateValue,
+      revision: privateValue,
+    },
+  };
+  const choices = modelChoices(config, 'org', 'project');
+  expect(JSON.stringify(choices)).not.toContain(privateValue);
+  expect(choices[0]).toMatchObject({
+    credentialConfigured: false,
+    providerReady: false,
+  });
 });
 it('loads private config freshly, rejects unsafe file permissions and isolates a broken provider', () => {
   writeFileSync(

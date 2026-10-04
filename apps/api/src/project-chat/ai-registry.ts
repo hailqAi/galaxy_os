@@ -127,18 +127,38 @@ const settings = z
       .max(1000)
       .default([]),
   })
-  .strict();
+  .strict()
+  .refine(
+    (state) =>
+      ![state.GEMINI_API_KEY, state.MISTRAL_API_KEY, state.KIRA_API_KEY].some(
+        (key) =>
+          key &&
+          [
+            state.revision,
+            state.lastTest,
+            ...state.tests.map((test) => test.result),
+          ].includes(key),
+      ),
+  );
 export type AiSettings = z.infer<typeof settings>;
 type ConfigMetadata = {
   loadStatus?: 'LOADED' | 'CREDENTIAL_NOT_LOADED';
   fileDigest?: string;
   invalidProviders?: AiProvider[];
+  credentialStates?: Partial<Record<AiProvider, string>>;
+  credentialPresence?: Partial<Record<AiProvider, boolean>>;
 };
 export type AiConfig = Partial<Record<AiProvider, AiSettings>> & ConfigMetadata;
-function unloaded(): AiConfig {
-  return Object.defineProperty({}, 'loadStatus', {
-    value: 'CREDENTIAL_NOT_LOADED',
-  });
+function unloaded(state = 'CREDENTIAL_NOT_LOADED'): AiConfig {
+  return Object.defineProperties(
+    {},
+    {
+      loadStatus: { value: 'CREDENTIAL_NOT_LOADED' },
+      credentialStates: {
+        value: Object.fromEntries(AI_MODELS.map((m) => [m.provider, state])),
+      },
+    },
+  );
 }
 
 // Đọc tại mỗi gate: thay khóa/policy không cần restart Web hoặc API.
@@ -157,31 +177,69 @@ export function readAiConfig(
       stat.mode & 0o077 ||
       stat.uid !== process.getuid?.()
     )
-      return unloaded();
+      return unloaded('STORE_UNREADABLE');
     const raw = readFileSync(fd, 'utf8');
-    const document: unknown = JSON.parse(raw);
+    let document: unknown;
+    try {
+      document = JSON.parse(raw);
+    } catch {
+      return unloaded('STORE_INVALID_FORMAT');
+    }
     const root = z
       .object({ providers: z.record(z.string(), z.unknown()) })
       .strict()
       .safeParse(document);
-    if (!root.success) return unloaded();
+    if (!root.success) return unloaded('STORE_INVALID_FORMAT');
     const result: AiConfig = Object.defineProperties(
       {},
       {
         loadStatus: { value: 'LOADED' },
         fileDigest: { value: createHash('sha256').update(raw).digest('hex') },
         invalidProviders: { value: [] },
+        credentialStates: { value: {} },
+        credentialPresence: { value: {} },
       },
     );
+    const ids = Object.keys(root.data.providers);
+    const missingState = ids.some(
+      (id) => !AI_MODELS.some((m) => m.provider === id),
+    )
+      ? 'STORE_INVALID_FORMAT'
+      : ids.length
+        ? 'PROVIDER_ENTRY_MISSING'
+        : 'EMPTY_STORE';
     for (const model of AI_MODELS) {
-      const parsed = settings.safeParse(root.data.providers[model.provider]);
+      const entry = root.data.providers[model.provider];
+      const parsed = settings.safeParse(entry);
       if (parsed.success) result[model.provider] = parsed.data;
-      else if (root.data.providers[model.provider] !== undefined)
+      else if (entry !== undefined)
         result.invalidProviders!.push(model.provider);
+      const key =
+        entry && typeof entry === 'object'
+          ? (entry as Record<string, unknown>)[model.keyName]
+          : undefined;
+      result.credentialPresence![model.provider] =
+        typeof key === 'string' && Boolean(key.trim());
+      result.credentialStates![model.provider] =
+        entry === undefined
+          ? missingState
+          : entry &&
+              typeof entry === 'object' &&
+              (!key || (typeof key === 'string' && !key.trim()))
+            ? 'CREDENTIAL_EMPTY'
+            : parsed.success
+              ? parsed.data.replacementConfirmed
+                ? 'LOADED'
+                : 'CREDENTIAL_NOT_CONFIRMED'
+              : 'INVALID_CONFIG';
     }
     return result;
-  } catch {
-    return unloaded();
+  } catch (error) {
+    return unloaded(
+      (error as NodeJS.ErrnoException).code === 'ENOENT'
+        ? 'CREDENTIAL_NOT_LOADED'
+        : 'STORE_UNREADABLE',
+    );
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
@@ -201,7 +259,7 @@ export function configuredModel(
   if (!result.success) throw new AiError('MISSING_CREDENTIAL');
   const state = result.data;
   const key = state[model.keyName];
-  if (!key || !state.replacementConfirmed)
+  if (!key?.trim() || !state.replacementConfirmed)
     throw new AiError('MISSING_CREDENTIAL');
   if (!state.enabled) throw new AiError('MODEL_DISABLED');
   if (state.maxOutputTokens > model.outputLimit)
@@ -299,13 +357,21 @@ export function modelChoices(
       providerReason,
       sourcePolicy,
       configLoaded: config.loadStatus !== 'CREDENTIAL_NOT_LOADED',
+      credentialPresent:
+        config.credentialPresence?.[model.provider] ??
+        Boolean(state?.[model.keyName]?.trim()),
+      credentialState:
+        config.credentialStates?.[model.provider] ??
+        (state?.[model.keyName]?.trim() && state.replacementConfirmed
+          ? 'LOADED'
+          : 'MISSING_CREDENTIAL'),
       reason,
       published: true,
       adapterImplemented: true,
       accountVisible: ready?.modelAccessVerified ?? false,
       adminEnabled: state?.enabled ?? false,
       credentialConfigured: Boolean(
-        state?.[model.keyName] && state.replacementConfirmed,
+        state?.[model.keyName]?.trim() && state.replacementConfirmed,
       ),
       revision: state?.revision ?? null,
       dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',

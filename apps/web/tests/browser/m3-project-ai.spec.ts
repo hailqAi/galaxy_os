@@ -110,6 +110,41 @@ async function login(page: Page) {
   ]);
   await page.goto(`/projects/${fixture.projectId}/work`);
 }
+
+test('open admin settings follows a later registry revision', async ({
+  page,
+}) => {
+  await post(`/projects/${fixture.projectId}/authorities`, {
+    userId: fixture.users.sender!.id,
+    actions: ['ACCESS_ADMIN'],
+    roomCeiling: [],
+  });
+  let updated = false;
+  await page.route(
+    new RegExp(`/api/v1/project-chat/projects/${fixture.projectId}/ai$`),
+    async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      if (updated)
+        body.models = body.models.map((model: { revision: string }) => ({
+          ...model,
+          revision: 'browser-r2',
+        }));
+      await route.fulfill({ response, json: body });
+    },
+  );
+  await login(page);
+  const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
+  const settings = panel.locator('details').filter({
+    hasText: 'Cấu hình nhà cung cấp và hạn mức',
+  });
+  await settings.locator('summary').click();
+  await expect(settings.getByText(/revision browser-r1/).first()).toBeVisible();
+  updated = true;
+  await expect(settings.getByText(/revision browser-r2/).first()).toBeVisible({
+    timeout: 8000,
+  });
+});
 test('private AI uses old sources, persists history and clears revoked derived content (mock provider only)', async ({
   page,
 }) => {

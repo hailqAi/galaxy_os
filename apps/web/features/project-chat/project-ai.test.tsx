@@ -127,6 +127,8 @@ it('keeps unavailable models visible and disabled with reasons', () => {
     available: false,
     reason: 'NOT_CONFIGURED',
     credentialConfigured: false,
+    credentialPresent: false,
+    credentialState: 'MISSING_CREDENTIAL',
     providerReady: false,
     providerReason: 'MISSING_CREDENTIAL',
     sourcePolicy: 'DENIED',
@@ -151,7 +153,47 @@ it('keeps unavailable models visible and disabled with reasons', () => {
     }),
   );
   expect(html).toMatch(/<option[^>]*value="kira-3.5-pro"[^>]*disabled=""/);
-  expect(html).toContain('Chưa cấu hình');
+  expect(html).toContain('Chưa có khóa thay thế');
+});
+
+it('shows credential diagnostics before a legacy provider reason', () => {
+  const model = {
+    id: 'kira-3.5-pro',
+    provider: 'kira',
+    label: 'Kira 3.5 Pro',
+    providerLabel: 'Kira',
+    host: 'kiraai.vn',
+    available: false,
+    reason: 'MISSING_CREDENTIAL',
+    credentialConfigured: false,
+    credentialPresent: false,
+    credentialState: 'STORE_UNREADABLE',
+    providerReady: false,
+    providerReason: 'MISSING_CREDENTIAL',
+    sourcePolicy: 'DENIED',
+    configLoaded: false,
+    lastTest: 'NOT_RUN',
+    adminEnabled: false,
+    accountVisible: false,
+    textLiveVerified: false,
+    revision: null,
+    capabilities: {
+      reasoningModes: ['default'],
+      imageInput: false,
+      pdfInput: false,
+    },
+    limits: { requestsPerDay: null, concurrent: 1, outputTokens: 8192 },
+  };
+  const html = renderToStaticMarkup(
+    createElement(ModelSelector, {
+      models: [model],
+      value: '',
+      onChange: () => {},
+    }),
+  );
+  expect(html).toContain('Không đọc được kho khóa');
+  expect(html).not.toContain('Chưa có khóa thay thế');
+  expect(aiStatusLabel('CREDENTIAL_NOT_CONFIRMED')).toContain('đã có khóa');
 });
 
 it('localizes configuration/source errors and preserves an existing Vietnamese server message', () => {
