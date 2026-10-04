@@ -1,10 +1,22 @@
 # Project status
 
-## Popup AI — OWNER_APPROVED_CURRENT_PROMPT / IMPLEMENTING
+## AI floating chat + typography — đã phát hành local 05/10/2026
 
-Thiết kế560/1100/P04/nháp RAM/16–26 đã được chủ dự án duyệt trong prompt tiếp tục.
-Thực thi inline, không chờ duyệt lại; receipt chờ duyệt bên dưới là lịch sử.
-Cả3provider đã có key mới (metadata), enabled=false; kiểm live theo luồng riêng.
+DESIGN_APPROVAL_STATUS: **OWNER_APPROVED_CURRENT_PROMPT**. Chủ dự án đã duyệt
+popup560px, expanded1100px, giữ P04, nháp RAM, chat16/26 và chọn thực thi INLINE.
+Không có điều kiện chờ duyệt lại thiết kế này.
+
+Release `local-df7ba5a5c974` từ CODE_SHA=TESTED_SHA `11af11543196b80dc6f35abbfba9b1b329768390`;
+TESTED_TREE `3d1386054b8494db092efca10393e21efc2a39fc`. [Bàn giao hiện hành](docs/galaxy-os/milestones/M3/ui-figma/HANDOFF.md).
+Popup và typography đã nghiệm thu Chrome và phát hành; chưa gọi toàn gói AI hoàn tất.
+Kira text live PASS3câu; Gemini câu đầu đạt rồi503; Mistral429. Cả3credential đã có
+ở canonical store và API nạp đúng revision, không yêu cầu nhập lại. Nơi nhập cũ vẫn
+UNKNOWN; không chặn UI. Chưa live citation/đổi model theo nguồn Project; ngoại lệ
+fixture namespace riêng trong DB local đang chờ lựa chọn owner. Không gửi9Project thật.
+Gemini image/PDF chưa live nên disabled; SYNTHETIC_PUBLIC_APPROVED giữ nguyên.
+Localhost/LAN200, session/9Project và config qua restart giữ nguyên; Edge/keeper
+không restart, public vẫn đóng. Không migration/push/merge. Các mục04/10 dưới đây
+là lịch sử, không phải trạng thái hiện hành.
 
 ## Đối soát API key — 2026-10-04 — T1_DIAGNOSTICS_LOCAL_RELEASED / UI_AWAITING_DESIGN_APPROVAL
 

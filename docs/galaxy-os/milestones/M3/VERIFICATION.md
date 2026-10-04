@@ -1,5 +1,47 @@
 # M3 — Kiểm chứng AI đa nhà cung cấp
 
+## 05/10 — AI floating chat + typography và provider live
+
+Thiết kế owner approved current prompt, thực thi INLINE. CODE_SHA=TESTED_SHA
+`11af11543196b80dc6f35abbfba9b1b329768390`, TESTED_TREE `3d1386054b8494db092efca10393e21efc2a39fc`; local release `local-df7ba5a5c974`.
+[Handoff hiện hành](ui-figma/HANDOFF.md), [live provider receipts](ui-figma/ACTIVATION.md).
+
+| Gate                     | Kết quả mới / log trong `.runtime/ai-floating-ui-evidence/task-logs/`                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| API full isolated        | 70files,1274PASS+1skip; `t5-api-full.log`                                                                    |
+| Web full sau review      | 39files,560PASS; `t5-web-after-review.log`                                                                   |
+| Edge / document / Python | 5 / 1 / 41PASS; `t5-full-test.log`, `t5-document-authorized.log`, `t5-python.log`                            |
+| Lint / types / format    | PASS; `t5-lint-final.log`, `t5-types-accepted.log`, `t5-format-accepted.log`                                 |
+| Chrome final             | 12/12PASS; `t5-browser-final.log`, screenshot/computed tại `t5-accepted/`                                    |
+| Build artifact           | API/Web/Edge PASS snapshot sạch; `t5-release-build.log`                                                      |
+| Review                   | 0Critical,2Important sửa RED→GREEN,0Minor; ledger/review receipt giữ cùng evidence                           |
+| Cutover / config         | READY; store so sánh toàn nội dung trong RAM không đổi,3revision và Kira text evidence giữ nguyên            |
+| Main / LAN               | Chrome popup560px/16–26/112px và cùngsession/9Project; Windows3000/LAN200, public503, Edge/keeper giữ nguyên |
+| Vendor thật              | KiraPASS3câu; Gemini partial503; Mistral429; nguồn Project/citationlive chưa đạt                             |
+
+Không nới assertion đểPASS: ca mới ban đầu đọc route trước Next navigation hoàn tất
+và thiếu marker source riêng; sửa setup/wait đúng route, giữ assertion. Một lần P04
+cold navigation chưa hiện composer trong5s; chẩn đoán riêngPASS3.3s và fullfinalPASS,
+không đổi timeout/source để che lỗi. Logfailed giữ nguyên. Root `pnpm test` lần đầu
+TooManyConnections do API fixture giữpool; dừng fixtureAPI rồi nguyênAPI suitePASS.
+Web/Edge trong rootlog đãPASS; document sandbox bị treo socket, dừng đúng testPID,
+chạy có quyền socket đạt1PASS. Không sửa guard/rate limit, DB hoặc chiến dịch clock.
+
+Lệnh API: nativeNode `--env-file=scripts/m3-isolated.env.example`, `taskset -c0,1`,
+spawn `pnpm --filter @galaxy/api test`; guard xác minh DBfixture/user cô lập. Web:
+`pnpm --filter @galaxy/web test`; lint/types/format theo root scripts. Chrome dùng
+`playwright.m2.config.ts`, `m3-project-ai.spec.ts` và `m3-pdf-workspace.spec.ts`,
+productionfixture/TLS33003/ChromeCDP33005, `GALAXY_NATIVE_ZOOM=true`. Dừng các runner
+fixture sau khi sao chép evidence; giữ profile/session người dùng và localhost3000.
+
+Release dùng `prepare-local-release.py build/units` và recipe lock/preflight/rollback
+hiện hữu; chỉ Web/API đổi artifact. Không key/envprivate trong artifact hoặcGit.
+Scan giá trị credential trong diff/logevidence bằng boolean nội bộ: không thấy;
+không in dấu vân tay secret. Main smoke chỉ GET và nháp RAM không gửi hồ sơ.
+Bàn phím mobile là kiểm viewport thấp, thiết bị thật UNVERIFIED. Live citation/source
+đang chờ owner lựa chọn fixture target; không biến mock hoặc admin text thành RAGlive.
+Các mục04/10 bên dưới là bằng chứng lịch sử.
+
 ## Đối soát key — bản sửa T1 local79e2ba59dd6d — 04/10/2026
 
 CODE_SHA=TESTED_SHA `e7ad61d8c739fbcb053ad0bc8b9e5bafc4d917a3`, TESTED_TREE

@@ -29,41 +29,45 @@
 **Files:** API project-ai.service.ts + test/m3-project-ai.integration.test.ts; Web project-ai-context.ts/test, project-ai-surfaces.tsx; project-ai.tsx; portal-shell/layout; ProjectWorkspaceHeader; project-chat/project-ai-workspace; products/EntityFiles entrypoints; browser m3-ai-floating.spec.ts.
 **Interfaces:** AiContext hiện hữu; aiSessionKey(projectId,scope,context); owner open(scope/context), mount(spec,target); ProjectAi nhận portalTarget/active/presentation callbacks, giữ hooks/request keys. List API trả context từ answer đầu tiên, không thêm model/schema.
 
-- [ ] RED: context key phân biệt Project/room/fileversion; API list context được pin; browser header mở popup không đổi URL, cùng launcher, dock↔float↔page giữ thread/nháp và chỉ một send.
-- [ ] Chạy targeted Vitest/API integration và Chrome test mới; Expected: assertions đỏ do chưa có behavior.
-- [ ] Code owner + React portal cho phần view; scope/history filter đúng; mọi URL update kiểm Project/page hiện hành; actor/logout/revoke clear.
-- [ ] Chạy targeted unit/API/browser. Expected: PASS, một controller mỗi session; checkpoint và commit local.
+- [x] RED: context key phân biệt Project/room/fileversion; API list context được pin; browser header mở popup không đổi URL, cùng launcher, dock↔float↔page giữ thread/nháp và chỉ một send.
+- [x] Chạy targeted Vitest/API integration và Chrome test mới; Expected: assertions đỏ do chưa có behavior.
+- [x] Code owner + React portal cho phần view; scope/history filter đúng; mọi URL update kiểm Project/page hiện hành; actor/logout/revoke clear.
+- [x] Chạy targeted unit/API/browser. Expected: PASS, một controller mỗi session; checkpoint và commit local.
 
 ### Task 2: T3 — typography, composer, responsive và nguồn
 
 **Files:** globals.css; project-ai.tsx, project-chat.tsx; chat-text.tsx/test, chat-composer-input.tsx/test; source-drawer.tsx + EntityFiles; browser m3-ai-floating.spec.ts.
 **Interfaces:** dùng owner Task1; textarea value/onChange/onSend với composition guard; source drawer dùng native dialog; renderer chỉ React escaped nodes, không raw HTML/fetch URL.
 
-- [ ] RED: computed16/26, textarea16px cao112px→200px, IME không gửi, Shift+Enter newline; source close/scroll anchor; viewport không tràn.
-- [ ] Code CSS scoped tokens và container breakpoint:220–240 + min520 +380–420; thu danh sách trước/AI overlay khi thiếu chỗ. Popup560/max760h; expanded1100/content760; mobile dynamic/safe area.
-- [ ] Composer ghim, nguồn picker/chips từ index được phép, Enter/Shift+Enter, nút44px, scroll mới không giật; render paragraph/list/table/code an toàn.
-- [ ] Targeted unit + Chrome1366×768/1440×900/1920×1080/390×844, zoom200%, visual viewport keyboard và focus/Escape. Expected: PASS; checkpoint/commit.
+- [x] RED: computed16/26, textarea16px cao112px→200px, IME không gửi, Shift+Enter newline; source close/scroll anchor; viewport không tràn.
+- [x] Code CSS scoped tokens và container breakpoint:220–240 + min520 +380–420; thu danh sách trước/AI overlay khi thiếu chỗ. Popup560/max760h; expanded1100/content760; mobile dynamic/safe area.
+- [x] Composer ghim, nguồn picker/chips từ index được phép, Enter/Shift+Enter, nút44px, scroll mới không giật; render paragraph/list/table/code an toàn.
+- [x] Targeted unit + Chrome1366×768/1440×900/1920×1080/390×844, zoom200%, visual viewport keyboard và focus/Escape. Expected: PASS; checkpoint/commit.
 
 ### Task 3: T4 — activation provider đủ điều kiện
 
 **Files:** không dự kiến source; ACTIVATION/evidence riêng, canonical store qua configure-ai.py hiện hữu.
 **Interfaces:** CLI status/key/enable; API settings/test synthetic, config revision và capability evidence.
 
-- [ ] Kiểm một lần metadata3provider/API. Nếu thiếu: WAITING_FOR_LOCAL_SECRET_INPUT, hướng dẫn input ẩn một lần, tiếp tục UI.
-- [ ] Có key mới: bật từng provider bằng enable đã xác minh; kiểm API nhận revision, admin synthetic text test qua Chrome hiện hành, không bypass gate.
+- [x] Kiểm một lần metadata3provider/API. Nếu thiếu: WAITING_FOR_LOCAL_SECRET_INPUT, hướng dẫn input ẩn một lần, tiếp tục UI.
+- [x] Có key mới: bật từng provider bằng enable đã xác minh; kiểm API nhận revision, admin synthetic text test qua Chrome hiện hành, không bypass gate.
 - [ ] Live Việt/text nguồn/câu nối tiếp qua ứng dụng; provider độc lập, giữ request/model/status/usage/citation evidence an toàn. Chỉ fixture được duyệt, không chín Project thật.
-- [ ] Ghi PASS hoặc lỗi vendor cụ thể; không retry loop/fallback/mua credit; image/PDF giữ tắt nếu chưa có live test riêng.
+- [x] Ghi PASS hoặc lỗi vendor cụ thể; không retry loop/fallback/mua credit; image/PDF giữ tắt nếu chưa có live test riêng.
 
 ### Task 4: T5 — hồi quy, review, release và bàn giao
 
 **Files:** docs hiện hữu; artifacts/env/recipe ngoài Git.
 **Interfaces:** Tasks1–3; pipeline prepare-local-release.py + recipe cutover sửa lock/rollback đã kiểm ở T1.
 
-- [ ] Full lint/typecheck/API/Web/Edge/document/Python/build/format; Chrome AI/pages và popup matrix. Expected: PASS hoặc blocker thật được ghi.
-- [ ] Fresh Astra/high review toàn diff: correctness/security/auth/isolation/UX/Ponytail; sửa Important/Critical bằng RED→GREEN rồi suite.
-- [ ] Commit local scope, build snapshot sạch riêng, verify artifact, stage env chỉ đổi release marker và giữ store; cutover đúng Web/API, giữ Edge/keeper.
-- [ ] Chrome localhost3000, LAN/public gate/session và store/revision sau cutover; docs hiện hữu và STATUS/handoff cập nhật kết quả thật; commit docs riêng.
+- [x] Full lint/typecheck/API/Web/Edge/document/Python/build/format; Chrome AI/pages và popup matrix. Expected: PASS hoặc blocker thật được ghi.
+- [x] Fresh Astra/high review toàn diff: correctness/security/auth/isolation/UX/Ponytail; sửa Important/Critical bằng RED→GREEN rồi suite.
+- [x] Commit local scope, build snapshot sạch riêng, verify artifact, stage env chỉ đổi release marker và giữ store; cutover đúng Web/API, giữ Edge/keeper.
+- [x] Chrome localhost3000, LAN/public gate/session và store/revision sau cutover; docs hiện hữu và STATUS/handoff cập nhật kết quả thật; commit docs riêng.
 
 Kế hoạch đã tự review: Task2 chỉ dùng owner/context Task1; Task3 dùng3adapter đã có,
 không phụ thuộc UI để lấy credential. Task4 dùng cùng artifact/codeSHA đã kiểm.
 Chủ dự án đã chỉ định INLINE và chỉ hỏi ngoài phạm vi; không thêm vòng xác nhận plan.
+
+Checkpoint05/10: T2/T3/T5 UI release đã đạt; T4 admin text live có kết quả thật,
+citation/đổi model theo nguồn Project live còn chờ fixture target. Không đánh task live
+hoàn tất chỉ vì Kira admin textPASS. Xem HANDOFF/ACTIVATION hiện hành.

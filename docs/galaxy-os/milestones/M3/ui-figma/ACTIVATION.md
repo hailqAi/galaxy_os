@@ -1,55 +1,78 @@
 # Kích hoạt và xác minh AI
 
-Cập nhật đối soát04/10: bản chẩn đoán `local-79e2ba59dd6d` đã phát hành. Trong các
-nguồn cấu hình có căn cứ đã kiểm, chưa có credential; nơi người dùng đã nhập vẫn
-chưa xác định. Không kết luận người dùng chưa nhập, không yêu cầu nhập lại trước
-khi biết entrypoint. Store hiện có được giữ nguyên, không tạo/ghi lại trong lượt này.
-Không có request vendor live. Việc tạo store0600 providers rỗng thuộc lượt trước.
+Cập nhật05/10: **3credential đã được tìm thấy trong store canonical hiện hữu**,
+replacementConfirmed=true nhưng ban đầu enabled=false. Đã dùng đúng CLI `enable`
+từng provider; không nhập lại, không tạo store khác, không sửa resolver/adapter T1.
+API đọc revision mới ngay theo gate; không restart API để kích hoạt. Nơi nhập cũ
+`PREVIOUS_INPUT_LOCATION_UNKNOWN`; nguyên nhân lần nhập cũ không đến backend vẫn
+`NOT_PROVEN`, không suy ra key sai.
 
-## Đối soát writer–store–API–UI mới nhất
+## Writer–store–API–UI hiện hành
 
-| Thành phần            | Quan sát thật                                                                                                                     |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| CLI                   | `/home/galaxy_os/.worktrees/m2-a-20260928/scripts/configure-ai.py`; owner terminal/service `hailq_glx`                            |
-| Cwd                   | Entrypoint absolute chạy từ root hoặc worktree đều resolve cùng store; root không có `scripts/configure-ai.py`                    |
-| Resolver              | `--file` ưu tiên, rồi `GALAXY_AI_CONFIG_FILE`, rồi default absolute; relative path bị từ chối                                     |
-| Store canonical       | `/home/galaxy_os/.runtime/ai-providers.json`, regular0600, cùng owner, cha traversable                                            |
-| Schema/revision       | Contract `providers` hiện hữu, không có trường schemaVersion; không provider entry nên revision=null                              |
-| Nội dung an toàn      | Root JSON hợp lệ, providerCount=0, mọi credentialNonempty=false; không xuất giá trị/dấu vân tay key                               |
-| Nguồn đã kiểm         | Root `.env.local`, worktree `.env.local` (không tồn tại), env/process hiện hành, env release trước được rollback manifest dẫn tới |
-| API mới               | PID434812, cwd `/home/galaxy_os/.runtime/releases/ai-config-20261004/apps/api`, đọc canonical store                               |
-| UI thật               | Chrome localhost3000, registry và màn quản trị cùng `EMPTY_STORE`, revision=null; không báo đã kết nối                            |
-| Nguồn người dùng nhập | UNKNOWN; cần tên lệnh/màn hình và cwd/user nếu nhớ, không cần gửi key                                                             |
+- CLI absolute `/home/galaxy_os/.worktrees/m2-a-20260928/scripts/configure-ai.py`;
+  root/worktree cùng resolver `/home/galaxy_os/.runtime/ai-providers.json`.
+- Owner terminal/API hailq_glx uid1000; store0600 ngoài artifact, cha traversable.
+  Schema contract `providers` hiện hữu; không tự thêm schemaVersion.
+- Cả3entry có credential không rỗng, replacementConfirmed=true, enabled=true.
+  So sánh boolean nội bộ trước/sau mỗi enable: giữ nguyên3key và toàn bộ sibling.
+  API/UI đều LOADED, revision khớp; các lỗi parse/quyền/rỗng vẫn tách biệt.
+- Sau cutover Web/API mới: cấu hình và bằng chứng live giữ nguyên; so sánh toàn
+  store trong RAM, không xuất key/prefix/suffix/hash. Không store riêng mỗi release.
+- Registry không có một boolean READY gộp mọi bước: credential loaded,
+  providerReady, textLiveVerified và sourcePolicy thể hiện riêng.
 
-Lệch path/owner/cache của runtime hiện tại **không được chứng minh**. CLI trước đây
-không nhận env override là lỗi có thể tái hiện bằng fixture; đó chưa phải bằng chứng
-nguồn gốc khóa người dùng bị thiếu. Registry trước đây gom lỗi đọc/parse, và UI cấu
-hình quản trị giữ snapshot cũ; bản mới phân loại và refresh metadata đúng.
+| Provider | Config revision                        | Text live qua Chrome localhost3000                           |
+| -------- | -------------------------------------- | ------------------------------------------------------------ |
+| Gemini   | `42f289ab-f8da-422b-b737-f3565c202f0c` | Câu đầu đạt; câu tiếp503 TEMPORARY_ERROR; chưa text verified |
+| Mistral  | `6b102872-8ff0-40b5-b962-c895732ed9d4` | 429 RATE_LIMITED; chưa chứng minh model access/text          |
+| Kira     | `004d59a2-0baa-4ef2-9028-8bcc6ac41f16` | PASS3câu, HTTP200, textLiveVerified=true                     |
 
-Chẩn đoán phân biệt `EMPTY_STORE`, `PROVIDER_ENTRY_MISSING`, `CREDENTIAL_EMPTY`,
-`STORE_UNREADABLE`, `STORE_INVALID_FORMAT`, `CREDENTIAL_NOT_LOADED`,
-`CREDENTIAL_NOT_CONFIRMED`, `INVALID_CONFIG`. Vendor từ chối credential chỉ được
-báo khi có vendor response; không suy ra từ file rỗng. Có bytes không đồng nghĩa
-model/account đã verified. `status` chỉ dùng evidence đủ contract và cùng revision.
+## Evidence vendor thật
 
-Lệnh đọc an toàn, dùng được từ root/worktree, không yêu cầu nhập key:
+Một lượt admin synthetic/provider trên API release local79e2ba59dd6d trước cutover;
+Chrome → Galaxy API → adapter → vendor → ADMIN_SMOKE/answer lưu trong Galaxy.
+Fixture cố định `galaxy-ai-activation-v1`: câu tiếng Việt, NG-42 rộng900mm/chưa xác
+nhận, câu nối tiếp cùng conversation. Không mock runtime thật hoặc gửi nguồn doanh nghiệp.
 
-```bash
-python3 /home/galaxy_os/.worktrees/m2-a-20260928/scripts/configure-ai.py status --provider google_gemini
-```
+| Provider | Galaxy request ID                      | Requested / returned model          | Usage input/output     |
+| -------- | -------------------------------------- | ----------------------------------- | ---------------------- |
+| Gemini   | `cd8b93fc-98c8-423d-b6b0-0fa3f082c2f0` | gemini-3.8-flash / gemini-3.8-flash | 219/68 phần thành công |
+| Mistral  | `245da2a6-f71f-45b6-bec7-b575096c43df` | mistral-medium-3-5 / null           | null                   |
+| Kira     | `00392844-efea-43de-bcde-b86c05d34654` | kira-3.5-pro / kira-3.5-pro         | 1874/470               |
 
-Writer giữ flock/atomic replace/CAS có sẵn; cập nhật một provider không mất provider
-khác; JSON lỗi không tạo file rỗng để repair. Không sửa store thật trong lượt này.
-API đọc lại mỗi gate; kiểm revision mới bằng file fixture và refresh Chrome. Cutover
-đã xác minh process API mới nhận cùng path và trạng thái rỗng; **chưa thể kiểm key
-hợp lệ tồn tại qua restart** khi chưa tìm thấy credential đủ điều kiện.
+Request ID trên là ID kiểm thử Galaxy; không giả thành upstream vendor request ID.
+Không retry để săn PASS, không fallback/mua credit/đổi gói;503/429 không được gọi
+là credential sai. Kira đạt không bật Gemini/Mistral/media. Ngưỡng concurrency,
+input/output, timeout/retry hữu hạn giữ nguyên; không thêm giới hạn lượt/ngày.
+
+Model/endpoint/reasoning đã đối chiếu tài liệu chính thức:
+[Gemini current model](https://ai.google.dev/gemini-api/docs/latest-model?hl=en),
+[Interactions API](https://ai.google.dev/api/interactions-api),
+[Mistral Medium3.5](https://docs.mistral.ai/models/mistral-medium-3-5-26-04),
+[Mistral reasoning](https://docs.mistral.ai/studio/conversations/reasoning),
+[Kira3.5Pro](https://kiraai.vn/models/kira-3.5-pro/).
+Không đổi ID/endpoint hoặc dùng câu trả lời model tự nhận danh tính làm chứng minh upstream.
+
+## Giới hạn live còn lại
+
+ADMIN_SMOKE ẩn khỏi history/ownedAnswer theo thiết kế; không nới ACL để mở citation
+của run này. Hành trình citation/source và đổi model đã PASS bằng fixture; **chưa
+đạt live Project RAG/citation trên localhost3000**. Đã hỏi owner lựa chọn fixture
+namespace/account/Project riêng trong DB local hoặc giữ DB local nguyên. Lý do:
+API3000 dùng DB local, trong khi yêu cầu test ghi dùng DB fixture riêng. Chưa tạo
+namespace đó/duyệt egress mới hoặc dùng9Project thật; việc này không chặn phát hành UI.
+
+SOURCE_EGRESS_STATUS: SYNTHETIC_PUBLIC_APPROVED,9Project thật DENIED. Text kết nối
+được không cấp quyền gửi hồ sơ. Gemini image/PDF NOT_RUN/DISABLED; Mistral/Kira text.
+Evidence an toàn nằm `.runtime/ai-floating-ui-evidence/live-*.json`; không secret
+trong Git/browser/logs/trace; request bodies/headers bí mật không được ghi.
 
 ## Chuỗi cấu hình
 
 `configure-ai.py key` → private store → `GALAXY_AI_CONFIG_FILE` của API systemd →
 registry mỗi gate → metadata configLoaded/revision/providerReady/sourcePolicy → UI.
 API không cache credential theo phiên; thay file đúng đường không cần restart.
-Không đọc giá trị key trong Codex, không đưa vào argv/history/browser/docs/artifact.
+Không xuất giá trị key về hội thoại Codex, argv/history/browser/docs/artifact.
 CLI dùng input ẩn, owner service hailq_glx. Chạy tại worktree canonical:
 
 ```bash
@@ -103,7 +126,5 @@ Candidate giữ nguyên: Gemini gemini-3.8-flash, Mistral mistral-medium-3-5, Ki
 Tài liệu không chứng minh quyền của credential. Kira returnedModel cũng không
 phải xác minh độc lập upstream.
 
-Còn phải làm khi có khóa: test live từng provider; hành trình UI → API đang phục vụ →
-vendor → answer lưu → citation mở; đổi model trong cùng hội thoại với fixture được
-quản lý và approved sources; Gemini image/PDF live riêng. Hiện chỉ UNIT/INTEGRATION/
-CHROME fixture được xác minh, LIVE_PROVIDER=NOT_RUN/BLOCKED_BY_CREDENTIALS.
+Các điều kiện live còn thiếu được ghi tại mục trên; không còn blocker thiếu credential.
+Không bật image/PDF trước kiểm riêng, không cho phép nguồn Project chỉ vì text đạt.

@@ -1,35 +1,85 @@
-# Bàn giao UI PDF và kích hoạt AI — 04/10/2026
+# Bàn giao popup AI, typography và kích hoạt provider — 05/10/2026
 
-## Quyết định chủ dự án — OWNER_APPROVED_CURRENT_PROMPT
+## Quyết định và kết quả hiện hành
 
-Chủ dự án đã duyệt rõ trong prompt tiếp tục: popup Project560px/max viewport−32px,
-thu nhỏ/mở rộng tối đa1100px/đóng; giữ panel P04; chat16/26, composer16px cao100–120px
-tự giãn có giới hạn; nháp RAM; không sao chép conversation; giữ model/source/quyền.
-Chủ dự án chọn thực thi INLINE từng task và cho phép tự hoàn thiện chi tiết kỹ thuật
-trong kiến trúc/phạm vi này. Không cần xác nhận lại phương án hoặc phương thức thực thi.
-Đây không phải phê duyệt một thiết kế/plan khác. Kế hoạch kỹ thuật dẫn xuất ở
-[plan popup](../../../../superpowers/plans/2026-10-04-ai-floating-chat.md).
+DESIGN_APPROVAL_STATUS: **OWNER_APPROVED_CURRENT_PROMPT**. Chủ dự án đã duyệt rõ
+popup560px, mở rộng1100px, giữ P04, nháp RAM, chat16/26, composer100–120px và chọn
+INLINE từng task. Đây chỉ là thiết kế đã được duyệt trong prompt tiếp tục;
+không xác nhận thay một thiết kế hoặc kế hoạch khác. Không chờ duyệt lại.
+[Plan thực thi](../../../../superpowers/plans/2026-10-04-ai-floating-chat.md).
 
-Trạng thái hiện hành: **UI_IMPLEMENTING**. Các dòng AWAITING_DESIGN_APPROVAL bên dưới
-là receipt lịch sử đã được quyết định này thay thế, không còn là blocker hiện tại.
-Kiểm đầu lượt: cả3provider CREDENTIAL_STORED/API chưa kiểm lại, enabled=false,
-textLiveVerified=false; không yêu cầu nhập lại. Nơi nhập cũ giữ
-PREVIOUS_INPUT_LOCATION_UNKNOWN, không chặn UI hoặc kích hoạt mới.
+- Header Project và launcher cùng mở popup tại P03/P04/P05/P06, không đổi route;
+  desktop non-modal560px/max viewport−32, cao≤760px/viewport an toàn, radius20px,
+  right/bottom24px. Expanded≤1100px, vùng đọc≤760px, vẫn non-modal desktop.
+  Mobile sheet native modal, chiều cao visualViewport/safe area. Không widget/voice/video.
+- Một ProjectAi controller cho actor/Project/scope/context, portal chuyển nơi hiển thị;
+  docked↔floating↔expanded↔page giữ conversation/request/model/source, không copy thread.
+  ALL và room/task/file/version có identity riêng. Header và launcher không nhân popup.
+- Đóng/thu nhỏ không xóa saved messages hoặc cancel request; nháp chỉ RAM. Ca request
+  A đến muộn200/403 khi đã mở B giữ popup/focus/nháp B; quay lại A nhận đúng answer.
+  Actor/revoke mask nội dung dẫn xuất; source viewer giữ version/focus/scroll anchor.
+- P04 giữ danh sách230px (rail64 khi thiếu chỗ), chat chính min520px trên3cột,
+  AI380–420px; vùng nội dung<1000px dùng overlay, <650px một cột. Không giảm font.
+- Computed Chrome: chat16/26, header18/26, metadata13/18, controls14/20,
+  composer16/26 cao112→200px, nút44px. Viewport thấp giới hạn composer theo phần còn
+  lại nhưng min112px. S01/P01/P03/P05/P06 title28/36, table14/22; giữ data/drilldown.
+- Renderer React escaped hỗ trợ block paragraph/heading/list/table/code; inline syntax
+  giữ dạng chữ, không HTML/script/URL preview. Table/code cuộn trong khối, URL dài wrap.
+  Enter gửi, Shift+Enter xuống dòng, IME229/composition không gửi; Escape đóng menu/source
+  trước popup; đọc tin cũ không bị auto-scroll, có nút tới cập nhật.
 
-Checkpoint T2: popup đã code; header/launcher dùng cùng owner ở PortalShell, mỗi
-actor/Project/scope/context giữ một controller. React portal chuyển nơi hiển thị,
-không nhân conversation/request. API list trả context ghim từ metadata request
-hiện hữu; không migration. Unit22/22, context API1/1, Chrome10/10 (fixture) PASS,
-gồm dock→floating→expanded→page khi request chờ, model pin, revoke/actor, nháp RAM.
-Checkpoint T3 (05/10): chat/AI16px/26px, header18/26, metadata13/18; composer112px
-giãn tới200px (viewport thấp giới hạn theo chiều cao còn lại), nút44px. P04 dùng
-230/min520/380–420; thu danh sách thành rail trước, AI overlay khi vùng nội dung
-dưới1000px. SourceDrawer P06 dùng chung; renderer Markdown khối escaped, không
-HTML hoặc URL preview. Nháp RAM, source Escape/focus và scroll anchor đã kiểm.
-Web560/560 PASS; Chrome các viewport1366/1440/1920/390 và vùng thấp PASS; zoom native
-200% DPR2/scale1 tại712×452 CSS px, sendBottom419.5px PASS. Chưa gọi vendor thật.
+## Provider và phạm vi chứng minh
 
-## Đối soát credential — kết quả mới nhất04/10
+[ACTIVATION](ACTIVATION.md) ghi đủ revision/request/model/status/usage. Đã tìm được
+3credential hợp lệ về cấu hình ở `/home/galaxy_os/.runtime/ai-providers.json`, ban đầu
+provider disabled; bật đúng CLI, API nạp ngay. Không nhập lại hoặc viết secret manager.
+Nơi nhập cũ UNKNOWN, nguyên nhân lần nhập cũ NOT_PROVEN. Store/schema/keys/sibling
+và evidence giữ nguyên qua cutover; API mới đọc cùng3revision.
+
+Kira text admin synthetic PASS3câu qua Chrome/API/vendorthật; Gemini câu đầu đạt rồi
+503; Mistral429. Không suy lỗi key từ503/429. Chưa live citation/đổi model theo nguồn
+Project trên API3000; đang chờ lựa chọn fixture DB của owner (không chặn UI).
+ChínProject thật sourcePolicyDENIED; Gemini image/PDF chưa kiểm nên disabled.
+Không gọi toàn gói AI hoàn tất hoặc dùng mock thay bằng chứng vendor.
+
+## Nghiệm thu và release
+
+CODE_SHA=TESTED_SHA `11af11543196b80dc6f35abbfba9b1b329768390`; TESTED_TREE `3d1386054b8494db092efca10393e21efc2a39fc`.
+DEPLOYED_LOCAL_RELEASE `local-df7ba5a5c974`. DOCS_COMMIT_SHA: commit tài liệu sau code này,
+SHA đầy đủ ở phản hồi cuối (không self-reference). Artifact riêng
+`/home/galaxy_os/.runtime/releases/ai-floating-20261005`; recipe/rollback code+config
+`/home/galaxy_os/.runtime/ai-floating-20261005`. Không restore DB/migration.
+
+API1274PASS+1skip, Web560, Edge5, document1, Python41; lint/typecheck/format/build
+PASS. Chrome cuối12/12: P03/P04/P05/P06 entrypoints, source/version, model/retry,
+actor/revoke, presentation, late response A/B, typography/IME. Matrix1366×768,
+1440×900/1024,1920×1080,390×844 và390×480; native zoom200% DPR2/scale1 tại712×452,
+sendBottom419.5px. Bàn phím mobile kiểm qua viewport thấp, chưa thiết bị thực.
+
+Fresh reviewer yêu cầu Astra/high, chỉ đọc:0Critical,2Important,0Minor. Hai Important
+(Escape React portal; late403A đóngB) RED→GREEN và fullChrome12PASS sau sửa một lượt.
+Ponytail/correctness/security/auth/UX không còn finding bắt buộc chưa xử lý. Metadata
+model thực thi không được tool xác nhận độc lập: UNVERIFIED. Không thêm dependency.
+
+Main Chrome đúng release, popup560/font16/26/composer112; minimize/expand RAM PASS;
+session và cùng9Project giữ nguyên, egress disabled đúng lý do. Windowslocalhost/LAN200,
+API3001 không public quaLAN; publicHTTPS503/TLSverified quaLANresolve, chưa kiểmWAN.
+EdgePID giữ nguyên/keeperRunningLimited; logs+userunits không phụ thuộc Codex.
+PUBLIC_DOMAIN: REMAINS_CLOSED. GIT_PUSH_MERGE: NOT_PERFORMED.
+
+Evidence `.runtime/ai-floating-ui-evidence/`: live receipts, t5-accepted computed/screenshot,
+main-before/after-cutover, archived task logs/review ledger. [VERIFICATION](../VERIFICATION.md)
+ghi lệnh, các lần test fail và cách xử lý; không gán log failed thànhPASS.
+
+## Điểm tiếp tục
+
+Chọn nơi fixture live citation được phép; sau đó test nguồn/câu nối tiếp/đổi model
+trong cùng conversation với nguồn synthetic rõ quyền. Gemini503/Mistral429 cần
+lần kiểm chủ động khi đủ điều kiện; không retryloop hoặc fallback. Image/PDF chưa bật.
+Nguồn nhập cũ UNKNOWN không còn blocker. Hai binary thiếu baseline chưa phục hồi.
+Các receipt04/10 phía dưới chỉ là lịch sử, không thay trạng thái05/10 ở trên.
+
+## Lịch sử đối soát credential — 04/10 (đã được cập nhật ở trên)
 
 **T1 sửa chẩn đoán đã phát hành local; nguyên nhân khóa người dùng chưa đến backend
 chưa chứng minh. T2–T4 popup/typography chưa triển khai vì đang chờ duyệt thiết kế.**
@@ -55,7 +105,7 @@ Không coi release chẩn đoán này là hoàn tất toàn bộ yêu cầu mớ
 [bằng chứng mới](../VERIFICATION.md). Chỉ cần người dùng cho biết tên lệnh/màn hình
 đã nhập, cwd/user nếu nhớ; không gửi key trong chat. Chưa yêu cầu nhập lại.
 
-## AI floating chat + typography — thiết kế đã trình bày, chờ duyệt
+## Nguồn thiết kế popup — đề xuất04/10, owner duyệt trong prompt tiếp tục
 
 Nguồn thật `/home/galaxy_os/figma`: `AI Panel - Active State.pdf`,
 `P04 Workspace - Contextual AI.pdf`, `Galaxy AI - Project Wide Search.pdf`,
@@ -65,7 +115,8 @@ trong `/tmp/galaxy-ai-floating-pdf`; không OCR/MCP/quota retry. File tools/rend
 không đưa Git, không gửi vendor. Nguồn PDF cho navy/trắng, source chips, thông báo
 riêng tư, ba vùng P04 và kiểu đọc rộng; không dùng số liệu/trả lời mẫu làm dữ liệu.
 
-Phần điều chỉnh mới đề xuất theo yêu cầu người dùng, chưa phải UI đã phát hành:
+Phần điều chỉnh UX mới của Galaxy, đã được duyệt và triển khai trong bản05/10;
+không khẳng định các kích thước này thuộc PDF hoặc sản phẩm bên ngoài:
 
 - Một owner AI toàn Project tồn tại ở PortalShell; header và launcher cùng mở một
   presentation. Mặc định non-modal560px, max viewport−32px, cao tối đa760px và phần
@@ -83,10 +134,8 @@ Phần điều chỉnh mới đề xuất theo yêu cầu người dùng, chưa 
   button/tab14–15/20–22, title18/26, page28/36. Giữ font UI hỗ trợ tiếng Việt đang có;
   không CDN font, zoom/scale toàn app hoặc wildcard toàn bộ trang.
 
-Phải tiếp tục sau duyệt: writing-plans, TDD controller/context/IME/focus/scroll/source,
-kiểm popup tại1366×768,1440×900/1024,1920×1080,390×844 và zoom200%, bàn phím mobile;
-full regression/review, rồi release riêng. Các mục này hiện `NOT_IMPLEMENTED/NOT_RUN`.
-Thiếu key không chặn triển khai UI sau khi thiết kế được duyệt.
+Các bước implementation/test/release05/10 đã được ghi ở đầu tài liệu.
+Kiểm bàn phím mobile dùng viewport thấp/safe area trên Chrome, chưa thử thiết bị thật.
 
 ## Receipt bản sửa T1
 
