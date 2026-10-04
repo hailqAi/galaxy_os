@@ -1,5 +1,76 @@
 # M3 — Kiểm chứng AI đa nhà cung cấp
 
+## Đối soát key — bản sửa T1 local79e2ba59dd6d — 04/10/2026
+
+CODE_SHA=TESTED_SHA `e7ad61d8c739fbcb053ad0bc8b9e5bafc4d917a3`, TESTED_TREE
+`ee4f0204a9fc04357da4f2f4692d2f0b7d9cecdd`. Scope: resolver/status CLI,
+registry diagnostics, nhãn và refresh revision của UI quản trị. Popup/typography
+chưa triển khai, chờ duyệt thiết kế; vendor live NOT_RUN. Không coi baseline hoặc
+kết quả worktree khác là nghiệm thu runtime mới.
+
+| Kiểm tra              | Kết quả/bằng chứng mới                                                                     |
+| --------------------- | ------------------------------------------------------------------------------------------ |
+| Python                | 41 PASS; `python-complete.log`; targeted8 PASS sau sửa cuối                                |
+| API                   | 70files,1274 PASS+1skip; `api-full.log`; không sửa API sau lần này                         |
+| Web                   | 38files,558 PASS; `web-full.log`; không sửa Web sau lần này                                |
+| Edge/document         | 5/1 PASS; `edge-authorized.log`, `document-authorized.log`                                 |
+| Lint/typecheck/format | PASS; `lint.log`, `typecheck.log`, `format-final.log`; img/AnyIO warning baseline còn      |
+| Source build          | PASS HTTPS fixture; `build-https.log`                                                      |
+| Chrome AI             | 4 PASS; `browser-ai.log`: settings revision, lưu/history/model/source/revoke và đổi actor  |
+| Chrome pages          | 4 PASS; `browser-pages.log`: S01/P01/P03/P04/P05/P06 và viewer/version, cùng build fixture |
+| Review                | Ponytail/correctness/security/auth/UX T1 không còn blocker cụ thể; reviewer read-only      |
+| Artifact              | Snapshot sạch/build API+Web+Edge PASS; `release-build.log`; candidate `ARTIFACTS_VERIFIED` |
+| Cutover               | READY; `cutover.log`, store ngoài artifact; rollback code/config có sẵn                    |
+| Main Chrome           | `main-after.json/log`: release đúng, session/Project-set giữ nguyên, UI EMPTY_STORE đúng   |
+| Runtime               | `t1-after.json`: API434812 đúng user/cwd/store; metadata/mtime store bằng trước cutover    |
+| Network/supervisor    | `network-after.log`: localhost/LAN200, API LAN private, public503; keeper/Edge giữ nguyên  |
+
+Evidence tại worktree canonical `.runtime/ai-floating-evidence/`, chỉ metadata an
+toàn/log fixture; không secret/cookie/body Project/ảnh profile vào Git. Chứng từ
+RED→GREEN cũ do agent báo được ghi rõ transcribed trong `t1-receipts.md`; raw logs
+`t1-evidence-validation-{red,green}.log` và `t1-compatibility-{red,green}.log` có thật.
+Không đổi log failed thành PASS: `build.log` lần sandbox không hoàn tất; build đầu
+có lỗi HTTP origin (`build-authorized.log`), đã dùng HTTPS test đúng contract;
+Python/Edge test trong sandbox lỗi socket EPERM, document test bị dừng, các log gốc
+được giữ và rerun với quyền socket test riêng đã đạt. Đây không phải vendor negative
+load test. Không migration/clock campaign, không reset DB hoặc thay credential thật.
+
+Lệnh đã chạy, với cwd worktree canonical:
+
+```bash
+python3 -m unittest discover -s scripts -p 'test_*.py'
+pnpm lint
+pnpm typecheck
+pnpm format:check
+pnpm --filter @galaxy/web test
+pnpm --filter @galaxy/edge test
+services/document-ai/.venv/bin/pytest services/document-ai
+```
+
+API full dùng env `scripts/m3-isolated.env.example`, isolation guard và taskset0,1
+cho runner (giữ nguyên main DB và URL). Build nhận cùng test env, thêm
+`APP_PUBLIC_ORIGIN=https://localhost:33003`. Production fixture phục vụ qua
+`scripts/m2-a-serve.mjs api --ai-fixture` và `web --production`, TLS runner hiện hữu;
+Playwright config `apps/web/playwright.m2.config.ts`, hai spec `m3-project-ai.spec.ts`
+và `m3-pdf-workspace.spec.ts`, native Chrome bridge33005, context/account/DB riêng.
+Đã dừng ba runner test của lượt này; giữ nguyên context Chrome localhost3000.
+Không chuyển người dùng sang33003.
+
+Release bằng `prepare-local-release.py build/units` hiện hữu, recipe giới hạn ở
+`/home/galaxy_os/.runtime/ai-config-20261004`. Review phát hiện rollback gap trước
+cutover: đã sửa partial-old-stop và cleanup-failure không bỏ restoration, re-read
+baseline/backup dưới lock; bốn fake-runtime case PASS. Không dùng kiểm fake rollback
+làm bằng chứng đã rollback runtime thật; candidate READY nên không phải chạy rollback.
+
+CREDENTIAL_ROOT_CAUSE vẫn NOT_PROVEN: store canonical thật rỗng, tất cả nguồn env
+có căn cứ đã đối chiếu không chứa key, nhưng chưa biết entrypoint người dùng đã nhập.
+Không yêu cầu nhập lại trước đối soát nguồn đó. Ba provider độc lập, text live NOT_RUN;
+Gemini image/PDF disabled; SYNTHETIC_PUBLIC_APPROVED và DENIED real-project giữ nguyên.
+Không có provider/request ID vendor thật để báo; mọi request browser ghi là fixture.
+
+[AI floating chat + typography: thiết kế chờ duyệt và kết quả thật](ui-figma/HANDOFF.md).
+Các phần dưới là lịch sử trước bản T1; không thay các trạng thái chưa đạt ở trên.
+
 ## Cập nhật 04/10 — UI PDF đã phát hành, live AI còn thiếu credential
 
 Release hiện hành `local-49bd3faf2e63`, code/tested `de274d3e1c38dfb0136fee25334f031b95eb328b`,

@@ -1,5 +1,36 @@
 # Project status
 
+## Đối soát API key — 2026-10-04 — T1_DIAGNOSTICS_LOCAL_RELEASED / UI_AWAITING_DESIGN_APPROVAL
+
+Đã phát hành riêng bản sửa chẩn đoán cấu hình `local-79e2ba59dd6d`, Web BUILD_ID
+`EoYwh9ru-aBUpRSIJ5ji4`. CODE_SHA=TESTED_SHA `e7ad61d8c739fbcb053ad0bc8b9e5bafc4d917a3`;
+TESTED_TREE `ee4f0204a9fc04357da4f2f4692d2f0b7d9cecdd`. Đây chưa phải hoàn tất yêu cầu
+popup/typography hoặc kích hoạt provider live.
+
+CLI canonical và API thực tế cùng đọc `/home/galaxy_os/.runtime/ai-providers.json`.
+Store0600 đúng owner, schema hợp lệ, nhưng providers rỗng; metadata/mtime không đổi
+qua cutover. Đã đối chiếu root/worktree, env hiện hành, process systemd và env release
+trước; không thấy credential tại các nguồn này. **Chưa biết lệnh/màn hình người dùng
+đã nhập**, nên nguyên nhân khóa không có trong store vẫn chưa chứng minh. Không yêu
+cầu nhập lại mù quáng, không tạo store khác hoặc tìm key trong hội thoại/history.
+
+Đã sửa CLI nhận override tuyệt đối, phân loại trạng thái đọc/store/entry/key; API/UI
+hiện đúng nguyên nhân; cấu hình quản trị mở theo revision mới. Kiểm thử writer giữ
+provider khác, concurrent updates, evidence không đủ không tạo live flags, không
+xuất key và không truncate khi JSON lỗi. Không bỏ auth/egress/disabled guard.
+
+API1274+1skip/Web558/Edge5/document1/Python41 đạt; Chrome8 hành trình fixture đạt;
+lint/typecheck/format/build/artifact đạt. Chrome main đúng release, cùng actor và
+9Project/300permission/0room; localhost/LAN200, public HTTPS503 qua LAN resolve,
+Edge308598 và keeper giữ chạy. Không migration/restore DB, vendor call hoặc egress
+nguồn doanh nghiệp. Cả3provider EMPTY_STORE, text live NOT_RUN; Gemini ảnh/PDF tắt.
+
+Thiết kế popup/controller đã trình bày và chờ duyệt rõ theo AGENTS; chưa viết phần
+popup/typography. PDF thật ở `/home/galaxy_os/figma` đã đọc text và render. Chữ panel
+hiện đo12/18, composer14/20 cao78px, selector11px: **chưa đạt mục tiêu mới**.
+[Bàn giao hiện hành](docs/galaxy-os/milestones/M3/ui-figma/HANDOFF.md) có đối soát, phạm vi đã phát hành và thiết kế chờ duyệt.
+Các mục bên dưới là lịch sử. Không push/merge/public.
+
 ## UI từ PDF và kích hoạt AI — 2026-10-04 — UI_LOCAL_RELEASED / AI_LIVE_BLOCKED
 
 S01 theo Desktop/Mobile/States; P01/P02/P03/P04/P05/P06 và AI toàn dự án đã lên

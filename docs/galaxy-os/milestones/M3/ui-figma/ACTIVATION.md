@@ -1,8 +1,48 @@
 # Kích hoạt và xác minh AI
 
-Trạng thái lượt04/10: đường cấu hình/admin test đã triển khai; credential của cả ba
-provider chưa tồn tại trong store được API dùng. File thiếu đã được tạo riêng0600
-với providers rỗng, không tạo khóa giả. Không có request vendor live trong lượt này.
+Cập nhật đối soát04/10: bản chẩn đoán `local-79e2ba59dd6d` đã phát hành. Trong các
+nguồn cấu hình có căn cứ đã kiểm, chưa có credential; nơi người dùng đã nhập vẫn
+chưa xác định. Không kết luận người dùng chưa nhập, không yêu cầu nhập lại trước
+khi biết entrypoint. Store hiện có được giữ nguyên, không tạo/ghi lại trong lượt này.
+Không có request vendor live. Việc tạo store0600 providers rỗng thuộc lượt trước.
+
+## Đối soát writer–store–API–UI mới nhất
+
+| Thành phần            | Quan sát thật                                                                                                                     |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| CLI                   | `/home/galaxy_os/.worktrees/m2-a-20260928/scripts/configure-ai.py`; owner terminal/service `hailq_glx`                            |
+| Cwd                   | Entrypoint absolute chạy từ root hoặc worktree đều resolve cùng store; root không có `scripts/configure-ai.py`                    |
+| Resolver              | `--file` ưu tiên, rồi `GALAXY_AI_CONFIG_FILE`, rồi default absolute; relative path bị từ chối                                     |
+| Store canonical       | `/home/galaxy_os/.runtime/ai-providers.json`, regular0600, cùng owner, cha traversable                                            |
+| Schema/revision       | Contract `providers` hiện hữu, không có trường schemaVersion; không provider entry nên revision=null                              |
+| Nội dung an toàn      | Root JSON hợp lệ, providerCount=0, mọi credentialNonempty=false; không xuất giá trị/dấu vân tay key                               |
+| Nguồn đã kiểm         | Root `.env.local`, worktree `.env.local` (không tồn tại), env/process hiện hành, env release trước được rollback manifest dẫn tới |
+| API mới               | PID434812, cwd `/home/galaxy_os/.runtime/releases/ai-config-20261004/apps/api`, đọc canonical store                               |
+| UI thật               | Chrome localhost3000, registry và màn quản trị cùng `EMPTY_STORE`, revision=null; không báo đã kết nối                            |
+| Nguồn người dùng nhập | UNKNOWN; cần tên lệnh/màn hình và cwd/user nếu nhớ, không cần gửi key                                                             |
+
+Lệch path/owner/cache của runtime hiện tại **không được chứng minh**. CLI trước đây
+không nhận env override là lỗi có thể tái hiện bằng fixture; đó chưa phải bằng chứng
+nguồn gốc khóa người dùng bị thiếu. Registry trước đây gom lỗi đọc/parse, và UI cấu
+hình quản trị giữ snapshot cũ; bản mới phân loại và refresh metadata đúng.
+
+Chẩn đoán phân biệt `EMPTY_STORE`, `PROVIDER_ENTRY_MISSING`, `CREDENTIAL_EMPTY`,
+`STORE_UNREADABLE`, `STORE_INVALID_FORMAT`, `CREDENTIAL_NOT_LOADED`,
+`CREDENTIAL_NOT_CONFIRMED`, `INVALID_CONFIG`. Vendor từ chối credential chỉ được
+báo khi có vendor response; không suy ra từ file rỗng. Có bytes không đồng nghĩa
+model/account đã verified. `status` chỉ dùng evidence đủ contract và cùng revision.
+
+Lệnh đọc an toàn, dùng được từ root/worktree, không yêu cầu nhập key:
+
+```bash
+python3 /home/galaxy_os/.worktrees/m2-a-20260928/scripts/configure-ai.py status --provider google_gemini
+```
+
+Writer giữ flock/atomic replace/CAS có sẵn; cập nhật một provider không mất provider
+khác; JSON lỗi không tạo file rỗng để repair. Không sửa store thật trong lượt này.
+API đọc lại mỗi gate; kiểm revision mới bằng file fixture và refresh Chrome. Cutover
+đã xác minh process API mới nhận cùng path và trạng thái rỗng; **chưa thể kiểm key
+hợp lệ tồn tại qua restart** khi chưa tìm thấy credential đủ điều kiện.
 
 ## Chuỗi cấu hình
 

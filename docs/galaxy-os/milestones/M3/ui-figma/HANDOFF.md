@@ -1,5 +1,103 @@
 # Bàn giao UI PDF và kích hoạt AI — 04/10/2026
 
+## Đối soát credential — kết quả mới nhất04/10
+
+**T1 sửa chẩn đoán đã phát hành local; nguyên nhân khóa người dùng chưa đến backend
+chưa chứng minh. T2–T4 popup/typography chưa triển khai vì đang chờ duyệt thiết kế.**
+Không coi release chẩn đoán này là hoàn tất toàn bộ yêu cầu mới.
+
+1. Nơi người dùng nhập key chưa rõ. CLI canonical, API release cũ/mới và env release
+   trước đều trỏ cùng store `/home/galaxy_os/.runtime/ai-providers.json`; root env và
+   các env liên quan không có key. Store0600 hợp lệ nhưng không provider entry.
+2. Sửa lỗi có bằng chứng ở CLI resolver/diagnostics, phân loại lỗi registry và refresh
+   metadata quản trị. Không đổi adapter, auth, egress hoặc giả readiness. Những lỗi
+   này chưa chứng minh tại sao khóa người dùng không tồn tại trong store.
+3. Gemini/Mistral/Kira chưa có model nào gọi thật; `PROVIDER_TEXT_LIVE_RESULTS=NOT_RUN`.
+   Đường admin synthetic vẫn cho phép test model chưa verified, giữ auth/lease/quota.
+4. Header Hỏi AI vẫn mở route cũ; chưa có floating popup mới. Panel ngữ cảnh P04 còn
+   nguyên. Đã giữ phần UI độc lập với blocker credential bằng việc đọc PDF, đo style,
+   truy vết controller và trình bày thiết kế; chưa vượt bước duyệt bắt buộc.
+5. Chữ/khung chưa đổi: browser thật1920×945 đo panel12px/18px rộng340px; composer14px/20px
+   cao78px; selector11px; page title24px/32px; P04 cột205/1024/340. Chưa đạt yêu cầu16/26.
+6. History/source/model switching đã qua Chrome fixture hiện hữu; chưa có bằng chứng
+   vòng đời floating/expanded mới. Không nhận fixture/mock thành vendor live.
+
+[Đối soát chi tiết và thao tác cấu hình](ACTIVATION.md),
+[bằng chứng mới](../VERIFICATION.md). Chỉ cần người dùng cho biết tên lệnh/màn hình
+đã nhập, cwd/user nếu nhớ; không gửi key trong chat. Chưa yêu cầu nhập lại.
+
+## AI floating chat + typography — thiết kế đã trình bày, chờ duyệt
+
+Nguồn thật `/home/galaxy_os/figma`: `AI Panel - Active State.pdf`,
+`P04 Workspace - Contextual AI.pdf`, `Galaxy AI - Project Wide Search.pdf`,
+`Galaxy OS_ M2-A UI States & Edge Cases.pdf`, `P06 Documents & AI Source View.pdf`,
+`Galaxy OS Foundations.pdf`. Tên local không có `(1)`. Cả sáu đã trích text và render
+trong `/tmp/galaxy-ai-floating-pdf`; không OCR/MCP/quota retry. File tools/render
+không đưa Git, không gửi vendor. Nguồn PDF cho navy/trắng, source chips, thông báo
+riêng tư, ba vùng P04 và kiểu đọc rộng; không dùng số liệu/trả lời mẫu làm dữ liệu.
+
+Phần điều chỉnh mới đề xuất theo yêu cầu người dùng, chưa phải UI đã phát hành:
+
+- Một owner AI toàn Project tồn tại ở PortalShell; header và launcher cùng mở một
+  presentation. Mặc định non-modal560px, max viewport−32px, cao tối đa760px và phần
+  viewport an toàn, right/bottom24px, radius20px. Expanded tối đa1100px, nội dung760px.
+  Mobile dùng sheet chiều cao động/safe area. Không voice/video/Live API/widget ngoài.
+- Đóng/thu nhỏ chỉ ẩn presentation; cùng component giữ conversationId/model/nháp RAM
+  và request. Dừng là hành động riêng. Actor/Project đổi thì không retarget response
+  cũ sang Project mới; không thêm draft storage. Không hai consumer gửi/poll cùng thread.
+- P04 giữ session theo group/room khác session ALL/null toàn Project. Backend list
+  có thể trả context từ request/answer metadata hiện hữu để lọc đúng history, không
+  migration/domain mới. P05/P06 mở đúng source/version; reuse viewer P06.
+- P04 dùng vùng nội dung để chọn ba cột220–240 / tối thiểu520 / 380–420. Khi thiếu
+  chiều rộng, thu danh sách trước, rồi overlay/tab AI; không giảm chữ để ép ba cột.
+- Token có scope: chat16/26, composer16/24–26 cao100–120→200px, metadata13/18,
+  button/tab14–15/20–22, title18/26, page28/36. Giữ font UI hỗ trợ tiếng Việt đang có;
+  không CDN font, zoom/scale toàn app hoặc wildcard toàn bộ trang.
+
+Phải tiếp tục sau duyệt: writing-plans, TDD controller/context/IME/focus/scroll/source,
+kiểm popup tại1366×768,1440×900/1024,1920×1080,390×844 và zoom200%, bàn phím mobile;
+full regression/review, rồi release riêng. Các mục này hiện `NOT_IMPLEMENTED/NOT_RUN`.
+Thiếu key không chặn triển khai UI sau khi thiết kế được duyệt.
+
+## Receipt bản sửa T1
+
+| Trường                       | Kết quả                                                                               |
+| ---------------------------- | ------------------------------------------------------------------------------------- |
+| CREDENTIAL_ROOT_CAUSE        | NOT_PROVEN; user entrypoint UNKNOWN; actual store EMPTY_STORE                         |
+| CLI_RUNTIME_STORE_MATCH      | PASS; absolute canonical path, root/worktree cùng resolver                            |
+| STORE_NON_DESTRUCTIVE_UPDATE | PASS fixture atomic/concurrent/CAS; store thật không ghi                              |
+| CONFIG_RELOAD_VERIFIED       | PASS API process mới đọc cùng store rỗng; revision refresh PASS fixture               |
+| PROVIDER_TEXT_LIVE_RESULTS   | Gemini/Mistral/Kira NOT_RUN — không eligible credential                               |
+| IMAGE_PDF_CAPABILITIES       | Gemini live chưa kiểm nên tắt; Mistral/Kira text-only                                 |
+| EGRESS_POLICY_STATUS         | SYNTHETIC_PUBLIC_APPROVED; Project thật DENIED                                        |
+| FLOATING_AI_STATUS           | AWAITING_DESIGN_APPROVAL; chưa triển khai                                             |
+| CONTEXTUAL_PANEL_STATUS      | Giữ panel P04 hiện hữu; regression PASS                                               |
+| EXPAND_MINIMIZE_HISTORY      | Vòng đời popup mới NOT_RUN; panel cũ/history fixture PASS                             |
+| PROJECT_SWITCH_ISOLATION     | Popup mới NOT_RUN; actor/revoke fixture PASS                                          |
+| TYPOGRAPHY_COMPUTED_STYLES   | Baseline12/18 panel,14/20 composer78px, selector11px; chưa đổi                        |
+| RESPONSIVE_KEYBOARD_RESULTS  | UI mới/zoom200/IME/mobile keyboard NOT_RUN                                            |
+| CODE_SHA / TESTED_SHA        | `e7ad61d8c739fbcb053ad0bc8b9e5bafc4d917a3`                                            |
+| TESTED_TREE                  | `ee4f0204a9fc04357da4f2f4692d2f0b7d9cecdd`                                            |
+| DOCS_COMMIT_SHA              | Commit docs chứa báo cáo này; SHA chính xác trong phản hồi cuối, không self-reference |
+| DEPLOYED_LOCAL_RELEASE       | `local-79e2ba59dd6d`, BUILD_ID `EoYwh9ru-aBUpRSIJ5ji4`                                |
+| RUNTIME_CONFIG_PERSISTENCE   | Store metadata/mtime/path giữ nguyên qua cutover; key persistence chưa thể kiểm       |
+| REMAINING_BLOCKERS           | Nơi nhập credential chưa rõ; chưa có key đủ điều kiện live; chờ duyệt thiết kế UI     |
+| DESIGN_HANDOFF_PATH          | `docs/galaxy-os/milestones/M3/ui-figma/HANDOFF.md`                                    |
+| PUBLIC_DOMAIN                | REMAINS_CLOSED                                                                        |
+| GIT_PUSH_MERGE               | NOT_PERFORMED                                                                         |
+
+Artifact `/home/galaxy_os/.runtime/releases/ai-config-20261004` được build từ snapshot
+sạch, private env ngoài artifact chỉ đổi release marker; store không đổi. Rollback
+code/config tại `/home/galaxy_os/.runtime/ai-config-20261004/rollback`, không restore DB.
+Recipe cũ được sửa nhánh partial stop/rollback và kiểm bốn tình huống fake runtime;
+preflight/baseline/backup dưới cùng lifecycle lock. Cutover thật không cần rollback.
+Main Chrome cùng actor/9Project/300permission/0room; Windows localhost/LAN200,
+LAN_API3001 không truy cập, public HTTPS503 qua LAN resolve/TLSverified. Edge308598
+và keeper Running/Limited giữ nguyên; không nhận thành kiểm WAN/reboot/logoff.
+Metadata model thực thi agent: UNVERIFIED; không dùng tên yêu cầu routing làm bằng chứng.
+
+## Lịch sử lượt UI PDF trước bản sửa T1
+
 UI đã phát hành local; AI chưa nghiệm thu live vì cả ba provider chưa có credential.
 Đã tạo store còn thiếu bằng writer hiện hữu, mode0600/owner hailq_glx, providers rỗng.
 Không tạo khóa giả, không nhận khóa qua hội thoại và không gọi vendor trong lượt này.
