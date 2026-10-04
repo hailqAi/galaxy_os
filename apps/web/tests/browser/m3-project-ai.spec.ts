@@ -99,6 +99,7 @@ async function approveSyntheticSources() {
 test.afterAll(async () => {
   await db.$disconnect();
 });
+
 async function login(page: Page) {
   const cookie = fixture.users.sender!.cookie,
     separator = cookie.indexOf('=');
@@ -536,3 +537,104 @@ test('T2 cùng request và hội thoại khi dock, floating, expanded và page',
   expect(await scroll.evaluate((element) => element.scrollTop)).toBe(anchor);
   await expect(citation).toBeFocused();
 });
+
+for (const lateStatus of [200, 403]) {
+  test(`T5 response A muộn ${lateStatus} không tác động popup Project B`, async ({
+    page,
+  }) => {
+    const a = await db.project.findUniqueOrThrow({
+      where: { id: fixture.projectId },
+    });
+    const b = await db.project.create({
+      data: {
+        organizationId: a.organizationId,
+        customerId: a.customerId,
+        code: `isolation-${randomUUID()}`,
+        name: `Project B ${lateStatus}`,
+        projectOwnerId: fixture.users.sender!.id,
+        createdBy: fixture.users.authority!.id,
+        updatedBy: fixture.users.authority!.id,
+      },
+    });
+    await post(`/projects/${b.id}/authorities`, {
+      userId: fixture.users.sender!.id,
+      actions: ['INVOKE'],
+      roomCeiling: [],
+    });
+    await post(
+      `/rooms/${fixture.roomId}/messages`,
+      {
+        clientKey: randomUUID(),
+        body: `ISOLATION-M3-${lateStatus} nguồn synthetic riêng 900 mm.`,
+      },
+      'sender',
+    );
+    await approveSyntheticSources();
+    await login(page);
+    await page
+      .getByRole('button', { name: 'Hỏi Galaxy AI', exact: true })
+      .click();
+    const popup = page.getByRole('dialog', { name: /Galaxy AI/ });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let runs = 0;
+    await page.route(/\/ai\/answers\/[^/]+\/run$/, async (route) => {
+      runs++;
+      const response = await route.fetch();
+      await held;
+      if (lateStatus === 403)
+        await route.fulfill({ status: 403, json: { message: 'FORBIDDEN' } });
+      else await route.fulfill({ response });
+    });
+    const question = `ISOLATION-M3-${lateStatus} kích thước?`;
+    await popup.getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ }).check();
+    await popup.getByLabel('Câu hỏi AI', { exact: true }).fill(question);
+    await popup.getByRole('button', { name: 'Hỏi AI', exact: true }).click();
+    await expect.poll(() => runs).toBe(1);
+    try {
+      await popup.getByRole('button', { name: 'Đóng AI', exact: true }).click();
+      await page
+        .getByRole('link', { name: '← Các dự án được cấp', exact: true })
+        .click();
+      await page.getByRole('link', { name: b.name, exact: true }).click();
+      await page
+        .getByRole('button', { name: 'Hỏi Galaxy AI', exact: true })
+        .click();
+      await expect(popup.getByText(b.name, { exact: true })).toBeVisible();
+      const input = popup.getByLabel('Câu hỏi AI', { exact: true });
+      await input.fill('Nháp riêng Project B');
+      const delivered = page.waitForResponse(/\/ai\/answers\/[^/]+\/run$/);
+      release();
+      await delivered;
+      // Một chu kỳ poll: callback A không được đóng/relabel popup B.
+      await page.waitForTimeout(3500);
+      await expect(popup).toBeVisible();
+      await expect(input).toHaveValue('Nháp riêng Project B');
+      await expect(input).toBeFocused();
+      await expect(popup.getByText(question, { exact: true })).toHaveCount(0);
+      await expect(popup.getByText(/^Mô phỏng kiểm thử M3/)).toHaveCount(0);
+      await expect(page).toHaveURL(new RegExp(`/projects/${b.id}/work$`));
+      if (lateStatus === 200) {
+        await popup
+          .getByRole('button', { name: 'Đóng AI', exact: true })
+          .click();
+        await page
+          .getByRole('link', { name: '← Các dự án được cấp', exact: true })
+          .click();
+        await page.getByRole('link', { name: a.name, exact: true }).click();
+        await page
+          .getByRole('button', { name: 'Hỏi Galaxy AI', exact: true })
+          .click();
+        await expect(
+          popup.getByRole('heading', { name: question, exact: true }),
+        ).toBeVisible();
+        await expect(popup.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
+      }
+      expect(runs).toBe(1);
+    } finally {
+      release();
+    }
+  });
+}

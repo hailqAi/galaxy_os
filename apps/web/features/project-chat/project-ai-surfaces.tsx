@@ -62,6 +62,7 @@ export function AiSurfaceProvider({
   const [access, setAccess] = useState<Access>();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [floating, setFloating] = useState<{
+    projectId: string;
     key: string;
     expanded: boolean;
   }>();
@@ -158,7 +159,7 @@ export function AiSurfaceProvider({
             },
           ],
     );
-    setFloating({ key, expanded: false });
+    setFloating({ projectId: spec.projectId, key, expanded: false });
   }, []);
   const mount = useCallback((value: Mount) => {
     const grant = accessRef.current;
@@ -220,7 +221,7 @@ export function AiSurfaceProvider({
           }
         : current,
     );
-    setFloating(undefined);
+    setFloating((current) => (current?.projectId === id ? undefined : current));
   }, []);
   const selectConversation = useCallback(
     (key: string, id: string) =>
@@ -283,23 +284,6 @@ export function AiSurfaceProvider({
           event.stopPropagation();
           close();
         }}
-        onKeyDown={(event) => {
-          if (
-            event.key === 'Escape' &&
-            !event.defaultPrevented &&
-            !(event.target instanceof HTMLSelectElement) &&
-            !(event.target as HTMLElement).closest('.source-drawer')
-          ) {
-            const menu =
-              dialog?.querySelector<HTMLDetailsElement>('details[open]');
-            if (menu) {
-              menu.open = false;
-              menu.querySelector('summary')?.focus();
-            } else close();
-            event.preventDefault();
-            event.stopPropagation();
-          }
-        }}
       />
       {sessions.map((session) => (
         <PersistentSession
@@ -327,7 +311,11 @@ export function AiSurfaceProvider({
             setFloating((current) =>
               current
                 ? { ...current, expanded: !current.expanded }
-                : { key: session.key, expanded: true },
+                : {
+                    projectId: session.projectId,
+                    key: session.key,
+                    expanded: true,
+                  },
             )
           }
           revoked={revoked}

@@ -899,6 +899,26 @@ export function ProjectAi({
       ref={panel}
       aria-label="Hỏi AI"
       className={`project-ai-panel ${collapsed && presentation === 'docked' ? 'is-collapsed' : ''}`}
+      onKeyDown={(event) => {
+        if (
+          event.key !== 'Escape' ||
+          event.defaultPrevented ||
+          event.nativeEvent.isComposing ||
+          event.nativeEvent.keyCode === 229 ||
+          event.target instanceof HTMLSelectElement ||
+          (event.target as HTMLElement).closest('.source-drawer')
+        )
+          return;
+        const menu =
+          panel.current?.querySelector<HTMLDetailsElement>('details[open]');
+        if (menu) {
+          menu.open = false;
+          menu.querySelector('summary')?.focus();
+        } else if (onClose) onClose();
+        else return;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
     >
       <header className="ai-panel-header">
         <div>

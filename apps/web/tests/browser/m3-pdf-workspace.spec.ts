@@ -523,6 +523,20 @@ test('T2 popup giữ nháp qua presentation và header không điều hướng',
   await popup
     .getByLabel('Câu hỏi AI', { exact: true })
     .fill('Nháp RAM riêng toàn dự án');
+  const unavailable = popup
+    .locator('details')
+    .filter({ hasText: 'Model chưa sẵn sàng' });
+  await unavailable.locator('summary').click();
+  await unavailable.locator('summary').press('Escape');
+  await expect(unavailable).not.toHaveAttribute('open', '');
+  await expect(popup).toBeVisible();
+  await input.press('Escape');
+  await expect(popup).not.toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Hỏi Galaxy AI', exact: true }),
+  ).toBeFocused();
+  await page.getByRole('button', { name: 'Mở Hỏi AI dự án' }).click();
+  await expect(input).toHaveValue('Nháp RAM riêng toàn dự án');
   await popup.getByRole('button', { name: 'Thu nhỏ AI' }).click();
   await expect(popup).not.toBeVisible();
   await page.getByRole('button', { name: 'Mở Hỏi AI dự án' }).click();
@@ -539,6 +553,23 @@ test('T2 popup giữ nháp qua presentation và header không điều hướng',
   await expect(popup.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue(
     'Nháp RAM riêng toàn dự án',
   );
+  for (const tab of ['Làm việc', 'Hồ sơ & kiến thức']) {
+    await popup.getByRole('button', { name: 'Đóng AI', exact: true }).click();
+    await page.getByRole('link', { name: tab, exact: true }).click();
+    await expect(page).toHaveURL(
+      new RegExp(
+        `/projects/${fixture.projectId}/${tab === 'Làm việc' ? 'work' : 'files'}$`,
+      ),
+    );
+    const route = page.url();
+    await page
+      .getByRole('button', { name: 'Hỏi Galaxy AI', exact: true })
+      .click();
+    await expect(popup.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue(
+      'Nháp RAM riêng toàn dự án',
+    );
+    expect(page.url()).toBe(route);
+  }
   const measurements = [];
   for (const viewport of [
     { width: 1366, height: 768 },

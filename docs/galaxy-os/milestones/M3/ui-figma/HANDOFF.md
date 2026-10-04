@@ -29,7 +29,6 @@ HTML hoặc URL preview. Nháp RAM, source Escape/focus và scroll anchor đã k
 Web560/560 PASS; Chrome các viewport1366/1440/1920/390 và vùng thấp PASS; zoom native
 200% DPR2/scale1 tại712×452 CSS px, sendBottom419.5px PASS. Chưa gọi vendor thật.
 
-
 ## Đối soát credential — kết quả mới nhất04/10
 
 **T1 sửa chẩn đoán đã phát hành local; nguyên nhân khóa người dùng chưa đến backend
