@@ -1,7 +1,28 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
-import { AiAnswer, aiStatusLabel, ModelSelector } from './project-ai';
+import {
+  AiAnswer,
+  aiStatusLabel,
+  ModelSelector,
+  aiSessionKey,
+} from './project-ai';
+
+it('giữ identity scope/Project/room và phiên bản nguồn riêng, không phụ thuộc thứ tự field', () => {
+  expect(typeof aiSessionKey).toBe('function');
+  expect(aiSessionKey('p', 'ALL', { fileAssetId: 'f', fileVersion: 1 })).toBe(
+    aiSessionKey('p', 'ALL', { fileVersion: 1, fileAssetId: 'f' }),
+  );
+  const keys = [
+    aiSessionKey('p', 'ALL'),
+    aiSessionKey('p', 'CONSULTING'),
+    aiSessionKey('q', 'ALL'),
+    aiSessionKey('p', 'ALL', { roomId: 'r' }),
+    aiSessionKey('p', 'ALL', { fileAssetId: 'f', fileVersion: 1 }),
+    aiSessionKey('p', 'ALL', { fileAssetId: 'f', fileVersion: 2 }),
+  ];
+  expect(new Set(keys).size).toBe(keys.length);
+});
 
 it('chỉ đưa câu trả lời hoàn tất vào nháp khi người dùng yêu cầu, không tạo nút đăng tự động', () => {
   const answer = {

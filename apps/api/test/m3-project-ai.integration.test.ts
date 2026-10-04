@@ -763,6 +763,13 @@ describe.sequential(
           .expect(201);
         expect(answer.body.status).toBe('COMPLETED');
         expect(fetcher).toHaveBeenCalledTimes(1);
+        const listed = (
+          await scenario.get('').expect(200)
+        ).body.conversations.find(
+          (item: { id: string }) => item.id === c.body.id,
+        );
+        expect(listed.context).toEqual({ roomId: scenario.rooms[0]!.room.id });
+        expect(listed).not.toHaveProperty('answers');
         expect(
           (await scenario.get(`/conversations/${c.body.id}`).expect(200)).body
             .context,

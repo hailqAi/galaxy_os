@@ -1,6 +1,7 @@
 'use client';
 import React from 'react';
 import Link from 'next/link';
+import { useAiSurfaces } from '../project-chat/project-ai-surfaces';
 
 export const projectGroups = [
   ['CONSULTING', 'Tư vấn & báo giá'],
@@ -25,6 +26,7 @@ export function ProjectWorkspaceHeader({
   aiEnabled?: boolean;
 }) {
   const base = `/projects/${projectId}`;
+  const ai = useAiSurfaces();
   const roomAccess = active === 'work' || !permissions.includes('project.read');
   return (
     <header className="project-workspace-header">
@@ -41,10 +43,15 @@ export function ProjectWorkspaceHeader({
           {code && <p className="mt-1 text-sm text-slate-500">{code}</p>}
         </div>
         <div className="flex flex-wrap gap-2">
-          {aiEnabled && (
-            <Link className="ai-launch" href={`${base}/ai`}>
+          {(aiEnabled ||
+            (ai?.access?.projectId === projectId && ai.access.allowed)) && (
+            <button
+              className="ai-launch"
+              aria-label="Hỏi Galaxy AI"
+              onClick={() => ai?.open({ projectId, scope: 'ALL' })}
+            >
               ✦ Hỏi Galaxy AI
-            </Link>
+            </button>
           )}
           {permissions.includes('project.read') && (
             <details className="workspace-more">

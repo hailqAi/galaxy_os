@@ -1062,17 +1062,33 @@ export class ProjectAiService {
           ? 'CONFIGURED'
           : 'NOT_CONFIGURED',
         models,
-        conversations: await tx.chatAiConversation.findMany({
-          where: {
-            organizationId: actor.organizationId,
-            projectId,
-            ownerId: actor.userId,
-            answers: { none: adminRunWhere },
-          },
-          select: { id: true, scope: true, createdAt: true },
-          orderBy: { createdAt: 'desc' },
-          take: 100,
-        }),
+        conversations: await tx.chatAiConversation
+          .findMany({
+            where: {
+              organizationId: actor.organizationId,
+              projectId,
+              ownerId: actor.userId,
+              answers: { none: adminRunWhere },
+            },
+            select: {
+              id: true,
+              scope: true,
+              createdAt: true,
+              answers: {
+                orderBy: { createdAt: 'asc' },
+                take: 1,
+                select: { usage: true },
+              },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 100,
+          })
+          .then((rows) =>
+            rows.map(({ answers, ...conversation }) => ({
+              ...conversation,
+              context: requestMetadata(answers[0]?.usage)?.context ?? null,
+            })),
+          ),
       };
     });
   }

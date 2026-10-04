@@ -1,5 +1,11 @@
 # Trạng thái triển khai và điểm tiếp tục
 
+## Popup AI — OWNER_APPROVED_CURRENT_PROMPT / IMPLEMENTING
+
+Thiết kế560/1100/P04/nháp RAM/16–26 đã được chủ dự án duyệt trong prompt tiếp tục.
+Thực thi inline, không chờ duyệt lại; receipt chờ duyệt bên dưới là lịch sử.
+Cả3provider đã có key mới (metadata), enabled=false; kiểm live theo luồng riêng.
+
 ## Đối soát API key — 2026-10-04 — T1_DIAGNOSTICS_LOCAL_RELEASED / UI_AWAITING_DESIGN_APPROVAL
 
 Đã phát hành riêng bản sửa chẩn đoán cấu hình `local-79e2ba59dd6d`, Web BUILD_ID

@@ -1,7 +1,14 @@
 'use client';
 import { createCommandKey } from '../../app/lib/create-command-key';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { api, ApiError } from '../../app/lib/api';
 
 export type AiContext = {
@@ -10,6 +17,19 @@ export type AiContext = {
   fileAssetId?: string;
   fileVersion?: number;
 };
+export const aiSessionKey = (
+  projectId: string,
+  scope: string,
+  context?: AiContext | null,
+) =>
+  JSON.stringify([
+    projectId,
+    scope,
+    context?.roomId ?? null,
+    context?.productLineId ?? null,
+    context?.fileAssetId ?? null,
+    context?.fileVersion ?? null,
+  ]);
 const contextParams = (context?: AiContext) =>
   Object.fromEntries(
     Object.entries(context ?? {}).map(([key, value]) => [key, String(value)]),
@@ -71,7 +91,12 @@ type Answer = {
   uncertainty?: string | null;
   sources: Source[];
 };
-type Conversation = { id: string; scope: string; createdAt?: string };
+type Conversation = {
+  id: string;
+  scope: string;
+  createdAt?: string;
+  context?: AiContext | null;
+};
 type History = Conversation & { answers: Answer[]; context?: AiContext | null };
 type SourceDetail = Source & {
   text: string;
@@ -302,15 +327,39 @@ export function ProjectAi({
   onDraft,
   initialContext,
   roomLabels,
+  portalTarget,
+  active = true,
+  presentation = 'docked',
+  projectName,
+  initialConversationId,
+  onSelected,
+  onScopeChange,
+  onFloat,
+  onExpand,
+  onMinimize,
+  onClose,
+  onPage,
 }: {
   projectId: string;
   actorId: string;
   group: string;
   initialContext?: AiContext;
   roomLabels?: Record<string, string>;
-  onRevoked: () => void;
+  onRevoked: (status?: number) => void;
   canConfigure?: boolean;
   onDraft?: (text: string) => void;
+  portalTarget?: HTMLElement | null;
+  active?: boolean;
+  presentation?: 'docked' | 'floating' | 'expanded' | 'page';
+  projectName?: string;
+  initialConversationId?: string;
+  onSelected?: (id: string) => void;
+  onScopeChange?: (scope: string) => void;
+  onFloat?: () => void;
+  onExpand?: () => void;
+  onMinimize?: () => void;
+  onClose?: () => void;
+  onPage?: () => void;
 }) {
   const panel = useRef<HTMLElement>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -342,7 +391,39 @@ export function ProjectAi({
   const selectedRef = useRef('');
   const [scope, setScope] = useState(group);
   const [history, setHistory] = useState<History>();
-  const context = selected ? (history?.context ?? undefined) : initialContext;
+  const context =
+    selected && history?.answers.length
+      ? (history.context ?? undefined)
+      : initialContext;
+  const presentationActive = useRef(active);
+  const [verified, setVerified] = useState(false);
+  const [wasActive, setWasActive] = useState(active);
+  if (wasActive !== active) {
+    setWasActive(active);
+    setVerified(false);
+  }
+  const drafts = useRef(new Map<string, string>());
+  const selectedCallback = useRef(onSelected);
+  const pagePresentation = useRef(presentation === 'page');
+  useLayoutEffect(() => {
+    selectedCallback.current = onSelected;
+    pagePresentation.current =
+      active && (presentation === 'page' || presentation === 'docked');
+  }, [onSelected, presentation, active]);
+  const updateUrl = (id: string) => {
+    selectedCallback.current?.(id);
+    if (
+      !pagePresentation.current ||
+      ![`/projects/${projectId}/ai`, `/projects/${projectId}/work`].includes(
+        location.pathname,
+      )
+    )
+      return;
+    const url = new URL(location.href);
+    if (id) url.searchParams.set('ai', id);
+    else url.searchParams.delete('ai');
+    window.history.replaceState(window.history.state, '', url);
+  };
   const [question, setQuestion] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -421,21 +502,26 @@ export function ProjectAi({
         [401, 403, 404, 412].includes(cause.status)
       ) {
         setQuestion('');
+        drafts.current.clear();
         requestKey.current = undefined;
         setRetryPin(undefined);
         selectedRef.current = '';
         setSelected('');
-        const url = new URL(location.href);
-        url.searchParams.delete('ai');
-        window.history.replaceState(window.history.state, '', url);
         activePage.current = false;
         refreshAgain.current = false;
-        onRevoked();
+        if (location.pathname.startsWith(`/projects/${projectId}/`)) {
+          const url = new URL(location.href);
+          url.searchParams.delete('ai');
+          window.history.replaceState(window.history.state, '', url);
+        }
+        onRevoked(cause.status);
       }
     },
-    [onRevoked, setSource, setQuestion, setRetryPin],
+    [onRevoked, setSource, setQuestion, setRetryPin, projectId],
   );
   const select = (id: string) => {
+    drafts.current.set(selectedRef.current, question);
+    setQuestion(drafts.current.get(id) ?? '');
     ++reading.current;
     sourceKey.current = undefined;
     indexScope.current = undefined;
@@ -447,14 +533,16 @@ export function ProjectAi({
     setSourceIds([]);
     requestKey.current = undefined;
     setRetryPin(undefined);
-    const url = new URL(location.href);
-    if (id) url.searchParams.set('ai', id);
-    else url.searchParams.delete('ai');
-    window.history.replaceState(window.history.state, '', url);
+    updateUrl(id);
   };
   const refresh = useCallback(
     async function refresh() {
-      if (!activePage.current || document.visibilityState !== 'visible') return;
+      if (
+        !activePage.current ||
+        !presentationActive.current ||
+        document.visibilityState !== 'visible'
+      )
+        return;
       if (refreshing.current) {
         refreshAgain.current = true;
         return;
@@ -498,12 +586,29 @@ export function ProjectAi({
         if (
           controller.current?.signal.aborted ||
           !activePage.current ||
+          !presentationActive.current ||
           document.visibilityState !== 'visible' ||
           epoch !== reading.current ||
           id !== selectedRef.current
         )
           return;
         setProvider(result.provider);
+        const identity = aiSessionKey(projectId, group, initialContext);
+        if (
+          detail &&
+          aiSessionKey(
+            projectId,
+            detail.scope,
+            detail.answers.length ? detail.context : initialContext,
+          ) !== identity
+        ) {
+          selectedRef.current = '';
+          setSelected('');
+          setHistory(undefined);
+          setLoadError('Hội thoại thuộc phạm vi khác; hãy mở đúng ngữ cảnh.');
+          return;
+        }
+        setVerified(true);
         setModels(result.models ?? []);
         setSettings((current) =>
           current === undefined ? current : (result.models ?? []),
@@ -528,7 +633,12 @@ export function ProjectAi({
               : 'default',
           );
         }
-        setList(result.conversations);
+        setList(
+          result.conversations.filter(
+            (item) =>
+              aiSessionKey(projectId, item.scope, item.context) === identity,
+          ),
+        );
         setSelected(id);
         setHistory(detail);
         setLoadError('');
@@ -550,15 +660,33 @@ export function ProjectAi({
         }
       }
     },
-    [call, invalidate, modelStorageKey, setSource],
+    [
+      call,
+      invalidate,
+      modelStorageKey,
+      setSource,
+      projectId,
+      group,
+      initialContext,
+    ],
   );
+  useEffect(() => {
+    presentationActive.current = active;
+    if (active && controller.current) void refresh();
+  }, [active, refresh]);
+  useEffect(() => {
+    if (
+      initialConversationId &&
+      initialConversationId !== selectedRef.current &&
+      !sending.current
+    ) {
+      selectedRef.current = initialConversationId;
+      void refresh();
+    }
+  }, [initialConversationId, refresh]);
   useEffect(() => {
     controller.current = new AbortController();
     const generation = reading;
-    const id = new URL(location.href).searchParams.get('ai');
-    if (id && /^[\da-f-]{36}$/i.test(id)) {
-      selectedRef.current = id;
-    }
     void refresh();
     const clear = () => {
       activePage.current = false;
@@ -568,6 +696,7 @@ export function ProjectAi({
       requestKey.current = undefined;
       setRetryPin(undefined);
       setQuestion('');
+      drafts.current.clear();
       setHistory(undefined);
       setSource(undefined);
       setIndex(undefined);
@@ -587,6 +716,7 @@ export function ProjectAi({
     document.addEventListener('visibilitychange', visible);
     window.addEventListener('pagehide', clear);
     window.addEventListener('pageshow', restore);
+    window.addEventListener('galaxy-auth-changed', clear);
     const timer = setInterval(() => {
       if (document.visibilityState === 'visible') void refresh();
     }, 3000);
@@ -597,6 +727,7 @@ export function ProjectAi({
       document.removeEventListener('visibilitychange', visible);
       window.removeEventListener('pagehide', clear);
       window.removeEventListener('pageshow', restore);
+      window.removeEventListener('galaxy-auth-changed', clear);
     };
   }, [refresh]);
   const act = async (operation: () => Promise<void>) => {
@@ -660,9 +791,7 @@ export function ProjectAi({
       if (controller.current?.signal.aborted) return;
       selectedRef.current = key.conversationId;
       setSelected(key.conversationId);
-      const url = new URL(location.href);
-      url.searchParams.set('ai', key.conversationId);
-      window.history.replaceState(window.history.state, '', url);
+      updateUrl(key.conversationId);
       const answer = await call<Answer>(
         `/conversations/${key.conversationId}/answers`,
         {
@@ -710,7 +839,7 @@ export function ProjectAi({
       }
     }
   };
-  return (
+  const content = (
     <section
       ref={panel}
       aria-label="Hỏi AI"
@@ -719,501 +848,572 @@ export function ProjectAi({
       <header className="ai-panel-header">
         <div>
           <span className="eyebrow">Galaxy AI · Riêng tư</span>
-          <h2 className="mt-1 font-semibold">Hỏi AI</h2>
+          <h2 className="mt-1 font-semibold">Galaxy AI</h2>
+          {projectName && <p className="ai-project-name">{projectName}</p>}
         </div>
         <div className="flex gap-1">
           <button
-            title="Mở AI toàn màn hình"
-            aria-label="Mở AI toàn màn hình"
+            disabled={busy}
+            aria-label="Phiên AI mới"
             onClick={() => {
-              setCollapsed(false);
-              void panel.current
-                ?.requestFullscreen()
-                .catch(() =>
-                  setError(
-                    'Trình duyệt chưa cho phép toàn màn hình. Dùng trang AI toàn dự án.',
-                  ),
-                );
+              select('');
+              setQuestion('');
             }}
           >
-            ⤢
+            ＋
           </button>
+          {onPage && (
+            <button aria-label="Mở trang AI" onClick={onPage}>
+              ↗
+            </button>
+          )}
+          {onFloat && presentation === 'docked' && (
+            <button aria-label="Tách AI thành cửa sổ nổi" onClick={onFloat}>
+              ▱
+            </button>
+          )}
+          {onExpand ? (
+            <button
+              aria-label={
+                presentation === 'expanded' ? 'Thu gọn cửa sổ AI' : 'Mở rộng AI'
+              }
+              onClick={onExpand}
+            >
+              ⤢
+            </button>
+          ) : (
+            <button
+              title="Mở AI toàn màn hình"
+              aria-label="Mở AI toàn màn hình"
+              onClick={() => {
+                setCollapsed(false);
+                void panel.current
+                  ?.requestFullscreen()
+                  .catch(() =>
+                    setError(
+                      'Trình duyệt chưa cho phép toàn màn hình. Dùng trang AI toàn dự án.',
+                    ),
+                  );
+              }}
+            >
+              ⤢
+            </button>
+          )}
           <button
-            aria-label={collapsed ? 'Mở panel AI' : 'Thu gọn panel AI'}
+            aria-label={
+              onMinimize
+                ? 'Thu nhỏ AI'
+                : collapsed
+                  ? 'Mở panel AI'
+                  : 'Thu gọn panel AI'
+            }
             aria-expanded={!collapsed}
-            onClick={() => setCollapsed((value) => !value)}
+            onClick={() =>
+              onMinimize ? onMinimize() : setCollapsed((value) => !value)
+            }
           >
             {collapsed ? '+' : '−'}
           </button>
+          {onClose && (
+            <button aria-label="Đóng AI" onClick={onClose}>
+              ×
+            </button>
+          )}
         </div>
       </header>
       <div className="ai-panel-content grid gap-3" hidden={collapsed}>
-        <p className="text-xs text-slate-500">
-          Tra cứu riêng trong nguồn được cấp quyền. Câu trả lời không tự gửi vào
-          phòng chat.
-        </p>
-        {provider === 'NOT_CONFIGURED' && (
-          <p role="status">
-            Chưa có provider sẵn sàng. Xem nguyên nhân riêng ở bộ chọn model;
-            lịch sử riêng tư vẫn được giữ.
+        {!verified && <p role="status">Đang kiểm tra quyền và hội thoại…</p>}
+        <div className="ai-session-content" hidden={!verified}>
+          <p className="ai-privacy">
+            {group === 'ALL' && !initialContext
+              ? 'Toàn dự án — theo quyền của bạn'
+              : scopes.find(([id]) => id === group)?.[1]}{' '}
+            · Chỉ mình tôi
           </p>
-        )}
-        <div className="flex flex-wrap gap-3">
-          <ModelSelector
-            models={models}
-            value={model}
-            onChange={(value) => {
-              setModel(value);
-              const choice = models.find((m) => m.id === value);
-              setReasoning(
-                choice?.capabilities.reasoningModes.includes('high')
-                  ? 'high'
-                  : 'default',
-              );
-              try {
-                sessionStorage.setItem(modelStorageKey, value);
-              } catch {
-                /* Không lưu secret tại browser. */
-              }
-            }}
-          />
+          <p className="text-xs text-slate-500">
+            Tra cứu riêng trong nguồn được cấp quyền. Câu trả lời không tự gửi
+            vào phòng chat.
+          </p>
+          {provider === 'NOT_CONFIGURED' && (
+            <p role="status">
+              Chưa có provider sẵn sàng. Xem nguyên nhân riêng ở bộ chọn model;
+              lịch sử riêng tư vẫn được giữ.
+            </p>
+          )}
+          <div className="flex flex-wrap gap-3">
+            <ModelSelector
+              models={models}
+              value={model}
+              onChange={(value) => {
+                setModel(value);
+                const choice = models.find((m) => m.id === value);
+                setReasoning(
+                  choice?.capabilities.reasoningModes.includes('high')
+                    ? 'high'
+                    : 'default',
+                );
+                try {
+                  sessionStorage.setItem(modelStorageKey, value);
+                } catch {
+                  /* Không lưu secret tại browser. */
+                }
+              }}
+            />
+            {chosenModel && (
+              <label>
+                Mức suy luận{' '}
+                <select
+                  aria-label="Mức suy luận"
+                  value={reasoning}
+                  onChange={(e) => setReasoning(e.target.value)}
+                >
+                  {chosenModel.capabilities.reasoningModes.map((value) => (
+                    <option key={value} value={value}>
+                      {
+                        (
+                          {
+                            default: 'Mặc định nhà cung cấp',
+                            none: 'Tối thiểu',
+                            low: 'Thấp',
+                            medium: 'Trung bình',
+                            high: 'Cao',
+                          } as Record<string, string>
+                        )[value]
+                      }
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
           {chosenModel && (
+            <p role="status">
+              {modelStatusLabel(chosenModel)} Văn bản theo nguồn; ảnh/PDF:{' '}
+              {chosenModel.capabilities.imageInput ||
+              chosenModel.capabilities.pdfInput
+                ? 'xem khả năng đã được kiểm chứng'
+                : 'chưa được bật/kiểm chứng live'}
+              .{' '}
+              {chosenModel.textLiveVerified
+                ? 'Đã có kiểm thử live văn bản.'
+                : 'Chưa kiểm chứng live văn bản.'}
+            </p>
+          )}
+          {canConfigure && (
+            <details
+              onToggle={(event) => {
+                if (!event.currentTarget.open) setSettings(undefined);
+                else
+                  void call<{ models: ModelChoice[] }>('/settings')
+                    .then((result) => setSettings(result.models))
+                    .catch((cause) => {
+                      setSettings(undefined);
+                      setError(
+                        aiStatusLabel(
+                          (cause as Error).message,
+                          (cause as Error).message,
+                        ),
+                      );
+                    });
+              }}
+            >
+              <summary>Cấu hình nhà cung cấp và hạn mức</summary>
+              <p>
+                Khóa thay thế nhập tại terminal local của máy chủ, input ẩn. Chỉ
+                hồ sơ và phiên bản nguồn giả/công khai được quản trị duyệt mới
+                được gửi.
+              </p>
+              {settings?.map((item) => (
+                <div key={item.id} className="my-3 rounded border p-3 text-xs">
+                  <strong>{item.label}</strong> · {item.host}
+                  <p>
+                    {modelStatusLabel(item)} · revision{' '}
+                    {item.revision ?? 'chưa có'}
+                  </p>
+                  {item.credentialPresent && (
+                    <p>
+                      Đã thấy giá trị khóa trong file; quyền model cần kiểm thử
+                      riêng.
+                    </p>
+                  )}
+                  <p>
+                    {item.textLiveVerified
+                      ? 'Văn bản đã kiểm chứng live'
+                      : 'Văn bản chưa kiểm chứng live'}{' '}
+                    · {item.limits.concurrent} lượt đồng thời ·{' '}
+                    {item.limits.requestsPerDay === null
+                      ? 'Không giới hạn lượt/ngày ở ứng dụng'
+                      : `${item.limits.requestsPerDay} lượt/ngày`}
+                  </p>
+                  <p>
+                    {item.sourcePolicy === 'DENIED'
+                      ? 'Project chưa được duyệt gửi dữ liệu ra nhà cung cấp.'
+                      : 'Project được duyệt; từng source/version vẫn được kiểm tra riêng.'}
+                  </p>
+                  <p className="my-2">
+                    Kiểm thử quản trị chỉ gửi nguồn tổng hợp cố định: văn bản
+                    tối đa 3 câu; ảnh/PDF 1 câu. Không đọc hồ sơ dự án.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {(
+                      [
+                        'text',
+                        ...(item.capabilities.nativeMediaImplemented
+                          ? ['image', 'pdf']
+                          : []),
+                      ] as ('text' | 'image' | 'pdf')[]
+                    ).map((capability) => (
+                      <button
+                        key={capability}
+                        disabled={busy || !item.providerReady}
+                        onClick={() =>
+                          void act(async () => {
+                            const name = `${item.id}/${capability}`;
+                            let clientKey = activationKeys.current.get(name);
+                            if (!clientKey) {
+                              clientKey = createCommandKey();
+                              activationKeys.current.set(name, clientKey);
+                            }
+                            const result = await call<
+                              NonNullable<typeof activation>
+                            >('/settings/test', {
+                              model: item.id,
+                              capability,
+                              clientKey,
+                            });
+                            setActivation(result);
+                            if (
+                              [
+                                'COMPLETED',
+                                'FAILED',
+                                'FAILED_UNKNOWN',
+                              ].includes(result.status)
+                            )
+                              activationKeys.current.delete(name);
+                            const latest = await call<{
+                              models: ModelChoice[];
+                            }>('/settings');
+                            setSettings(latest.models);
+                            setModels(latest.models);
+                          })
+                        }
+                      >
+                        Kiểm thử{' '}
+                        {capability === 'text'
+                          ? 'văn bản'
+                          : capability === 'image'
+                            ? 'ảnh'
+                            : 'PDF'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {activation && (
+                <p role="status" className="text-xs">
+                  Lượt {activation.requestId} ·{' '}
+                  {activation.evidence?.result === 'PASS'
+                    ? 'Đạt kiểm thử nguồn tổng hợp'
+                    : aiStatusLabel(
+                        activation.errorCode ?? activation.status,
+                      )}{' '}
+                  · {activation.evidence?.requestedModel} · model trả về:{' '}
+                  {activation.evidence?.returnedModel ??
+                    'vendor không cung cấp metadata'}{' '}
+                  · revision {activation.evidence?.revision ?? 'chưa có'}
+                </p>
+              )}
+            </details>
+          )}
+          {error && <p role="alert">{error}</p>}
+          {loadError && <p role="alert">{loadError}</p>}
+          <div className="flex flex-wrap gap-3">
+            <button
+              disabled={busy}
+              onClick={() => {
+                select('');
+                setQuestion('');
+                setScope(group);
+              }}
+            >
+              Chat AI mới
+            </button>
             <label>
-              Mức suy luận{' '}
+              Phạm vi{' '}
               <select
-                aria-label="Mức suy luận"
-                value={reasoning}
-                onChange={(e) => setReasoning(e.target.value)}
+                aria-label="Phạm vi AI"
+                value={selected ? (history?.scope ?? scope) : scope}
+                disabled={
+                  busy || Boolean(selected) || Boolean(initialContext?.roomId)
+                }
+                onChange={(e) =>
+                  onScopeChange
+                    ? onScopeChange(e.target.value)
+                    : setScope(e.target.value)
+                }
               >
-                {chosenModel.capabilities.reasoningModes.map((value) => (
+                {scopes.map(([value, label]) => (
                   <option key={value} value={value}>
-                    {
-                      (
-                        {
-                          default: 'Mặc định nhà cung cấp',
-                          none: 'Tối thiểu',
-                          low: 'Thấp',
-                          medium: 'Trung bình',
-                          high: 'Cao',
-                        } as Record<string, string>
-                      )[value]
-                    }
+                    {label}
                   </option>
                 ))}
               </select>
             </label>
-          )}
-        </div>
-        {chosenModel && (
-          <p role="status">
-            {modelStatusLabel(chosenModel)} Văn bản theo nguồn; ảnh/PDF:{' '}
-            {chosenModel.capabilities.imageInput ||
-            chosenModel.capabilities.pdfInput
-              ? 'xem khả năng đã được kiểm chứng'
-              : 'chưa được bật/kiểm chứng live'}
-            .{' '}
-            {chosenModel.textLiveVerified
-              ? 'Đã có kiểm thử live văn bản.'
-              : 'Chưa kiểm chứng live văn bản.'}
-          </p>
-        )}
-        {canConfigure && (
-          <details
-            onToggle={(event) => {
-              if (!event.currentTarget.open) setSettings(undefined);
-              else
-                void call<{ models: ModelChoice[] }>('/settings')
-                  .then((result) => setSettings(result.models))
-                  .catch((cause) => {
-                    setSettings(undefined);
-                    setError(
-                      aiStatusLabel(
-                        (cause as Error).message,
-                        (cause as Error).message,
-                      ),
-                    );
-                  });
-            }}
-          >
-            <summary>Cấu hình nhà cung cấp và hạn mức</summary>
-            <p>
-              Khóa thay thế nhập tại terminal local của máy chủ, input ẩn. Chỉ
-              hồ sơ và phiên bản nguồn giả/công khai được quản trị duyệt mới
-              được gửi.
+            <label>
+              Lịch sử{' '}
+              <select
+                aria-label="Lịch sử AI"
+                value={selected}
+                disabled={busy}
+                onChange={(e) => {
+                  select(e.target.value);
+                  void refresh();
+                }}
+              >
+                <option value="">Chat mới</option>
+                {list.map((conversation, i) => (
+                  <option key={conversation.id} value={conversation.id}>
+                    {
+                      scopes.find(
+                        ([value]) => value === conversation.scope,
+                      )?.[1]
+                    }{' '}
+                    ·{' '}
+                    {conversation.createdAt
+                      ? new Date(conversation.createdAt).toLocaleString('vi-VN')
+                      : i + 1}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {context && (
+            <p
+              className="rounded border border-amber-200 bg-amber-50 p-3 text-xs"
+              role="status"
+            >
+              {context.roomId
+                ? `Ngữ cảnh hội thoại: ${roomLabels?.[context.roomId] ?? context.roomId}.`
+                : context.productLineId
+                  ? 'Ngữ cảnh: các cuộc trao đổi liên kết hạng mục.'
+                  : `Ngữ cảnh: file gốc, phiên bản v${context.fileVersion}.`}
+              {context.roomId &&
+                context.roomId !== initialContext?.roomId &&
+                ' Phạm vi đã ghim khác room đang mở; chọn Chat AI mới để dùng room mới.'}{' '}
+              Chỉ dùng nguồn có quyền trong chỉ mục hiện hữu; file chưa được gửi
+              qua chat/phát hành có thể chưa có nguồn AI. Hội thoại đã lưu giữ
+              phạm vi này.
             </p>
-            {settings?.map((item) => (
-              <div key={item.id} className="my-3 rounded border p-3 text-xs">
-                <strong>{item.label}</strong> · {item.host}
-                <p>
-                  {modelStatusLabel(item)} · revision{' '}
-                  {item.revision ?? 'chưa có'}
-                </p>
-                {item.credentialPresent && (
-                  <p>
-                    Đã thấy giá trị khóa trong file; quyền model cần kiểm thử
-                    riêng.
-                  </p>
-                )}
-                <p>
-                  {item.textLiveVerified
-                    ? 'Văn bản đã kiểm chứng live'
-                    : 'Văn bản chưa kiểm chứng live'}{' '}
-                  · {item.limits.concurrent} lượt đồng thời ·{' '}
-                  {item.limits.requestsPerDay === null
-                    ? 'Không giới hạn lượt/ngày ở ứng dụng'
-                    : `${item.limits.requestsPerDay} lượt/ngày`}
-                </p>
-                <p>
-                  {item.sourcePolicy === 'DENIED'
-                    ? 'Project chưa được duyệt gửi dữ liệu ra nhà cung cấp.'
-                    : 'Project được duyệt; từng source/version vẫn được kiểm tra riêng.'}
-                </p>
-                <p className="my-2">
-                  Kiểm thử quản trị chỉ gửi nguồn tổng hợp cố định: văn bản tối
-                  đa 3 câu; ảnh/PDF 1 câu. Không đọc hồ sơ dự án.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {(
-                    [
-                      'text',
-                      ...(item.capabilities.nativeMediaImplemented
-                        ? ['image', 'pdf']
-                        : []),
-                    ] as ('text' | 'image' | 'pdf')[]
-                  ).map((capability) => (
-                    <button
-                      key={capability}
-                      disabled={busy || !item.providerReady}
-                      onClick={() =>
-                        void act(async () => {
-                          const name = `${item.id}/${capability}`;
-                          let clientKey = activationKeys.current.get(name);
-                          if (!clientKey) {
-                            clientKey = createCommandKey();
-                            activationKeys.current.set(name, clientKey);
-                          }
-                          const result = await call<
-                            NonNullable<typeof activation>
-                          >('/settings/test', {
-                            model: item.id,
-                            capability,
-                            clientKey,
-                          });
-                          setActivation(result);
-                          if (
-                            ['COMPLETED', 'FAILED', 'FAILED_UNKNOWN'].includes(
-                              result.status,
-                            )
-                          )
-                            activationKeys.current.delete(name);
-                          const latest = await call<{ models: ModelChoice[] }>(
-                            '/settings',
-                          );
-                          setSettings(latest.models);
-                          setModels(latest.models);
-                        })
-                      }
-                    >
-                      Kiểm thử{' '}
-                      {capability === 'text'
-                        ? 'văn bản'
-                        : capability === 'image'
-                          ? 'ảnh'
-                          : 'PDF'}
-                    </button>
-                  ))}
-                </div>
-              </div>
+          )}
+          <div className="ai-suggestions" aria-label="Gợi ý AI">
+            {[
+              'Tóm tắt các nguồn được phép và nêu việc còn thiếu.',
+              'Đối chiếu các nguồn, chỉ rõ thông tin mâu thuẫn và phiên bản.',
+              'Dịch nội dung nguồn được chọn sang tiếng Anh, giữ mã và con số.',
+              'Soạn nháp phản hồi dựa trên nguồn, nêu rõ điểm cần xác nhận.',
+            ].map((prompt, i) => (
+              <button
+                key={prompt}
+                disabled={busy || Boolean(retryPin)}
+                onClick={() => setQuestion(prompt)}
+              >
+                {['Tóm tắt', 'Đối chiếu', 'Dịch', 'Soạn phản hồi'][i]}
+              </button>
             ))}
-            {activation && (
-              <p role="status" className="text-xs">
-                Lượt {activation.requestId} ·{' '}
-                {activation.evidence?.result === 'PASS'
-                  ? 'Đạt kiểm thử nguồn tổng hợp'
-                  : aiStatusLabel(
-                      activation.errorCode ?? activation.status,
-                    )}{' '}
-                · {activation.evidence?.requestedModel} · model trả về:{' '}
-                {activation.evidence?.returnedModel ??
-                  'vendor không cung cấp metadata'}{' '}
-                · revision {activation.evidence?.revision ?? 'chưa có'}
-              </p>
-            )}
-          </details>
-        )}
-        {error && <p role="alert">{error}</p>}
-        {loadError && <p role="alert">{loadError}</p>}
-        <div className="flex flex-wrap gap-3">
+          </div>
           <button
             disabled={busy}
             onClick={() => {
-              select('');
-              setQuestion('');
-              setScope(group);
-            }}
-          >
-            Chat AI mới
-          </button>
-          <label>
-            Phạm vi{' '}
-            <select
-              aria-label="Phạm vi AI"
-              value={selected ? (history?.scope ?? scope) : scope}
-              disabled={busy || Boolean(selected)}
-              onChange={(e) => setScope(e.target.value)}
-            >
-              {scopes.map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Lịch sử{' '}
-            <select
-              aria-label="Lịch sử AI"
-              value={selected}
-              disabled={busy}
-              onChange={(e) => {
-                select(e.target.value);
-                void refresh();
-              }}
-            >
-              <option value="">Chat mới</option>
-              {list.map((conversation, i) => (
-                <option key={conversation.id} value={conversation.id}>
-                  {scopes.find(([value]) => value === conversation.scope)?.[1]}{' '}
-                  ·{' '}
-                  {conversation.createdAt
-                    ? new Date(conversation.createdAt).toLocaleString('vi-VN')
-                    : i + 1}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        {context && (
-          <p
-            className="rounded border border-amber-200 bg-amber-50 p-3 text-xs"
-            role="status"
-          >
-            {context.roomId
-              ? `Ngữ cảnh hội thoại: ${roomLabels?.[context.roomId] ?? context.roomId}.`
-              : context.productLineId
-                ? 'Ngữ cảnh: các cuộc trao đổi liên kết hạng mục.'
-                : `Ngữ cảnh: file gốc, phiên bản v${context.fileVersion}.`}
-            {context.roomId &&
-              context.roomId !== initialContext?.roomId &&
-              ' Phạm vi đã ghim khác room đang mở; chọn Chat AI mới để dùng room mới.'}{' '}
-            Chỉ dùng nguồn có quyền trong chỉ mục hiện hữu; file chưa được gửi
-            qua chat/phát hành có thể chưa có nguồn AI. Hội thoại đã lưu giữ
-            phạm vi này.
-          </p>
-        )}
-        <div className="ai-suggestions" aria-label="Gợi ý AI">
-          {[
-            'Tóm tắt các nguồn được phép và nêu việc còn thiếu.',
-            'Đối chiếu các nguồn, chỉ rõ thông tin mâu thuẫn và phiên bản.',
-            'Dịch nội dung nguồn được chọn sang tiếng Anh, giữ mã và con số.',
-            'Soạn nháp phản hồi dựa trên nguồn, nêu rõ điểm cần xác nhận.',
-          ].map((prompt, i) => (
-            <button
-              key={prompt}
-              disabled={busy || Boolean(retryPin)}
-              onClick={() => setQuestion(prompt)}
-            >
-              {['Tóm tắt', 'Đối chiếu', 'Dịch', 'Soạn phản hồi'][i]}
-            </button>
-          ))}
-        </div>
-        <button
-          disabled={busy}
-          onClick={() => {
-            void act(async () => {
-              const chosen = history?.scope ?? scope;
-              const result = await call<{
-                hasMore: boolean;
-                sources: {
-                  id: string;
-                  label: string;
-                  status: string;
-                  version?: string;
-                  nativeFile?: boolean;
-                }[];
-              }>('/index', { scope: chosen, ...context });
-              if (
-                !controller.current?.signal.aborted &&
-                document.visibilityState === 'visible'
-              ) {
-                indexScope.current = { scope: chosen, context };
-                setIndex(result);
-              }
-            });
-          }}
-        >
-          Cập nhật nguồn trong phạm vi
-        </button>
-        {index && (
-          <div aria-label="Trạng thái nguồn">
-            <p>
-              {index.hasMore
-                ? 'Còn nguồn chờ đọc; cập nhật tiếp để tiếp tục.'
-                : 'Đã xử lý lượt nguồn hiện tại.'}
-            </p>
-            <ul>
-              {index.sources.map((item) => (
-                <li key={item.id}>
-                  {item.nativeFile && (
-                    <input
-                      type="checkbox"
-                      aria-label={`Gửi native ${item.label}`}
-                      disabled={
-                        busy ||
-                        !(item.label.toLowerCase().endsWith('.pdf')
-                          ? chosenModel?.capabilities.pdfInput
-                          : chosenModel?.capabilities.imageInput)
-                      }
-                      checked={sourceIds.includes(item.id)}
-                      onChange={(e) =>
-                        setSourceIds((current) =>
-                          e.target.checked
-                            ? [...current, item.id].slice(0, 3)
-                            : current.filter((id) => id !== item.id),
-                        )
-                      }
-                    />
-                  )}
-                  {item.label}: {aiStatusLabel(item.status)}
-                  {item.nativeFile
-                    ? ' · Có thể chọn gửi native khi capability đã được bật; tối đa 3 file, PDF ngắn tối đa 10 trang/file.'
-                    : ''}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {history?.answers.map((answer) => (
-          <AiAnswer
-            key={answer.id}
-            answer={answer}
-            onDraft={onDraft}
-            onSource={(item) => {
-              void openSource(answer.id, item);
-            }}
-            onRun={() => {
               void act(async () => {
-                await run(answer.id);
+                const chosen = history?.scope ?? scope;
+                const result = await call<{
+                  hasMore: boolean;
+                  sources: {
+                    id: string;
+                    label: string;
+                    status: string;
+                    version?: string;
+                    nativeFile?: boolean;
+                  }[];
+                }>('/index', { scope: chosen, ...context });
+                if (
+                  !controller.current?.signal.aborted &&
+                  document.visibilityState === 'visible'
+                ) {
+                  indexScope.current = { scope: chosen, context };
+                  setIndex(result);
+                }
               });
             }}
-            onCancel={() => {
-              void call(`/answers/${answer.id}/cancel`, {})
-                .then(refresh)
-                .catch(invalidate);
-            }}
-          />
-        ))}
-        {source && (
-          <aside
-            aria-label="Nguồn câu trả lời"
-            className="grid gap-2 rounded border p-3"
           >
-            <h3>{source.label}</h3>
-            <p>
-              Bản {source.version} ·{' '}
-              {source.page
-                ? `trang ${source.page}`
-                : `dòng ${source.startLine}–${source.endLine}`}{' '}
-              ·{' '}
-              {source.provenance === 'PUBLISHED'
-                ? 'Nguồn đã phát hành'
-                : 'Trao đổi chưa xác nhận'}
-            </p>
-            <pre className="whitespace-pre-wrap">{source.text}</pre>
-            {source.downloadUrl?.startsWith('/api/v1/project-chat/') && (
-              <a href={source.downloadUrl}>Mở file đúng phiên bản</a>
-            )}
-            <button
-              onClick={() => {
-                sourceKey.current = undefined;
-                setSource(undefined);
-              }}
-            >
-              Đóng nguồn
-            </button>
-          </aside>
-        )}
-        {!busy && retryPin && (
-          <aside role="status" className="grid gap-2 rounded border p-3">
-            <p>
-              Lượt gửi chưa rõ kết quả:{' '}
-              {models.find((m) => m.id === retryPin.model)?.label ??
-                retryPin.model}{' '}
-              · mức {retryPin.reasoning} · {retryPin.sourceIds.length} file. Thử
-              lại giữ nguyên câu hỏi, model và nguồn đã chốt.
-            </p>
-            <button
-              type="button"
-              disabled={!pilotConfirmed}
-              onClick={() => void ask(true)}
-            >
-              Thử lại lượt đã chốt
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                requestKey.current = undefined;
-                setRetryPin(undefined);
-                setError(
-                  'Đã bỏ retry. Lượt tiếp theo là yêu cầu mới; lượt trước có thể đã được xử lý.',
-                );
-              }}
-            >
-              Tạo lượt mới theo lựa chọn hiện tại
-            </button>
-          </aside>
-        )}
-        <form
-          className="grid gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void ask();
-          }}
-        >
-          <label>
-            Câu hỏi AI
-            <textarea
-              aria-label="Câu hỏi AI"
-              className="block w-full"
-              rows={3}
-              maxLength={8000}
-              value={question}
-              disabled={busy}
-              onChange={(e) => setQuestion(e.target.value)}
-            />
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={pilotConfirmed}
-              onChange={(e) => setPilotConfirmed(e.target.checked)}
-            />{' '}
-            Câu hỏi chỉ chứa dữ liệu giả hoặc công khai được phép; không có dữ
-            liệu mật/cá nhân.
-          </label>
-          <button
-            disabled={
-              busy ||
-              Boolean(retryPin) ||
-              !question.trim() ||
-              !chosenModel?.available ||
-              !pilotConfirmed
-            }
-          >
-            {busy ? 'Đang tìm nguồn / xử lý…' : 'Hỏi AI'}
+            Cập nhật nguồn trong phạm vi
           </button>
-        </form>
+          {index && (
+            <div aria-label="Trạng thái nguồn">
+              <p>
+                {index.hasMore
+                  ? 'Còn nguồn chờ đọc; cập nhật tiếp để tiếp tục.'
+                  : 'Đã xử lý lượt nguồn hiện tại.'}
+              </p>
+              <ul>
+                {index.sources.map((item) => (
+                  <li key={item.id}>
+                    {item.nativeFile && (
+                      <input
+                        type="checkbox"
+                        aria-label={`Gửi native ${item.label}`}
+                        disabled={
+                          busy ||
+                          !(item.label.toLowerCase().endsWith('.pdf')
+                            ? chosenModel?.capabilities.pdfInput
+                            : chosenModel?.capabilities.imageInput)
+                        }
+                        checked={sourceIds.includes(item.id)}
+                        onChange={(e) =>
+                          setSourceIds((current) =>
+                            e.target.checked
+                              ? [...current, item.id].slice(0, 3)
+                              : current.filter((id) => id !== item.id),
+                          )
+                        }
+                      />
+                    )}
+                    {item.label}: {aiStatusLabel(item.status)}
+                    {item.nativeFile
+                      ? ' · Có thể chọn gửi native khi capability đã được bật; tối đa 3 file, PDF ngắn tối đa 10 trang/file.'
+                      : ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {history?.answers.map((answer) => (
+            <AiAnswer
+              key={answer.id}
+              answer={answer}
+              onDraft={onDraft}
+              onSource={(item) => {
+                void openSource(answer.id, item);
+              }}
+              onRun={() => {
+                void act(async () => {
+                  await run(answer.id);
+                });
+              }}
+              onCancel={() => {
+                void call(`/answers/${answer.id}/cancel`, {})
+                  .then(refresh)
+                  .catch(invalidate);
+              }}
+            />
+          ))}
+          {source && (
+            <aside
+              aria-label="Nguồn câu trả lời"
+              className="grid gap-2 rounded border p-3"
+            >
+              <h3>{source.label}</h3>
+              <p>
+                Bản {source.version} ·{' '}
+                {source.page
+                  ? `trang ${source.page}`
+                  : `dòng ${source.startLine}–${source.endLine}`}{' '}
+                ·{' '}
+                {source.provenance === 'PUBLISHED'
+                  ? 'Nguồn đã phát hành'
+                  : 'Trao đổi chưa xác nhận'}
+              </p>
+              <pre className="whitespace-pre-wrap">{source.text}</pre>
+              {source.downloadUrl?.startsWith('/api/v1/project-chat/') && (
+                <a href={source.downloadUrl}>Mở file đúng phiên bản</a>
+              )}
+              <button
+                onClick={() => {
+                  sourceKey.current = undefined;
+                  setSource(undefined);
+                }}
+              >
+                Đóng nguồn
+              </button>
+            </aside>
+          )}
+          {!busy && retryPin && (
+            <aside role="status" className="grid gap-2 rounded border p-3">
+              <p>
+                Lượt gửi chưa rõ kết quả:{' '}
+                {models.find((m) => m.id === retryPin.model)?.label ??
+                  retryPin.model}{' '}
+                · mức {retryPin.reasoning} · {retryPin.sourceIds.length} file.
+                Thử lại giữ nguyên câu hỏi, model và nguồn đã chốt.
+              </p>
+              <button
+                type="button"
+                disabled={!pilotConfirmed}
+                onClick={() => void ask(true)}
+              >
+                Thử lại lượt đã chốt
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  requestKey.current = undefined;
+                  setRetryPin(undefined);
+                  setError(
+                    'Đã bỏ retry. Lượt tiếp theo là yêu cầu mới; lượt trước có thể đã được xử lý.',
+                  );
+                }}
+              >
+                Tạo lượt mới theo lựa chọn hiện tại
+              </button>
+            </aside>
+          )}
+          <form
+            className="grid gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void ask();
+            }}
+          >
+            <label>
+              Câu hỏi AI
+              <textarea
+                aria-label="Câu hỏi AI"
+                className="block w-full"
+                rows={3}
+                maxLength={8000}
+                value={question}
+                disabled={busy}
+                onChange={(e) => setQuestion(e.target.value)}
+              />
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={pilotConfirmed}
+                onChange={(e) => setPilotConfirmed(e.target.checked)}
+              />{' '}
+              Câu hỏi chỉ chứa dữ liệu giả hoặc công khai được phép; không có dữ
+              liệu mật/cá nhân.
+            </label>
+            <button
+              disabled={
+                busy ||
+                Boolean(retryPin) ||
+                !question.trim() ||
+                !chosenModel?.available ||
+                !pilotConfirmed
+              }
+            >
+              {busy ? 'Đang tìm nguồn / xử lý…' : 'Hỏi AI'}
+            </button>
+          </form>
+        </div>
       </div>
     </section>
   );
+  return portalTarget === undefined
+    ? content
+    : portalTarget && active
+      ? createPortal(content, portalTarget)
+      : null;
 }

@@ -466,3 +466,49 @@ test('P01/P03: filter trong URL, quay lại và cùng hồ sơ qua các tab', as
     }),
   ).toBeVisible();
 });
+
+test('T2 popup giữ nháp qua presentation và header không điều hướng', async ({
+  page,
+}) => {
+  const cookie = fixture.users.sender!.cookie,
+    split = cookie.indexOf('=');
+  await page
+    .context()
+    .addCookies([
+      {
+        name: cookie.slice(0, split),
+        value: cookie.slice(split + 1),
+        url: process.env.APP_PUBLIC_ORIGIN!,
+        httpOnly: true,
+        sameSite: 'Lax',
+      },
+    ]);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`/projects/${fixture.projectId}/overview`);
+  const before = page.url();
+  await page
+    .getByRole('button', { name: 'Hỏi Galaxy AI', exact: true })
+    .click({ timeout: 5000 });
+  const popup = page.getByRole('dialog', { name: /Galaxy AI/ });
+  await expect(popup).toBeVisible();
+  expect(page.url()).toBe(before);
+  await popup
+    .getByLabel('Câu hỏi AI', { exact: true })
+    .fill('Nháp RAM riêng toàn dự án');
+  await popup.getByRole('button', { name: 'Thu nhỏ AI' }).click();
+  await expect(popup).not.toBeVisible();
+  await page.getByRole('button', { name: 'Mở Hỏi AI dự án' }).click();
+  await expect(popup.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue(
+    'Nháp RAM riêng toàn dự án',
+  );
+  await popup.getByRole('button', { name: 'Mở rộng AI', exact: true }).click();
+  await expect(popup).toHaveClass(/is-expanded/);
+  await popup.getByRole('button', { name: 'Đóng AI', exact: true }).click();
+  await page.getByRole('link', { name: 'Hạng mục', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Hỏi Galaxy AI', exact: true })
+    .click();
+  await expect(popup.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue(
+    'Nháp RAM riêng toàn dự án',
+  );
+});

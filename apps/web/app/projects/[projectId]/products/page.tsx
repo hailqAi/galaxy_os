@@ -6,6 +6,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { Actor, api } from '../../../lib/api';
 import { ProjectWorkspaceHeader } from '../../../../features/projects/project-workspace-header';
 import { projectDomainLabel } from '../../../../features/projects/project-domain-labels';
+import { useAiSurfaces } from '../../../../features/project-chat/project-ai-surfaces';
 
 type Revision = {
   revision: number;
@@ -159,6 +160,7 @@ export function ProductTable({
 }
 
 export default function ProjectProductsPage() {
+  const ai = useAiSurfaces();
   const projectId = String(useParams().projectId),
     query = useSearchParams();
   const [data, setData] = useState<Page>(),
@@ -414,9 +416,18 @@ export default function ProjectProductsPage() {
             >
               Mở cấu hình, phê duyệt & hồ sơ nguồn
             </Link>
-            <Link href={`/projects/${projectId}/ai?productLineId=${detail.id}`}>
+            <button
+              onClick={() => {
+                drawer.current?.close();
+                ai?.open({
+                  projectId,
+                  scope: 'ALL',
+                  context: { productLineId: detail.id },
+                });
+              }}
+            >
               Hỏi AI về hạng mục →
-            </Link>
+            </button>
             <section>
               <h4 className="font-semibold">Lịch sử cấu hình</h4>
               {detail.revisions.map((r) => (

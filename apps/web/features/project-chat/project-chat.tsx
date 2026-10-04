@@ -13,7 +13,7 @@ import { useRouter } from 'next/navigation';
 import { Actor, api, ApiError, apiUrl } from '../../app/lib/api';
 import { ChatManagement, ReleasePanel, ReleaseList } from './chat-controls';
 import { projectDomainLabel } from '../projects/project-domain-labels';
-import { ProjectAi } from './project-ai';
+import { AiMount, useAiSurfaces } from './project-ai-surfaces';
 import {
   ProjectWorkspaceHeader,
   projectGroups as groups,
@@ -155,6 +155,7 @@ export function ProjectChatIndex() {
 }
 
 export function ProjectChat({ projectId }: { projectId: string }) {
+  const ai = useAiSurfaces();
   const [snapshot, setData] = useState<RoomPage>();
   const data = snapshot?.project.id === projectId ? snapshot : undefined;
   const [revision, setRevision] = useState(0);
@@ -217,6 +218,7 @@ export function ProjectChat({ projectId }: { projectId: string }) {
       setSelected(nextRoom);
       const url = new URL(location.href);
       url.searchParams.set('group', nextGroup);
+      url.searchParams.delete('ai');
       if (nextRoom) url.searchParams.set('room', nextRoom);
       else url.searchParams.delete('room');
       window.history.pushState(window.history.state, '', url);
@@ -315,12 +317,12 @@ export function ProjectChat({ projectId }: { projectId: string }) {
                       .includes(roomSearch.toLocaleLowerCase('vi')),
                 ) && <p>Không có chủ đề phù hợp.</p>}
               {hasAi && (
-                <Link
+                <button
                   className="ai-launch text-center"
-                  href={`/projects/${projectId}/ai`}
+                  onClick={() => ai?.open({ projectId, scope: 'ALL' })}
                 >
                   Tra cứu AI toàn dự án →
-                </Link>
+                </button>
               )}
             </aside>
             {room && actor ? (
@@ -347,17 +349,20 @@ export function ProjectChat({ projectId }: { projectId: string }) {
               </div>
             )}
             {hasAi && actor && (
-              <ProjectAi
-                initialContext={room ? { roomId: room.id } : undefined}
+              <AiMount
+                context={room ? { roomId: room.id } : undefined}
                 roomLabels={Object.fromEntries(
                   (data?.rooms ?? []).map((r) => [r.id, r.title]),
                 )}
                 key={`${projectId}/${actor.userId}`}
                 projectId={projectId}
-                actorId={actor.userId}
-                group={group}
-                canConfigure={data.authorityActions.includes('ACCESS_ADMIN')}
-                onRevoked={revoked}
+                scope={group}
+                conversationId={
+                  typeof window === 'undefined'
+                    ? undefined
+                    : (new URLSearchParams(location.search).get('ai') ??
+                      undefined)
+                }
                 onDraft={
                   room?.actions.includes('SEND') && !room.locked
                     ? (text) => draftWriterRef.current?.(text)

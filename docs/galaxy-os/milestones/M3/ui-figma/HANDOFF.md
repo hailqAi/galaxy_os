@@ -1,5 +1,29 @@
 # Bàn giao UI PDF và kích hoạt AI — 04/10/2026
 
+## Quyết định chủ dự án — OWNER_APPROVED_CURRENT_PROMPT
+
+Chủ dự án đã duyệt rõ trong prompt tiếp tục: popup Project560px/max viewport−32px,
+thu nhỏ/mở rộng tối đa1100px/đóng; giữ panel P04; chat16/26, composer16px cao100–120px
+tự giãn có giới hạn; nháp RAM; không sao chép conversation; giữ model/source/quyền.
+Chủ dự án chọn thực thi INLINE từng task và cho phép tự hoàn thiện chi tiết kỹ thuật
+trong kiến trúc/phạm vi này. Không cần xác nhận lại phương án hoặc phương thức thực thi.
+Đây không phải phê duyệt một thiết kế/plan khác. Kế hoạch kỹ thuật dẫn xuất ở
+[plan popup](../../../../superpowers/plans/2026-10-04-ai-floating-chat.md).
+
+Trạng thái hiện hành: **UI_IMPLEMENTING**. Các dòng AWAITING_DESIGN_APPROVAL bên dưới
+là receipt lịch sử đã được quyết định này thay thế, không còn là blocker hiện tại.
+Kiểm đầu lượt: cả3provider CREDENTIAL_STORED/API chưa kiểm lại, enabled=false,
+textLiveVerified=false; không yêu cầu nhập lại. Nơi nhập cũ giữ
+PREVIOUS_INPUT_LOCATION_UNKNOWN, không chặn UI hoặc kích hoạt mới.
+
+Checkpoint T2: popup đã code; header/launcher dùng cùng owner ở PortalShell, mỗi
+actor/Project/scope/context giữ một controller. React portal chuyển nơi hiển thị,
+không nhân conversation/request. API list trả context ghim từ metadata request
+hiện hữu; không migration. Unit22/22, context API1/1, Chrome10/10 (fixture) PASS,
+gồm dock→floating→expanded→page khi request chờ, model pin, revoke/actor, nháp RAM.
+T3 font/composer chưa triển khai ở checkpoint này; chưa gọi vendor thật.
+
+
 ## Đối soát credential — kết quả mới nhất04/10
 
 **T1 sửa chẩn đoán đã phát hành local; nguyên nhân khóa người dùng chưa đến backend

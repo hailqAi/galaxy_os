@@ -3,6 +3,7 @@ import React, { FormEvent, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { api, apiUrl } from './lib/api';
 import { parseUploadBytes } from './projects/[projectId]/documents/document-upload';
+import { useAiSurfaces } from '../features/project-chat/project-ai-surfaces';
 
 type Attachment = {
   entityType: string;
@@ -110,6 +111,7 @@ export function EntityFiles(props: Props) {
   );
 }
 function EntityFileList({ entityType, entityId, permissions }: Props) {
+  const ai = useAiSurfaces();
   const [data, setData] = useState<Page>(),
     [message, setMessage] = useState('');
   const [uploading, setUploading] = useState(false),
@@ -450,11 +452,21 @@ function EntityFileList({ entityType, entityId, permissions }: Props) {
                 <a href={download(file)}>Tải đúng phiên bản</a>
               )}
               {entityType === 'Project' && (
-                <Link
-                  href={`/projects/${entityId}/ai?fileAssetId=${file.id}&version=${file.version}`}
+                <button
+                  onClick={() => {
+                    dialog.current?.close();
+                    ai?.open({
+                      projectId: entityId,
+                      scope: 'ALL',
+                      context: {
+                        fileAssetId: file.id,
+                        fileVersion: file.version,
+                      },
+                    });
+                  }}
                 >
                   Hỏi AI về nguồn →
-                </Link>
+                </button>
               )}
             </div>
             {file.attachments.map((a) => {

@@ -1,92 +1,76 @@
 'use client';
-import React, { useCallback, useEffect, useState } from 'react';
-import { api, Actor } from '../../app/lib/api';
+import React, { useEffect, useState } from 'react';
+import { api } from '../../app/lib/api';
 import { ProjectWorkspaceHeader } from '../projects/project-workspace-header';
-import { ProjectAi, AiContext } from './project-ai';
+import { AiContext } from './project-ai';
+import { AiMount, useAiSurfaces } from './project-ai-surfaces';
 import { useSearchParams } from 'next/navigation';
 
 export function ProjectAiWorkspace({ projectId }: { projectId: string }) {
-  const query = useSearchParams();
-  const initialContext: AiContext | undefined = query.get('productLineId')
-    ? { productLineId: query.get('productLineId')! }
-    : query.get('fileAssetId')
-      ? {
-          fileAssetId: query.get('fileAssetId')!,
-          fileVersion: Number(query.get('version')),
-        }
-      : undefined;
-  const [data, setData] = useState<{
-    actor: Actor;
-    project: { name: string };
-    actions: string[];
+  const query = useSearchParams(),
+    ai = useAiSurfaces();
+  const conversationId = query.get('ai') ?? undefined;
+  const [resolved, setResolved] = useState<{
+    id: string;
+    scope: string;
+    context?: AiContext;
   }>();
   const [error, setError] = useState('');
-  const revoked = useCallback(() => {
-    setData(undefined);
-    setError('Quyền AI đã thay đổi. Tải lại trang để kiểm tra quyền hiện tại.');
-  }, []);
+  const initialContext: AiContext | undefined = query.get('roomId')
+    ? { roomId: query.get('roomId')! }
+    : query.get('productLineId')
+      ? { productLineId: query.get('productLineId')! }
+      : query.get('fileAssetId')
+        ? {
+            fileAssetId: query.get('fileAssetId')!,
+            fileVersion: Number(query.get('version')),
+          }
+        : undefined;
   useEffect(() => {
-    const controller = new AbortController(),
-      init = { signal: controller.signal };
-    void Promise.all([
-      api<Actor>('/me', init),
-      api<{
-        project: { name: string };
-        aiEnabled: boolean;
-        authorityActions: string[];
-      }>(`/project-chat/projects/${projectId}/rooms`, init),
-    ])
-      .then(([actor, rooms]) => {
-        if (!controller.signal.aborted) {
-          if (!rooms.aiEnabled || !rooms.authorityActions.includes('INVOKE'))
-            setError('Bạn chưa được cấp quyền AI trong dự án này.');
-          else
-            setData({
-              actor,
-              project: rooms.project,
-              actions: rooms.authorityActions,
-            });
-        }
+    if (!conversationId) return;
+    const controller = new AbortController();
+    void api<{ id: string; scope: string; context?: AiContext }>(
+      `/project-chat/projects/${projectId}/ai/conversations/${conversationId}`,
+      { signal: controller.signal },
+    )
+      .then((result) => {
+        if (!controller.signal.aborted) setResolved(result);
       })
-      .catch((e) => {
-        if (!controller.signal.aborted) setError((e as Error).message);
+      .catch(() => {
+        if (!controller.signal.aborted)
+          setError('Không mở được hội thoại hoặc quyền đã thay đổi.');
       });
     return () => controller.abort();
-  }, [projectId]);
+  }, [projectId, conversationId]);
+  const history = resolved?.id === conversationId ? resolved : undefined;
+  const scope = history?.scope ?? query.get('scope') ?? 'ALL';
+  const context = history?.context ?? initialContext;
   return (
     <div className="ai-project-workspace grid gap-5">
       <ProjectWorkspaceHeader
         projectId={projectId}
-        name={data?.project.name}
+        name={ai?.access?.name}
         active="ai"
-        permissions={data?.actor.permissions ?? []}
+        permissions={ai?.access?.permissions ?? []}
       />
       <header>
         <h2 className="text-xl font-semibold">
-          {initialContext
+          {context
             ? 'Galaxy AI — Tra cứu nguồn đã chọn'
             : 'Galaxy AI — Tra cứu toàn dự án'}
         </h2>
-        <p className="mt-2 text-sm text-slate-500">
-          Dùng cùng lịch sử riêng tư và nguồn của không gian làm việc. Mỗi câu
-          trả lời được kiểm tra lại quyền khi mở.
-        </p>
+        <p>Lịch sử riêng tư; nguồn được kiểm tra lại theo quyền của bạn.</p>
       </header>
-      {error && (
-        <p className="panel" role="alert">
-          {error}
-        </p>
+      {(error || ai?.access?.error) && (
+        <p role="alert">{error || ai?.access?.error}</p>
       )}
-      {!data && !error && <p role="status">Đang kiểm tra quyền AI…</p>}
-      {data && (
-        <ProjectAi
-          key={`${projectId}/${data.actor.userId}`}
+      {(!conversationId || history) && (
+        <AiMount
           projectId={projectId}
-          actorId={data.actor.userId}
-          group="ALL"
-          initialContext={initialContext}
-          canConfigure={data.actions.includes('ACCESS_ADMIN')}
-          onRevoked={revoked}
+          scope={scope}
+          context={context}
+          conversationId={conversationId}
+          kind="page"
         />
       )}
     </div>

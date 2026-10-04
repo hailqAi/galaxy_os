@@ -290,11 +290,18 @@ test('private AI uses old sources, persists history and clears revoked derived c
   await panel.getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ }).check();
   await panel.getByRole('button', { name: 'Chat AI mới', exact: true }).click();
   await panel.getByLabel('Phạm vi AI', { exact: true }).selectOption('ALL');
-  await panel
+  // Scope toàn dự án là phiên riêng trong popup; panel nhóm vẫn giữ đúng scope.
+  const projectPopup = page.getByRole('dialog', { name: /Galaxy AI/ });
+  await projectPopup
+    .getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ })
+    .check();
+  await projectPopup
     .getByLabel('Câu hỏi AI', { exact: true })
     .fill('GH-M3-42 nguồn đã trao đổi?');
-  await panel.getByRole('button', { name: 'Hỏi AI', exact: true }).click();
-  await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
+  await projectPopup
+    .getByRole('button', { name: 'Hỏi AI', exact: true })
+    .click();
+  await expect(projectPopup.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
   expect(
     await db.chatAiSourceIndex.count({
       where: { projectId: fixture.projectId, status: 'READY' },
@@ -305,9 +312,9 @@ test('private AI uses old sources, persists history and clears revoked derived c
     {},
     'manager',
   );
-  await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toHaveCount(0);
+  await expect(projectPopup.getByText(/^Mô phỏng kiểm thử M3/)).toHaveCount(0);
   await expect(
-    panel.getByText('Không còn quyền xem nội dung phụ thuộc nguồn này'),
+    projectPopup.getByText('Không còn quyền xem nội dung phụ thuộc nguồn này'),
   ).toBeVisible();
 });
 
@@ -407,4 +414,66 @@ test('switching between AI-enabled actors discards the old private conversation 
   await expect(panel.getByLabel('Lịch sử AI', { exact: true })).toHaveValue('');
   await expect(panel.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue('');
   await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toHaveCount(0);
+});
+
+test('T2 cùng request và hội thoại khi dock, floating, expanded và page', async ({
+  page,
+}) => {
+  await login(page);
+  let runs = 0;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(/\/ai\/answers\/[^/]+\/run$/, async (route) => {
+    runs++;
+    const response = await route.fetch();
+    await held;
+    await route.fulfill({ response });
+  });
+  const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
+  await panel.getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ }).check();
+  await panel
+    .getByLabel('Câu hỏi AI', { exact: true })
+    .fill('T2 chuyển presentation giữ nguồn SLOW-M3-42?');
+  await panel.getByRole('button', { name: 'Hỏi AI', exact: true }).click();
+  await expect.poll(() => runs).toBe(1);
+  const id = new URL(page.url()).searchParams.get('ai');
+  expect(id).toBeTruthy();
+  await panel.getByRole('button', { name: 'Tách AI thành cửa sổ nổi' }).click();
+  const popup = page.getByRole('dialog', { name: /Galaxy AI/ });
+  await expect(popup).toBeVisible();
+  await expect(panel).toHaveCount(1);
+  await panel.getByRole('button', { name: 'Mở rộng AI', exact: true }).click();
+  await panel
+    .getByLabel('Model AI', { exact: true })
+    .selectOption('kira-3.5-pro');
+  await panel.getByRole('button', { name: 'Thu nhỏ AI' }).click();
+  await expect(popup).not.toBeVisible();
+  await expect(panel).toHaveCount(1);
+  await panel.getByRole('button', { name: 'Mở trang AI' }).click();
+  await expect(page).toHaveURL(new RegExp(`/ai\\?.*ai=${id}`));
+  release();
+  await expect(panel.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue('');
+  await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
+  await expect(panel.getByLabel('Model AI', { exact: true })).toHaveValue(
+    'kira-3.5-pro',
+  );
+  const answers = await db.chatAiAnswer.findMany({
+    where: { conversationId: id! },
+  });
+  expect(answers).toHaveLength(1);
+  expect(answers[0]!.model).toBe('gemini-3.8-flash');
+  expect(runs).toBe(1);
+  await panel
+    .getByLabel('Câu hỏi AI', { exact: true })
+    .fill('Nháp của cùng phiên');
+  await panel.getByRole('button', { name: 'Mở rộng AI', exact: true }).click();
+  await expect(panel.getByLabel('Lịch sử AI', { exact: true })).toHaveValue(
+    id!,
+  );
+  await expect(panel.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue(
+    'Nháp của cùng phiên',
+  );
+  expect(runs).toBe(1);
 });

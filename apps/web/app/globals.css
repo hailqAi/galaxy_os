@@ -1073,3 +1073,92 @@ td {
     grid-template-columns: 120px minmax(0, 1fr);
   }
 }
+
+/* AI Project: cùng controller, chỉ đổi presentation. */
+.ai-launcher-wrap {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 40;
+}
+.ai-launcher {
+  border-radius: 24px;
+  padding: 12px 20px;
+  background: #111d35;
+  color: white;
+}
+.ai-floating {
+  position: fixed;
+  inset: auto 24px 24px auto;
+  margin: 0;
+  width: 560px;
+  max-width: calc(100vw - 32px);
+  height: min(760px, calc(100dvh - 104px));
+  max-height: calc(100dvh - 48px);
+  padding: 0;
+  border: 1px solid #dbe2ec;
+  border-radius: 20px;
+  box-shadow: 0 12px 40px #17264026;
+  background: white;
+  z-index: 60;
+}
+.ai-floating.is-expanded {
+  width: min(1100px, calc(100vw - 48px));
+  height: calc(100dvh - 48px);
+}
+.ai-floating::backdrop {
+  background: #111d3533;
+}
+.ai-floating > .project-ai-panel {
+  height: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+  border: 0;
+  border-radius: inherit;
+}
+.ai-floating .ai-panel-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.ai-session-content {
+  display: grid;
+  gap: 12px;
+}
+.ai-session-content[hidden] {
+  display: none;
+}
+.ai-mount {
+  min-width: 0;
+}
+.ai-mount-target:empty {
+  display: none;
+}
+.ai-mount-page .project-ai-panel {
+  max-width: 1100px;
+  margin: auto;
+}
+.ai-project-name {
+  max-width: 240px;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.ai-context-launch {
+  display: none;
+}
+@media (max-width: 639px) {
+  .ai-floating,
+  .ai-floating.is-expanded {
+    inset: var(--ai-viewport-top, 0px) 0 auto 0;
+    width: 100%;
+    max-width: 100%;
+    height: var(--ai-viewport-height, 100dvh);
+    max-height: var(--ai-viewport-height, 100dvh);
+    border-radius: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .ai-launcher-wrap {
+    right: 16px;
+    bottom: max(16px, env(safe-area-inset-bottom));
+  }
+}
