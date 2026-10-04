@@ -1,5 +1,7 @@
 import { expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { activationFixture } from '../../../api/src/project-chat/ai-activation';
 import { test } from './m2-chrome-fixture';
 import {
@@ -272,9 +274,21 @@ test('P04/AI01: chat lưu thật, panel thu gọn giữ nháp và dùng cùng l�
   await page
     .getByLabel('Tin nhắn', { exact: true })
     .fill('Tin fixture cho bản PDF — giữ lịch sử');
-  await page.getByRole('button', { name: 'Gửi tin', exact: true }).click();
+  const composer = page.getByLabel('Tin nhắn', { exact: true });
+  await composer.dispatchEvent('compositionstart');
+  await composer.press('Enter');
   await expect(
-    page.getByText('Tin fixture cho bản PDF — giữ lịch sử', { exact: true }),
+    page
+      .locator('.chat-message')
+      .filter({ hasText: 'Tin fixture cho bản PDF — giữ lịch sử' }),
+  ).toHaveCount(0);
+  await composer.dispatchEvent('compositionend');
+  await composer.fill('Tin fixture cho bản PDF — giữ lịch sử');
+  await composer.press('Enter');
+  await expect(
+    page
+      .locator('.chat-message')
+      .getByText('Tin fixture cho bản PDF — giữ lịch sử', { exact: true }),
   ).toBeVisible();
   const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
   await panel
@@ -469,20 +483,18 @@ test('P01/P03: filter trong URL, quay lại và cùng hồ sơ qua các tab', as
 
 test('T2 popup giữ nháp qua presentation và header không điều hướng', async ({
   page,
-}) => {
+}, info) => {
   const cookie = fixture.users.sender!.cookie,
     split = cookie.indexOf('=');
-  await page
-    .context()
-    .addCookies([
-      {
-        name: cookie.slice(0, split),
-        value: cookie.slice(split + 1),
-        url: process.env.APP_PUBLIC_ORIGIN!,
-        httpOnly: true,
-        sameSite: 'Lax',
-      },
-    ]);
+  await page.context().addCookies([
+    {
+      name: cookie.slice(0, split),
+      value: cookie.slice(split + 1),
+      url: process.env.APP_PUBLIC_ORIGIN!,
+      httpOnly: true,
+      sameSite: 'Lax',
+    },
+  ]);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/projects/${fixture.projectId}/overview`);
   const before = page.url();
@@ -492,6 +504,22 @@ test('T2 popup giữ nháp qua presentation và header không điều hướng',
   const popup = page.getByRole('dialog', { name: /Galaxy AI/ });
   await expect(popup).toBeVisible();
   expect(page.url()).toBe(before);
+  // T3: số đo thật, không suy từ ảnh PDF.
+  await expect(popup.locator('.project-ai-panel')).toHaveCSS(
+    'font-size',
+    '16px',
+  );
+  await expect(popup.locator('.project-ai-panel')).toHaveCSS(
+    'line-height',
+    '26px',
+  );
+  const input = popup.getByLabel('Câu hỏi AI', { exact: true });
+  await expect(input).toHaveCSS('font-size', '16px');
+  const initialHeight = await input.evaluate(
+    (element) => element.getBoundingClientRect().height,
+  );
+  expect(initialHeight).toBeGreaterThanOrEqual(100);
+  expect(initialHeight).toBeLessThanOrEqual(120);
   await popup
     .getByLabel('Câu hỏi AI', { exact: true })
     .fill('Nháp RAM riêng toàn dự án');
@@ -511,4 +539,187 @@ test('T2 popup giữ nháp qua presentation và header không điều hướng',
   await expect(popup.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue(
     'Nháp RAM riêng toàn dự án',
   );
+  const measurements = [];
+  for (const viewport of [
+    { width: 1366, height: 768 },
+    { width: 1440, height: 900 },
+    { width: 1920, height: 1080 },
+    { width: 390, height: 844 },
+    { width: 683, height: 384 },
+    { width: 390, height: 480 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await expect(popup).toBeVisible();
+    const input = popup.getByLabel('Câu hỏi AI', { exact: true });
+    await input.fill('Nháp RAM riêng toàn dự án');
+    await expect(input).toHaveCSS('font-size', '16px');
+    await expect(input).toHaveCSS('line-height', '26px');
+    const geometry = await popup.evaluate((node) => {
+      const input = node.querySelector('textarea')!,
+        send = node.querySelector('button[type="submit"]')!;
+      const rect = node.getBoundingClientRect(),
+        field = input.getBoundingClientRect(),
+        button = send.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        fieldHeight: field.height,
+        sendBottom: button.bottom,
+        sendHeight: button.height,
+        font: getComputedStyle(input).fontSize,
+        lineHeight: getComputedStyle(input).lineHeight,
+      };
+    });
+    expect(geometry.left).toBeGreaterThanOrEqual(0);
+    expect(geometry.right).toBeLessThanOrEqual(viewport.width);
+    expect(geometry.bottom).toBeLessThanOrEqual(viewport.height);
+    expect(geometry.sendBottom).toBeLessThanOrEqual(viewport.height);
+    expect(geometry.sendHeight).toBeGreaterThanOrEqual(44);
+    expect(geometry.fieldHeight).toBeGreaterThanOrEqual(100);
+    expect(geometry.fieldHeight).toBeLessThanOrEqual(120);
+    await input.fill(
+      Array.from(
+        { length: 24 },
+        (_, i) => `Dòng dài ${i} ${'nguồn-tiếng-Việt-'.repeat(6)}`,
+      ).join('\n'),
+    );
+    const expandedHeight = await input.evaluate(
+      (element) => element.getBoundingClientRect().height,
+    );
+    expect(expandedHeight).toBeGreaterThanOrEqual(112);
+    expect(expandedHeight).toBeLessThanOrEqual(200);
+    if (viewport.height >= 600) expect(expandedHeight).toBe(200);
+    expect(
+      await popup
+        .locator('button[type="submit"]')
+        .evaluate((element) => element.getBoundingClientRect().bottom),
+    ).toBeLessThanOrEqual(viewport.height);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(viewport.width);
+    await input.fill('Nháp RAM riêng toàn dự án');
+    measurements.push({ viewport, ...geometry });
+    await page.screenshot({
+      path: info.outputPath(
+        `ai-popup-${viewport.width}x${viewport.height}.png`,
+      ),
+    });
+  }
+  await info.attach('computed-chat-styles', {
+    body: JSON.stringify(measurements, null, 2),
+    contentType: 'application/json',
+  });
+  writeFileSync(
+    info.outputPath('computed-chat-styles.json'),
+    JSON.stringify(measurements, null, 2),
+  );
+  if (process.env.GALAXY_NATIVE_ZOOM === 'true') {
+    // Context không emulation để zoom native thay đổi CSS viewport thật.
+    const zoomContext = await page
+      .context()
+      .browser()!
+      .newContext({ viewport: null, ignoreHTTPSErrors: true });
+    await zoomContext.addCookies(await page.context().cookies());
+    const zoomPage = await zoomContext.newPage();
+    await zoomPage.goto(page.url());
+    await zoomPage
+      .getByRole('button', { name: 'Hỏi Galaxy AI', exact: true })
+      .click();
+    const zoomPopup = zoomPage.getByRole('dialog', { name: /Galaxy AI/ });
+    await zoomPopup
+      .getByLabel('Câu hỏi AI', { exact: true })
+      .fill('Nghiệm thu chữ tiếng Việt ở zoom 200%');
+
+    const cdp = await zoomPage.context().newCDPSession(zoomPage);
+    const { targetInfo } = await cdp.send('Target.getTargetInfo');
+    expect(targetInfo.url).toContain('localhost:33003');
+    const { windowId, bounds } = await cdp.send('Browser.getWindowForTarget', {
+      targetId: targetInfo.targetId,
+    });
+    await cdp.send('Browser.setWindowBounds', {
+      windowId,
+      bounds: { windowState: 'normal' },
+    });
+    await cdp.send('Browser.setWindowBounds', {
+      windowId,
+      bounds: { width: 1440, height: 1000 },
+    });
+    await expect
+      .poll(() => zoomPage.evaluate(() => innerWidth))
+      .toBeGreaterThan(1300);
+    await zoomPage.evaluate(() => {
+      document.title = 'Galaxy AI fixture zoom 200';
+    });
+    await zoomPage.bringToFront();
+    const activate =
+      "Add-Type -AssemblyName System.Windows.Forms; $ws=New-Object -ComObject WScript.Shell; if(-not $ws.AppActivate('Galaxy AI fixture zoom 200')){throw 'Wrong fixture window'}; Start-Sleep -Milliseconds 300; ";
+    const keys = (command: string) =>
+      spawnSync(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', activate + command],
+        { encoding: 'utf8', timeout: 10000 },
+      );
+    try {
+      expect(
+        keys(
+          "[System.Windows.Forms.SendKeys]::SendWait('^0'); 1..5 | ForEach-Object {[System.Windows.Forms.SendKeys]::SendWait('^{ADD}'); Start-Sleep -Milliseconds 100}",
+        ).status,
+      ).toBe(0);
+      await expect
+        .poll(() => zoomPage.evaluate(() => devicePixelRatio))
+        .toBe(2);
+      await expect
+        .poll(() =>
+          zoomPopup.evaluate(
+            (node) =>
+              node
+                .querySelector('button[type="submit"]')!
+                .getBoundingClientRect().bottom <= innerHeight,
+          ),
+        )
+        .toBe(true);
+      const zoom = await zoomPopup.evaluate((node) => ({
+        ratio: devicePixelRatio,
+        scale: visualViewport!.scale,
+        width: innerWidth,
+        height: innerHeight,
+        sendBottom: node
+          .querySelector('button[type="submit"]')!
+          .getBoundingClientRect().bottom,
+        font: getComputedStyle(node.querySelector('textarea')!).fontSize,
+      }));
+      expect(zoom.scale).toBe(1);
+      expect(zoom.font).toBe('16px');
+      expect(zoom.sendBottom).toBeLessThanOrEqual(zoom.height);
+      writeFileSync(
+        info.outputPath('chrome-native-zoom-200.json'),
+        JSON.stringify(zoom, null, 2),
+      );
+      await info.attach('chrome-native-zoom-200', {
+        body: JSON.stringify(zoom),
+        contentType: 'application/json',
+      });
+      await zoomPage.screenshot({
+        path: info.outputPath('ai-popup-native-zoom-200.png'),
+      });
+    } finally {
+      expect(
+        keys("[System.Windows.Forms.SendKeys]::SendWait('^0')").status,
+      ).toBe(0);
+      await expect
+        .poll(() => zoomPage.evaluate(() => devicePixelRatio))
+        .toBe(1);
+      await cdp.send('Browser.setWindowBounds', {
+        windowId,
+        bounds:
+          bounds.windowState === 'normal'
+            ? bounds
+            : { windowState: bounds.windowState },
+      });
+      await cdp.detach();
+      await zoomContext.close();
+    }
+  }
 });

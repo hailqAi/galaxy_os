@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { api, apiUrl } from './lib/api';
 import { parseUploadBytes } from './projects/[projectId]/documents/document-upload';
 import { useAiSurfaces } from '../features/project-chat/project-ai-surfaces';
+import { SourceDrawer } from './source-drawer';
 
 type Attachment = {
   entityType: string;
@@ -410,18 +411,11 @@ function EntityFileList({ entityType, entityId, permissions }: Props) {
           </button>
         </div>
       </footer>
-      <dialog
-        ref={dialog}
-        aria-labelledby="file-source-title"
-        className="source-drawer file-source-drawer"
+      <SourceDrawer
+        dialogRef={dialog}
+        title="Nguồn tài liệu"
         onClose={() => selectFile('')}
       >
-        <header>
-          <h2 id="file-source-title" className="font-semibold">
-            Nguồn tài liệu
-          </h2>
-          <button onClick={() => dialog.current?.close()}>Đóng</button>
-        </header>
         {file && (
           <div className="grid gap-4">
             <h3 className="break-words text-xl font-semibold">
@@ -500,7 +494,7 @@ function EntityFileList({ entityType, entityId, permissions }: Props) {
         {!file && !previewError && (
           <p role="status">Đang kiểm tra quyền và phiên bản…</p>
         )}
-      </dialog>
+      </SourceDrawer>
     </section>
   );
 }

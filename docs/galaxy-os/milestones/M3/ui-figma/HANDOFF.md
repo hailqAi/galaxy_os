@@ -21,7 +21,13 @@ actor/Project/scope/context giữ một controller. React portal chuyển nơi h
 không nhân conversation/request. API list trả context ghim từ metadata request
 hiện hữu; không migration. Unit22/22, context API1/1, Chrome10/10 (fixture) PASS,
 gồm dock→floating→expanded→page khi request chờ, model pin, revoke/actor, nháp RAM.
-T3 font/composer chưa triển khai ở checkpoint này; chưa gọi vendor thật.
+Checkpoint T3 (05/10): chat/AI16px/26px, header18/26, metadata13/18; composer112px
+giãn tới200px (viewport thấp giới hạn theo chiều cao còn lại), nút44px. P04 dùng
+230/min520/380–420; thu danh sách thành rail trước, AI overlay khi vùng nội dung
+dưới1000px. SourceDrawer P06 dùng chung; renderer Markdown khối escaped, không
+HTML hoặc URL preview. Nháp RAM, source Escape/focus và scroll anchor đã kiểm.
+Web560/560 PASS; Chrome các viewport1366/1440/1920/390 và vùng thấp PASS; zoom native
+200% DPR2/scale1 tại712×452 CSS px, sendBottom419.5px PASS. Chưa gọi vendor thật.
 
 
 ## Đối soát credential — kết quả mới nhất04/10

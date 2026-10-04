@@ -14,6 +14,7 @@ import { Actor, api, ApiError, apiUrl } from '../../app/lib/api';
 import { ChatManagement, ReleasePanel, ReleaseList } from './chat-controls';
 import { projectDomainLabel } from '../projects/project-domain-labels';
 import { AiMount, useAiSurfaces } from './project-ai-surfaces';
+import { ChatComposerInput } from './chat-composer-input';
 import {
   ProjectWorkspaceHeader,
   projectGroups as groups,
@@ -99,7 +100,7 @@ export function ChatComposer({
 }) {
   return (
     <form
-      className="grid gap-2"
+      className="chat-composer grid gap-2"
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
         onSubmit();
@@ -107,18 +108,19 @@ export function ChatComposer({
     >
       <label>
         Tin nhắn
-        <textarea
+        <ChatComposerInput
           aria-label="Tin nhắn"
-          className="w-full"
-          rows={3}
-          maxLength={8000}
           value={value}
           disabled={disabled || sending}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={onChange}
         />
       </label>
       {reason && <p role="status">{reason}</p>}
-      <button type="submit" disabled={disabled || sending || !value.trim()}>
+      <button
+        className="chat-send"
+        type="submit"
+        disabled={disabled || sending || !value.trim()}
+      >
         {sending ? 'Đang gửi…' : 'Gửi tin'}
       </button>
     </form>
@@ -163,6 +165,7 @@ export function ProjectChat({ projectId }: { projectId: string }) {
   const [selected, setSelected] = useState('');
   const [group, setGroup] = useState('CONSULTING');
   const [roomSearch, setRoomSearch] = useState('');
+  const [roomDrawerOpen, setRoomDrawerOpen] = useState(false);
   const draftWriterRef = useRef<((text: string) => void) | undefined>(
     undefined,
   );
@@ -216,6 +219,7 @@ export function ProjectChat({ projectId }: { projectId: string }) {
     leaveGuardRef.current(() => {
       setGroup(nextGroup);
       setSelected(nextRoom);
+      setRoomDrawerOpen(false);
       const url = new URL(location.href);
       url.searchParams.set('group', nextGroup);
       url.searchParams.delete('ai');
@@ -251,9 +255,21 @@ export function ProjectChat({ projectId }: { projectId: string }) {
             )}
           <div className={`contextual-workspace ${hasAi ? 'with-ai' : ''}`}>
             <aside
-              className={`room-sidebar panel ${room ? 'room-selected' : ''}`}
+              className={`room-sidebar panel ${room ? 'room-selected' : ''} ${roomDrawerOpen ? 'is-open' : ''}`}
               aria-label="Cuộc trao đổi"
             >
+              <button
+                className="room-rail-toggle"
+                aria-expanded={roomDrawerOpen}
+                aria-label={
+                  roomDrawerOpen
+                    ? 'Đóng danh sách cuộc trao đổi'
+                    : 'Mở danh sách cuộc trao đổi'
+                }
+                onClick={() => setRoomDrawerOpen((value) => !value)}
+              >
+                ☰
+              </button>
               <h2 className="font-semibold">Cuộc trao đổi</h2>
               <input
                 aria-label="Tìm cuộc trao đổi"

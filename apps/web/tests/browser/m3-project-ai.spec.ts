@@ -10,6 +10,10 @@ import {
 
 let fixture: Awaited<ReturnType<typeof createM2BrowserFixture>>;
 const db = new PrismaClient();
+test.beforeEach(async ({ page }) => {
+  // Ca docked cần đủ vùng nội dung ba cột; màn hẹp dùng nút overlay đã kiểm riêng.
+  await page.setViewportSize({ width: 1440, height: 900 });
+});
 const post = async (path: string, body: object, who = 'authority') => {
   const response = await fetch(
     `${process.env.INTERNAL_API_URL}/project-chat${path}`,
@@ -476,4 +480,59 @@ test('T2 cùng request và hội thoại khi dock, floating, expanded và page',
     'Nháp của cùng phiên',
   );
   expect(runs).toBe(1);
+  // Chỉ fixture: nội dung dài để kiểm renderer, không phải bằng chứng vendor.
+  await page.route(new RegExp(`/ai/conversations/${id}$`), async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.answers[0].answer =
+      '## Nội dung dài\n\n' +
+      Array.from(
+        { length: 35 },
+        (_, i) => `Đoạn ${i}: ${'Nguồn tổng hợp tiếng Việt. '.repeat(12)}`,
+      ).join('\n\n') +
+      '\n\n| Mã | Nguồn |\n| --- | --- |\n| NG-42 | ' +
+      'a'.repeat(400) +
+      ' |\n\n```txt\n' +
+      'x'.repeat(600) +
+      '\n```';
+    await route.fulfill({ response, json: body });
+  });
+  await expect(
+    panel.locator('.chat-text').getByRole('heading', { name: 'Nội dung dài' }),
+  ).toBeVisible({ timeout: 8000 });
+  await expect(panel.locator('.chat-text').first()).toHaveCSS(
+    'font-size',
+    '16px',
+  );
+  await expect(panel.locator('.chat-text').first()).toHaveCSS(
+    'line-height',
+    '26px',
+  );
+  const scroll = panel.locator('.ai-scroll-body');
+  await scroll.evaluate((element) => {
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await panel
+    .getByLabel('Câu hỏi AI', { exact: true })
+    .fill('T3 câu tiếp theo cùng nguồn?');
+  await panel.getByRole('button', { name: 'Hỏi AI', exact: true }).click();
+  await expect(panel.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue('');
+  expect(await scroll.evaluate((element) => element.scrollTop)).toBe(0);
+  await panel.getByRole('button', { name: /Có cập nhật/ }).click();
+  expect(await scroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(
+    100,
+  );
+  const citation = panel
+    .getByRole('button', { name: /Tin nhắn.*bản.*dòng/ })
+    .last();
+  await citation.click();
+  const source = panel.getByRole('dialog', { name: 'Nguồn câu trả lời' });
+  await expect(source).toBeVisible();
+  const anchor = await scroll.evaluate((element) => element.scrollTop);
+  await source.getByRole('button', { name: 'Đóng nguồn' }).press('Escape');
+  await expect(source).toHaveCount(0);
+  await expect(popup).toBeVisible();
+  expect(await scroll.evaluate((element) => element.scrollTop)).toBe(anchor);
+  await expect(citation).toBeFocused();
 });

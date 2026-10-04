@@ -283,6 +283,23 @@ export function AiSurfaceProvider({
           event.stopPropagation();
           close();
         }}
+        onKeyDown={(event) => {
+          if (
+            event.key === 'Escape' &&
+            !event.defaultPrevented &&
+            !(event.target instanceof HTMLSelectElement) &&
+            !(event.target as HTMLElement).closest('.source-drawer')
+          ) {
+            const menu =
+              dialog?.querySelector<HTMLDetailsElement>('details[open]');
+            if (menu) {
+              menu.open = false;
+              menu.querySelector('summary')?.focus();
+            } else close();
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
       />
       {sessions.map((session) => (
         <PersistentSession
