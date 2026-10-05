@@ -4,6 +4,7 @@ import {
   ChatAiConversationDto,
   ChatAiQuestionDto,
   ChatAiScopeDto,
+  ChatAiEgressDto,
 } from './project-chat.dto';
 import { multipartFilename } from '../files/filename';
 import {
@@ -98,6 +99,13 @@ export class ProjectChatController {
     @Body(input(ChatAiActivationDto)) value: ChatAiActivationDto,
   ) {
     return this.ai.testActivation(actor, id, value);
+  }
+  @Post('projects/:id/ai/settings/egress') aiEgress(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(input(ChatAiEgressDto)) value: ChatAiEgressDto,
+  ) {
+    return this.ai.approveEgress(actor, id, value);
   }
   @Post('projects/:id/ai/index') aiIndex(
     @Actor() actor: CurrentActor,

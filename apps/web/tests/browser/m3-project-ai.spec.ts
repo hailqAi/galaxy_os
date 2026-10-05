@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { AI_MODELS } from '../../../api/src/project-chat/ai-registry';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { test } from './m2-chrome-fixture';
 import {
   createM2BrowserFixture,
@@ -87,6 +87,23 @@ async function approveSyntheticSources() {
           },
         ],
         approvedSources: sources.map((s) => ({ id: s.id, version: s.version })),
+        approvedInputs: [
+          'GH-M3-42 kích thước?',
+          'GH-M3-42 tiếp theo?',
+          'GH-M3-42 retry A?',
+          'GH-M3-42 nguồn đã trao đổi?',
+          'SLOW-M3-42 nội dung?',
+          'SLOW-M3-42 thông tin?',
+          'T2 chuyển presentation giữ nguồn SLOW-M3-42?',
+          'T3 câu tiếp theo cùng nguồn?',
+          'ISOLATION-M3-200 kích thước?',
+          'ISOLATION-M3-403 kích thước?',
+        ].map((question) => ({
+          organizationId: sources[0]!.organizationId,
+          projectId: fixture.projectId,
+          ownerId: fixture.users.sender!.id,
+          questionHash: createHash('sha256').update(question).digest('hex'),
+        })),
       },
     ]),
   );

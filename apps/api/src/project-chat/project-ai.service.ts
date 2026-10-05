@@ -26,6 +26,7 @@ import {
   readAiConfig,
   modelChoices,
   assertEgress,
+  assertInput,
   requestMetadata,
 } from './ai-registry';
 import {
@@ -41,11 +42,13 @@ import {
   activationFixture,
   activationFixtureVersion,
   recordActivation,
+  writeAiMetadata,
 } from './ai-activation';
 import {
   ChatAiActivationDto,
   ChatAiConversationDto,
   ChatAiQuestionDto,
+  ChatAiEgressDto,
 } from './project-chat.dto';
 
 const adminRunWhere = {
@@ -600,9 +603,151 @@ export class ProjectAiService {
     return this.authorized(actor, projectId, async (tx) => {
       await this.access.authority(tx, actor, projectId, 'ACCESS_ADMIN');
       return {
-        models: modelChoices(readAiConfig(), actor.organizationId, projectId),
+        models: await this.operationalModels(tx, actor, projectId),
         configuration: 'TERMINAL_LOCAL',
         dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+      };
+    });
+  }
+  private async operationalModels(
+    tx: Prisma.TransactionClient,
+    actor: CurrentActor,
+    projectId: string,
+  ) {
+    const models = modelChoices(
+      readAiConfig(),
+      actor.organizationId,
+      projectId,
+    );
+    return Promise.all(
+      models.map(async (model) => {
+        const where = {
+          organizationId: actor.organizationId,
+          model: model.id,
+          providerStartedAt: { not: null },
+          OR: [
+            {
+              usage: {
+                path: ['request', 'revision'],
+                equals: model.revision ?? '',
+              },
+            },
+            {
+              usage: {
+                path: ['activation', 'revision'],
+                equals: model.revision ?? '',
+              },
+            },
+          ],
+        } satisfies Prisma.ChatAiAnswerWhereInput;
+        const last = await tx.chatAiAnswer.findFirst({
+          where: {
+            ...where,
+            status: { in: ['COMPLETED', 'FAILED'] },
+            OR: [
+              { status: 'COMPLETED' },
+              {
+                errorCode: {
+                  in: [
+                    'TEMPORARY_ERROR',
+                    'RATE_LIMITED',
+                    'RATE_LIMITED_UNKNOWN',
+                    'RATE_LIMITED_TEMPORARY',
+                    'QUOTA_EXHAUSTED',
+                    'BILLING_ACTION_REQUIRED',
+                    'INVALID_CREDENTIAL',
+                    'PROVIDER_FORBIDDEN',
+                    'NETWORK_OR_TLS',
+                    'PROVIDER_TIMEOUT_UNKNOWN',
+                  ],
+                },
+              },
+            ],
+            AND: [{ OR: where.OR }],
+          },
+          orderBy: { providerStartedAt: 'desc' },
+          select: { status: true, errorCode: true, completedAt: true },
+        });
+        const success = await tx.chatAiAnswer.findFirst({
+          where: { ...where, status: 'COMPLETED' },
+          orderBy: { providerStartedAt: 'desc' },
+          select: { completedAt: true },
+        });
+        return {
+          ...model,
+          lastSuccessfulCallAt: success?.completedAt ?? null,
+          health: {
+            status:
+              last?.status === 'COMPLETED'
+                ? 'NORMAL'
+                : last
+                  ? 'DEGRADED'
+                  : 'UNKNOWN',
+            code: last?.errorCode ?? null,
+            checkedAt: last?.completedAt ?? null,
+          },
+        };
+      }),
+    );
+  }
+  approveEgress(
+    actor: CurrentActor,
+    projectId: string,
+    input: ChatAiEgressDto,
+  ) {
+    return this.authorized(actor, projectId, async (tx) => {
+      await this.access.authority(tx, actor, projectId, 'ACCESS_ADMIN');
+      const metadata = readAiConfig();
+      const identity = AI_MODELS.find((model) => model.id === input.model);
+      if (!identity || !metadata[identity.provider] || !metadata.fileDigest)
+        throw new ConflictException('INVALID_CONFIG');
+      const config =
+        input.action === 'APPROVE'
+          ? configuredModel(metadata, input.model)
+          : {
+              provider: identity.provider,
+              fileDigest: metadata.fileDigest,
+              dataPolicy: metadata[identity.provider]!.dataPolicy,
+            };
+      let target = projectId;
+      if (input.kind === 'INPUT') {
+        if (!input.question?.trim() || input.sourceId || input.version)
+          throw new ConflictException('INVALID_CONTEXT');
+        target = createHash('sha256').update(input.question).digest('hex');
+      } else if (input.kind === 'SOURCE') {
+        if (!input.sourceId || !input.version || input.question)
+          throw new ConflictException('INVALID_CONTEXT');
+        const source = await tx.chatAiSourceIndex.findFirst({
+          where: {
+            id: input.sourceId,
+            organizationId: actor.organizationId,
+            projectId,
+            version: input.version,
+          },
+        });
+        if (!source) throw new NotFoundException();
+        await this.checkSource(tx, actor, projectId, source);
+        target = source.id;
+      } else if (input.question || input.sourceId || input.version)
+        throw new ConflictException('INVALID_CONTEXT');
+      const event = {
+        id: randomUUID(),
+        actorId: actor.userId,
+        organizationId: actor.organizationId,
+        projectId,
+        at: new Date().toISOString(),
+        kind: input.kind,
+        action: input.action,
+        target,
+        ...(input.version && { version: input.version }),
+      };
+      // Quyết định và audit được ghi cùng atomic config dưới flock/CAS; không chứa prompt hoặc tên nguồn.
+      await writeAiMetadata(config, 'record-policy', event);
+      return {
+        policyRevision: event.id,
+        dataPolicy: config.dataPolicy,
+        action: event.action,
+        kind: event.kind,
       };
     });
   }
@@ -620,6 +765,53 @@ export class ProjectAiService {
             ) SELECT TRUE AS locked FROM quota_lock`,
     );
     const now = new Date();
+    const recent =
+      'provider' in config
+        ? await tx.chatAiAnswer.findFirst({
+            where: {
+              model: config.model,
+              OR: [
+                {
+                  usage: {
+                    path: ['request', 'revision'],
+                    equals: config.revision,
+                  },
+                },
+                {
+                  usage: {
+                    path: ['activation', 'revision'],
+                    equals: config.revision,
+                  },
+                },
+              ],
+              errorCode: { in: ['TEMPORARY_ERROR', 'RATE_LIMITED_TEMPORARY'] },
+              providerStartedAt: { not: null },
+            },
+            orderBy: { completedAt: 'desc' },
+            select: { usage: true, completedAt: true },
+          })
+        : null;
+    const metadata = recent?.usage as {
+      diagnostic?: { retry_after_ms?: unknown };
+    } | null;
+    const retryAfter = metadata?.diagnostic?.retry_after_ms;
+    if (
+      recent?.completedAt &&
+      typeof retryAfter === 'number' &&
+      Number.isFinite(retryAfter) &&
+      retryAfter > 0 &&
+      recent.completedAt.getTime() + retryAfter > now.getTime()
+    ) {
+      await tx.chatAiAnswer.update({
+        where: { id },
+        data: {
+          status: 'FAILED',
+          errorCode: 'PROVIDER_COOLDOWN',
+          completedAt: now,
+        },
+      });
+      return false;
+    }
     const day = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
     );
@@ -1071,11 +1263,7 @@ export class ProjectAiService {
   }
   list(actor: CurrentActor, projectId: string) {
     return this.authorized(actor, projectId, async (tx) => {
-      const models = modelChoices(
-        readAiConfig(),
-        actor.organizationId,
-        projectId,
-      );
+      const models = await this.operationalModels(tx, actor, projectId);
       return {
         provider: models.some((m) => m.providerReady)
           ? 'CONFIGURED'
@@ -1106,6 +1294,7 @@ export class ProjectAiService {
             rows.map(({ answers, ...conversation }) => ({
               ...conversation,
               context: requestMetadata(answers[0]?.usage)?.context ?? null,
+              mode: requestMetadata(answers[0]?.usage)?.mode ?? 'PROJECT',
             })),
           ),
       };
@@ -1156,6 +1345,9 @@ export class ProjectAiService {
     return this.authorized(actor, projectId, async (tx, grantId) => {
       await this.conversation(tx, actor, projectId, conversationId);
       const context = this.context(input);
+      const mode = input.mode ?? 'PROJECT';
+      if (mode === 'GENERAL' && (context || input.sourceIds?.length))
+        throw new ConflictException('INVALID_CONTEXT');
       if (context && !input.model)
         throw new ConflictException('Cần chọn model');
       if (!input.question.trim()) throw new ConflictException('Câu hỏi trống');
@@ -1174,6 +1366,7 @@ export class ProjectAiService {
                 input.dataClassification,
                 input.sourceIds ?? [],
                 ...(context ? [context] : []),
+                mode,
               ])
             : input.question,
         )
@@ -1213,26 +1406,36 @@ export class ProjectAiService {
       });
       if (
         first &&
-        JSON.stringify(requestMetadata(first.usage)?.context) !==
-          JSON.stringify(context)
+        (JSON.stringify(requestMetadata(first.usage)?.context) !==
+          JSON.stringify(context) ||
+          (requestMetadata(first.usage)?.mode ?? 'PROJECT') !== mode)
       )
         throw new ConflictException('CONVERSATION_CONTEXT_CHANGED');
       let pin: AiRequestMetadata | null = null;
       if (input.model) {
         try {
           const config = configuredModel(readAiConfig(), input.model);
-          assertEgress(
+          if (mode === 'PROJECT')
+            assertEgress(
+              config,
+              actor.organizationId,
+              projectId,
+              input.dataClassification,
+              [],
+            );
+          assertInput(
             config,
             actor.organizationId,
             projectId,
-            input.dataClassification,
-            [],
+            actor.userId,
+            input.question,
           );
           const reasoning = input.reasoning ?? 'default';
           if (!(config.reasoning as readonly string[]).includes(reasoning))
             throw new AiError('UNSUPPORTED_REASONING');
           pin = {
             version: 1,
+            mode,
             provider: config.provider,
             model: config.model,
             revision: config.revision,
@@ -1243,6 +1446,20 @@ export class ProjectAiService {
             ...(context && { context }),
           };
         } catch (error) {
+          const model = AI_MODELS.find((m) => m.id === input.model);
+          this.logger.log(
+            JSON.stringify({
+              request_id: input.clientKey,
+              stage: 'POLICY',
+              provider_id: model?.provider,
+              model_id: input.model,
+              policy_reason:
+                error instanceof AiError ? error.code : 'INVALID_CONFIG',
+              outbound_attempted: false,
+              upstream_status: null,
+              config_version: readAiConfig()[model!.provider]?.revision ?? null,
+            }),
+          );
           throw new ConflictException(
             error instanceof AiError ? error.code : 'INVALID_CONFIG',
           );
@@ -1346,13 +1563,41 @@ export class ProjectAiService {
           answer,
           answer.status !== 'COMPLETED',
         )!;
-        assertEgress(
+        assertInput(
           config,
           actor.organizationId,
           projectId,
-          pin.dataClassification,
-          dependencies.map((d) => d.source),
+          actor.userId,
+          answer.question,
         );
+        const previous = await tx.chatAiAnswer.findMany({
+          where: {
+            conversationId: answer.conversationId,
+            status: 'COMPLETED',
+            createdAt: { lt: answer.createdAt },
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { question: true, usage: true },
+        });
+        for (const turn of previous) {
+          if ((requestMetadata(turn.usage)?.mode ?? 'PROJECT') !== pin.mode)
+            throw new AiError('HISTORY_UNAVAILABLE');
+          assertInput(
+            config,
+            actor.organizationId,
+            projectId,
+            actor.userId,
+            turn.question,
+          );
+        }
+        if (pin.mode !== 'GENERAL')
+          assertEgress(
+            config,
+            actor.organizationId,
+            projectId,
+            pin.dataClassification,
+            dependencies.map((d) => d.source),
+          );
       } catch (error) {
         return {
           ...hidden,
@@ -1381,8 +1626,9 @@ export class ProjectAiService {
     });
     return {
       id: answer.id,
+      mode: pin?.mode ?? 'PROJECT',
       status:
-        answer.status === 'FAILED' &&
+        ['FAILED', 'NO_SOURCES'].includes(answer.status) &&
         ['EGRESS_POLICY_DENIED', 'HISTORY_UNAVAILABLE'].includes(
           answer.errorCode ?? '',
         )
@@ -1451,6 +1697,7 @@ export class ProjectAiService {
         id: conversation.id,
         scope: conversation.scope,
         context: requestMetadata(answers[0]?.usage)?.context ?? null,
+        mode: requestMetadata(answers[0]?.usage)?.mode ?? 'PROJECT',
         answers: visible,
       };
     });
@@ -1708,17 +1955,22 @@ export class ProjectAiService {
       upstream_status: null,
     };
     let priorTurns: { question: string; answer: string }[] = [];
+    let limitedSources = false;
     const controller = new AbortController();
     this.running.set(id, controller);
     try {
-      await this.index(actor, projectId, claimed.scope, pin?.context);
+      if (pin?.mode !== 'GENERAL')
+        await this.index(actor, projectId, claimed.scope, pin?.context);
       controller.signal.throwIfAborted();
-      const native = await this.mediaContext(
-        actor,
-        projectId,
-        claimed.answer,
-        claimed.scope,
-      );
+      const native =
+        pin?.mode === 'GENERAL'
+          ? []
+          : await this.mediaContext(
+              actor,
+              projectId,
+              claimed.answer,
+              claimed.scope,
+            );
       const context = await this.authorized(
         actor,
         projectId,
@@ -1734,6 +1986,7 @@ export class ProjectAiService {
           if (answer.status !== 'INDEXING') return null;
           // A top-k source answer never claims the full domain total.
           if (
+            pin?.mode !== 'GENERAL' &&
             /(?:^|[^\p{L}\p{N}_])(?:tổng|tất cả)(?:$|[^\p{L}\p{N}_])/iu.test(
               answer.question.normalize('NFKC'),
             )
@@ -1776,6 +2029,7 @@ export class ProjectAiService {
               const previousPin = requestMetadata(previousAnswer.usage);
               if (
                 !previousPin ||
+                previousPin.mode !== pin.mode ||
                 previousPin.dataClassification !== pin.dataClassification
               )
                 throw new AiError('EGRESS_POLICY_DENIED');
@@ -1783,13 +2037,21 @@ export class ProjectAiService {
                 where: { answerId: previousAnswer.id },
                 include: { source: true },
               });
-              assertEgress(
+              assertInput(
                 config,
                 actor.organizationId,
                 projectId,
-                pin.dataClassification,
-                deps.map((d) => d.source),
+                actor.userId,
+                previousAnswer.question,
               );
+              if (pin.mode !== 'GENERAL')
+                assertEgress(
+                  config,
+                  actor.organizationId,
+                  projectId,
+                  pin.dataClassification,
+                  deps.map((d) => d.source),
+                );
               if (
                 !config.nativeMedia &&
                 deps.some((d) =>
@@ -1805,6 +2067,19 @@ export class ProjectAiService {
                 answer: previousAnswer.answer!,
               });
             }
+          }
+          if (pin?.mode === 'GENERAL' && 'provider' in config) {
+            this.selectedConfig(answer);
+            assertInput(
+              config,
+              actor.organizationId,
+              projectId,
+              actor.userId,
+              answer.question,
+            );
+            if (!(await this.reserveProvider(tx, actor, config, id)))
+              return null;
+            return [];
           }
           const terms = [
             ...sourceTokens(
@@ -1861,6 +2136,17 @@ export class ProjectAiService {
           for (const source of candidates) {
             try {
               await this.checkSource(tx, actor, projectId, source);
+              if (
+                'provider' in config &&
+                !config.approvedSources.some(
+                  (approved) =>
+                    approved.id === source.id &&
+                    approved.version === source.version,
+                )
+              ) {
+                limitedSources = true;
+                continue;
+              }
               readable.push(source);
             } catch (error) {
               if (!this.denied(error)) throw error;
@@ -1899,7 +2185,9 @@ export class ProjectAiService {
               data: {
                 status: 'NO_SOURCES',
                 completedAt: new Date(),
-                errorCode: 'NO_READABLE_INDEXED_SOURCE',
+                errorCode: limitedSources
+                  ? 'EGRESS_POLICY_DENIED'
+                  : 'NO_READABLE_INDEXED_SOURCE',
               },
             });
             return null;
@@ -2043,7 +2331,9 @@ export class ProjectAiService {
             data: {
               status: 'COMPLETED',
               answer: result.answer,
-              uncertainty: result.uncertainty,
+              uncertainty: limitedSources
+                ? `Chỉ sử dụng phần nguồn đã được phép gửi tới nhà cung cấp. ${result.uncertainty}`
+                : result.uncertainty,
               citations: result.citations,
               usage: pin
                 ? {

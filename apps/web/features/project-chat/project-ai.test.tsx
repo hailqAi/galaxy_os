@@ -8,6 +8,28 @@ import {
   aiSessionKey,
 } from './project-ai';
 
+it('thông báo GENERAL không đọc hồ sơ và phân biệt quota với credential', () => {
+  const html = renderToStaticMarkup(
+    createElement(AiAnswer, {
+      answer: {
+        id: 'a',
+        mode: 'GENERAL',
+        status: 'COMPLETED',
+        question: '2+2?',
+        answer: '4',
+        sources: [],
+      },
+      onSource: () => {},
+      onCancel: () => {},
+      onRun: () => {},
+    }),
+  );
+  expect(html).toContain('Không sử dụng hồ sơ dự án');
+  expect(aiStatusLabel('RATE_LIMITED_UNKNOWN')).toContain('chưa xác định');
+  expect(aiStatusLabel('QUOTA_EXHAUSTED').toLowerCase()).toContain('hạn mức');
+  expect(aiStatusLabel('INPUT_POLICY_DENIED')).toContain('phê duyệt');
+});
+
 it('giữ identity scope/Project/room và phiên bản nguồn riêng, không phụ thuộc thứ tự field', () => {
   expect(typeof aiSessionKey).toBe('function');
   expect(aiSessionKey('p', 'ALL', { fileAssetId: 'f', fileVersion: 1 })).toBe(

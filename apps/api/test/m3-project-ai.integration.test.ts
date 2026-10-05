@@ -334,6 +334,12 @@ describe.sequential(
     });
     afterAll(async () => {
       await app?.close();
+      // Kết thúc leases của riêng dữ liệu synthetic do suite này tạo, không tác động lượt khác.
+      if (organizationId)
+        await db.chatAiAnswer.updateMany({
+          where: { organizationId },
+          data: { leaseUntil: null },
+        });
       await db.$disconnect();
     });
 
@@ -370,6 +376,16 @@ describe.sequential(
         maxConcurrent: 1,
         maxRequestsPerDay: null,
         dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+        approvedInputs: [
+          scenario.code + '?',
+          scenario.code + ' kích thước?',
+          'Mô tả ảnh mẫu?',
+        ].map((question) => ({
+          organizationId,
+          projectId: scenario.projectId,
+          ownerId: users.owner!.id,
+          questionHash: createHash('sha256').update(question).digest('hex'),
+        })),
         approvedProjects: [{ organizationId, projectId: scenario.projectId }],
         approvedSources: sources.map((s) => ({ id: s.id, version: s.version })),
       };
@@ -455,6 +471,18 @@ describe.sequential(
               replacementConfirmed: true,
               enabled: true,
               dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+              approvedInputs: [
+                scenario.code + '?',
+                scenario.code + ' kích thước?',
+                'Mô tả ảnh mẫu?',
+              ].map((question) => ({
+                organizationId,
+                projectId: scenario.projectId,
+                ownerId: users.owner!.id,
+                questionHash: createHash('sha256')
+                  .update(question)
+                  .digest('hex'),
+              })),
             },
           },
         }),
@@ -700,6 +728,18 @@ describe.sequential(
               enabled: true,
               replacementConfirmed: true,
               dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+              approvedInputs: [
+                scenario.code + '?',
+                scenario.code + ' kích thước?',
+                'Mô tả ảnh mẫu?',
+              ].map((question) => ({
+                organizationId,
+                projectId: scenario.projectId,
+                ownerId: users.owner!.id,
+                questionHash: createHash('sha256')
+                  .update(question)
+                  .digest('hex'),
+              })),
               approvedProjects: [
                 { organizationId, projectId: scenario.projectId },
               ],
@@ -794,6 +834,399 @@ describe.sequential(
       }
     });
 
+    it('GENERAL chỉ gửi câu đã duyệt, không lấy hồ sơ và thu hồi chặn delivery/replay', async () => {
+      const scenario = await aiScenario();
+      const dir = mkdtempSync(join(tmpdir(), 'm3-general-'));
+      const path = join(dir, 'providers.json');
+      writeFileSync(
+        path,
+        JSON.stringify({
+          providers: {
+            kira: {
+              revision: 'general-r1',
+              KIRA_API_KEY: 'synthetic-only',
+              replacementConfirmed: true,
+              enabled: true,
+              dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+              approvedInputs: [
+                scenario.code + '?',
+                scenario.code + ' kích thước?',
+                'Mô tả ảnh mẫu?',
+              ].map((question) => ({
+                organizationId,
+                projectId: scenario.projectId,
+                ownerId: users.owner!.id,
+                questionHash: createHash('sha256')
+                  .update(question)
+                  .digest('hex'),
+              })),
+            },
+          },
+        }),
+        { mode: 0o600 },
+      );
+      vi.stubEnv('GALAXY_AI_CONFIG_FILE', path);
+      let calls = 0;
+      vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+        calls++;
+        const body = JSON.parse(String(init.body));
+        expect(body.model).toBe('kira-3.5-pro');
+        const context = JSON.parse(body.messages[1].content);
+        if (calls === 1)
+          expect(context).toEqual({
+            question: 'Giải thích phép cộng 2 + 2.',
+            sources: [],
+            history: [],
+          });
+        expect(context.sources).toEqual([]);
+        expect(context.history.length).toBeLessThanOrEqual(6);
+        expect(String(init.body)).not.toContain(scenario.code);
+        return new Response(
+          JSON.stringify({
+            model: body.model,
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  content: JSON.stringify({
+                    answer: '2 + 2 = 4. Chưa dùng hồ sơ dự án.',
+                    citations: [],
+                    uncertainty: '',
+                  }),
+                },
+              },
+            ],
+          }),
+        );
+      });
+      try {
+        const c = await scenario
+          .post('/conversations', { scope: 'ALL', clientKey: randomUUID() })
+          .expect(201);
+        const payload = {
+          question: 'Giải thích phép cộng 2 + 2.',
+          mode: 'GENERAL',
+          model: 'kira-3.5-pro',
+          dataClassification: 'SYNTHETIC_PUBLIC_APPROVED',
+          clientKey: randomUUID(),
+        };
+        await scenario
+          .post(`/conversations/${c.body.id}/answers`, payload)
+          .expect(409);
+        expect(calls).toBe(0);
+        await scenario
+          .post('/settings/egress', {
+            model: payload.model,
+            kind: 'INPUT',
+            action: 'APPROVE',
+            question: payload.question,
+            confirmed: true,
+          })
+          .expect(201);
+        const a = await scenario
+          .post(`/conversations/${c.body.id}/answers`, payload)
+          .expect(201);
+        const result = await scenario
+          .post(`/answers/${a.body.id}/run`, {})
+          .expect(201);
+        expect(result.body.errorCode).toBeNull();
+        expect(result.body).toMatchObject({
+          status: 'COMPLETED',
+          mode: 'GENERAL',
+          sources: [],
+        });
+        expect(calls).toBe(1);
+        expect(
+          await db.chatAiSourceIndex.count({
+            where: { projectId: scenario.projectId },
+          }),
+        ).toBe(0);
+        await scenario
+          .post(`/conversations/${c.body.id}/answers`, {
+            ...payload,
+            clientKey: randomUUID(),
+            mode: 'PROJECT',
+          })
+          .expect(409);
+        await scenario
+          .post('/settings/egress', {
+            model: payload.model,
+            kind: 'INPUT',
+            action: 'APPROVE',
+            question: 'Giải thích phép cộng 3 + 3.',
+            confirmed: true,
+          })
+          .expect(201);
+        for (let i = 0; i < 7; i++) {
+          const follow = await scenario
+            .post(`/conversations/${c.body.id}/answers`, {
+              ...payload,
+              clientKey: randomUUID(),
+              question: 'Giải thích phép cộng 3 + 3.',
+            })
+            .expect(201);
+          const done = await scenario
+            .post(`/answers/${follow.body.id}/run`, {})
+            .expect(201);
+          expect(done.body.status, done.body.errorCode).toBe('COMPLETED');
+        }
+        await scenario
+          .post('/settings/egress', {
+            model: payload.model,
+            kind: 'INPUT',
+            action: 'REVOKE',
+            question: payload.question,
+            confirmed: true,
+          })
+          .expect(201);
+        const history = await scenario
+          .get(`/conversations/${c.body.id}`)
+          .expect(200);
+        expect(history.body.answers.at(-1)).toMatchObject({
+          answer: null,
+          sources: [],
+          status: 'INPUT_POLICY_DENIED',
+        });
+        await scenario.post(`/answers/${a.body.id}/run`, {}).expect(201);
+        expect(calls).toBe(8);
+      } finally {
+        rmSync(dir, { recursive: true });
+      }
+    });
+
+    it('admin duyệt đúng nguồn/version, nguồn chưa duyệt không outbound; 503 rồi revoke không retry', async () => {
+      const scenario = await aiScenario(2);
+      await scenario.post('/index', { scope: 'ALL' }).expect(201);
+      const indexes = await db.chatAiSourceIndex.findMany({
+        where: { projectId: scenario.projectId },
+        orderBy: { roomId: 'asc' },
+      });
+      const dir = mkdtempSync(join(tmpdir(), 'm3-approval-'));
+      const path = join(dir, 'providers.json');
+      const question = scenario.code + ' kích thước?';
+      writeFileSync(
+        path,
+        JSON.stringify({
+          providers: {
+            kira: {
+              revision: 'policy-' + randomUUID(),
+              KIRA_API_KEY: 'synthetic-only',
+              replacementConfirmed: true,
+              enabled: true,
+              dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+            },
+          },
+        }),
+        { mode: 0o600 },
+      );
+      vi.stubEnv('GALAXY_AI_CONFIG_FILE', path);
+      let calls = 0;
+      try {
+        await db.chatProjectGrant.create({
+          data: {
+            organizationId,
+            projectId: scenario.projectId,
+            userId: users.reader!.id,
+            grantedBy: users.owner!.id,
+            actions: ['INVOKE'],
+            roomCeiling: [],
+            effectiveAt: new Date(Date.now() - 1000),
+          },
+        });
+        await request(app.getHttpServer())
+          .post(
+            `/api/v1/project-chat/projects/${scenario.projectId}/ai/settings/egress`,
+          )
+          .set('Cookie', users.reader!.cookie)
+          .set('X-Chat-Actor', users.reader!.id)
+          .send({
+            model: 'kira-3.5-pro',
+            kind: 'PROJECT',
+            action: 'APPROVE',
+            confirmed: true,
+          })
+          .expect(404);
+        const policy = {
+          model: 'kira-3.5-pro',
+          action: 'APPROVE',
+          confirmed: true,
+        };
+        await scenario
+          .post('/settings/egress', { ...policy, kind: 'PROJECT' })
+          .expect(201);
+        await scenario
+          .post('/settings/egress', { ...policy, kind: 'INPUT', question })
+          .expect(201);
+        await scenario
+          .post('/settings/egress', {
+            ...policy,
+            kind: 'SOURCE',
+            sourceId: indexes[0]!.id,
+            version: 'wrong-version',
+          })
+          .expect(404);
+        await scenario
+          .post('/settings/egress', {
+            ...policy,
+            kind: 'SOURCE',
+            sourceId: indexes[0]!.id,
+            version: indexes[0]!.version,
+          })
+          .expect(201);
+        expect(
+          JSON.parse(readFileSync(path, 'utf8')).providers.kira.policyAudit,
+        ).toHaveLength(3);
+        vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+          calls++;
+          const payload = JSON.parse(
+            JSON.parse(String(init.body)).messages[1].content,
+          );
+          expect(payload.sources).toHaveLength(1);
+          expect(payload.sources[0].text).toContain(indexes[0]!.text);
+          expect(payload.sources[0].text).not.toContain(indexes[1]!.text);
+          return new Response(
+            JSON.stringify({
+              model: 'kira-3.5-pro',
+              choices: [
+                {
+                  finish_reason: 'stop',
+                  message: {
+                    content: JSON.stringify({
+                      answer: 'Theo nguồn được cấp.',
+                      citations: [payload.sources[0].handle],
+                      uncertainty: '',
+                    }),
+                  },
+                },
+              ],
+            }),
+          );
+        });
+        const c = await scenario
+          .post('/conversations', { scope: 'ALL', clientKey: randomUUID() })
+          .expect(201);
+        const ask = async () =>
+          (
+            await scenario
+              .post(`/conversations/${c.body.id}/answers`, {
+                ...policy,
+                action: undefined,
+                confirmed: undefined,
+                question,
+                clientKey: randomUUID(),
+                dataClassification: 'SYNTHETIC_PUBLIC_APPROVED',
+              })
+              .expect(201)
+          ).body;
+        const first = await ask();
+        const result = await scenario
+          .post(`/answers/${first.id}/run`, {})
+          .expect(201);
+        expect(
+          result.body.status,
+          JSON.stringify({ error: result.body.errorCode, calls }),
+        ).toBe('COMPLETED');
+        expect(result.body.uncertainty).toContain('phần nguồn');
+        const health = (
+          await scenario.get('/settings').expect(200)
+        ).body.models.find(
+          (model: { id: string }) => model.id === 'kira-3.5-pro',
+        );
+        expect(health).toMatchObject({
+          credentialState: 'LOADED',
+          providerReady: true,
+          health: { status: 'NORMAL' },
+        });
+        expect(health.lastSuccessfulCallAt).toBeTruthy();
+        vi.stubGlobal('fetch', async () => {
+          calls++;
+          return new Response('{}', {
+            status: 503,
+            headers: { 'Retry-After': '120' },
+          });
+        });
+        const waiting = await ask();
+        const failed = await scenario
+          .post(`/answers/${waiting.id}/run`, {})
+          .expect(201);
+        expect(failed.body.errorCode).toBe('TEMPORARY_ERROR');
+        const whileWaiting = await ask();
+        const paced = await scenario
+          .post(`/answers/${whileWaiting.id}/run`, {})
+          .expect(201);
+        expect(paced.body.errorCode).toBe('PROVIDER_COOLDOWN');
+        expect(calls).toBe(2);
+        const degraded = (
+          await scenario.get('/settings').expect(200)
+        ).body.models.find(
+          (model: { id: string }) => model.id === 'kira-3.5-pro',
+        );
+        expect(degraded).toMatchObject({
+          credentialState: 'LOADED',
+          providerReady: true,
+          health: { status: 'DEGRADED', code: 'TEMPORARY_ERROR' },
+        });
+        // Mô phỏng hết cooldown chỉ trong hàng fixture; không đổi clock/ứng dụng chính.
+        await db.chatAiAnswer.update({
+          where: { id: waiting.id },
+          data: {
+            completedAt: new Date(Date.now() - 121000),
+            leaseUntil: null,
+          },
+        });
+        const next = await ask();
+        vi.stubGlobal('fetch', async () => {
+          calls++;
+          await scenario
+            .post('/settings/egress', {
+              ...policy,
+              action: 'REVOKE',
+              kind: 'SOURCE',
+              sourceId: indexes[0]!.id,
+              version: indexes[0]!.version,
+            })
+            .expect(201);
+          return new Response('{}', { status: 503 });
+        });
+        const denied = await scenario
+          .post(`/answers/${next.id}/run`, {})
+          .expect(201);
+        expect(['CONFIG_CHANGED', 'EGRESS_POLICY_DENIED']).toContain(
+          denied.body.status,
+        );
+        expect(calls).toBe(3);
+        const hidden = await scenario
+          .get(`/conversations/${c.body.id}`)
+          .expect(200);
+        expect(hidden.body.answers[0]).toMatchObject({
+          status: 'EGRESS_POLICY_DENIED',
+          answer: null,
+          sources: [],
+        });
+        const disabled = JSON.parse(readFileSync(path, 'utf8'));
+        disabled.providers.kira.enabled = false;
+        delete disabled.providers.kira.KIRA_API_KEY;
+        writeFileSync(path, JSON.stringify(disabled), { mode: 0o600 });
+        await scenario
+          .post('/settings/egress', {
+            ...policy,
+            action: 'REVOKE',
+            kind: 'PROJECT',
+          })
+          .expect(201);
+        expect(
+          JSON.parse(readFileSync(path, 'utf8')).providers.kira
+            .approvedProjects,
+        ).toEqual([]);
+      } finally {
+        await db.chatAiAnswer.updateMany({
+          where: { projectId: scenario.projectId },
+          data: { leaseUntil: null },
+        });
+        rmSync(dir, { recursive: true });
+      }
+    });
+
     it('pins model/revision, switches within one conversation and blocks revoked egress before replay', async () => {
       const scenario = await aiScenario();
       await scenario.post('/index', { scope: 'ALL' }).expect(201);
@@ -811,6 +1244,16 @@ describe.sequential(
             replacementConfirmed: true,
             enabled: true,
             dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+            approvedInputs: [
+              scenario.code + '?',
+              scenario.code + ' kích thước?',
+              'Mô tả ảnh mẫu?',
+            ].map((question) => ({
+              organizationId,
+              projectId: scenario.projectId,
+              ownerId: users.owner!.id,
+              questionHash: createHash('sha256').update(question).digest('hex'),
+            })),
             maxOutputTokens: 8192,
             approvedProjects: [
               { organizationId, projectId: scenario.projectId },
@@ -963,6 +1406,16 @@ describe.sequential(
         replacementConfirmed: true,
         enabled: true,
         dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+        approvedInputs: [
+          scenario.code + '?',
+          scenario.code + ' kích thước?',
+          'Mô tả ảnh mẫu?',
+        ].map((question) => ({
+          organizationId,
+          projectId: scenario.projectId,
+          ownerId: users.owner!.id,
+          questionHash: createHash('sha256').update(question).digest('hex'),
+        })),
         approvedProjects: [{ organizationId, projectId: scenario.projectId }],
         approvedSources: [],
       };
@@ -1019,6 +1472,16 @@ describe.sequential(
         replacementConfirmed: true,
         enabled: true,
         dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+        approvedInputs: [
+          scenario.code + '?',
+          scenario.code + ' kích thước?',
+          'Mô tả ảnh mẫu?',
+        ].map((question) => ({
+          organizationId,
+          projectId: scenario.projectId,
+          ownerId: users.owner!.id,
+          questionHash: createHash('sha256').update(question).digest('hex'),
+        })),
         approvedProjects: [{ organizationId, projectId: scenario.projectId }],
         approvedSources: sources.map((s) => ({ id: s.id, version: s.version })),
       };
@@ -1129,6 +1592,16 @@ describe.sequential(
         replacementConfirmed: true,
         enabled: true,
         dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+        approvedInputs: [
+          scenario.code + '?',
+          scenario.code + ' kích thước?',
+          'Mô tả ảnh mẫu?',
+        ].map((question) => ({
+          organizationId,
+          projectId: scenario.projectId,
+          ownerId: users.owner!.id,
+          questionHash: createHash('sha256').update(question).digest('hex'),
+        })),
         tests: [
           {
             revision: 'r1',

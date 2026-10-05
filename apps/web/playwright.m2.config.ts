@@ -14,13 +14,15 @@ if (
 export default defineConfig({
   testDir: './tests/browser',
   testMatch:
-    process.env.FEATURE_PROJECT_AI === 'true'
-      ? [
-          'm2-project-chat.spec.ts',
-          'm3-project-ai.spec.ts',
-          'm3-pdf-workspace.spec.ts',
-        ]
-      : 'm2-project-chat.spec.ts',
+    process.env.GALAXY_AI_LIVE_FIXTURE === 'confirmed'
+      ? 'm3-live-rag.spec.ts'
+      : process.env.FEATURE_PROJECT_AI === 'true'
+        ? [
+            'm2-project-chat.spec.ts',
+            'm3-project-ai.spec.ts',
+            'm3-pdf-workspace.spec.ts',
+          ]
+        : 'm2-project-chat.spec.ts',
   workers: 1,
   fullyParallel: false,
   outputDir: 'test-results/m2-a',

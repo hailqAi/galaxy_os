@@ -40,7 +40,7 @@ def read_private(path, metadata=False):
     finally:
         os.close(fd)
 
-def update(path, operation, expected_digest=None, whole_document=False):
+def update(path, operation, expected_digest=None, whole_document=False, after_write=None):
     path = Path(path)
     if path.is_symlink():
         raise ValueError('Không dùng symlink cho cấu hình')
@@ -60,6 +60,8 @@ def update(path, operation, expected_digest=None, whole_document=False):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        if after_write:
+            after_write()
     finally:
         if temporary and os.path.exists(temporary):
             os.unlink(temporary)
@@ -135,6 +137,7 @@ def save_provider(path, provider, key, host):
     name, expected_host = PROVIDERS[provider]
     if host != expected_host or not key.strip() or any(c.isspace() for c in key) or len(key) > 4096:
         raise ValueError('Host cấp khóa hoặc giá trị không hợp lệ; không thử gửi khóa')
+    pending = {}
     def change(document):
         providers = document['providers']
         previous = providers.get(provider, {})
@@ -143,7 +146,7 @@ def save_provider(path, provider, key, host):
             resolved = env_credentials(source)
             if resolved['status'] != 'LOADED':
                 raise ValueError(resolved['status'])
-            write_env(Path(source['path']), {**resolved['keys'], name: key})
+            pending.update(path=Path(source['path']), keys={**resolved['keys'], name: key})
         providers[provider] = {
             **previous, **({name: key} if not source else {}), 'revision': str(uuid.uuid4()),
             'replacementConfirmed': True, 'enabled': False,
@@ -157,7 +160,9 @@ def save_provider(path, provider, key, host):
         if source:
             for key_name, _ in PROVIDERS.values():
                 providers[provider].pop(key_name, None)
-    update(path, change, whole_document=True)
+    # Hai file không atomic cùng nhau: metadata disabled trước, env sau; lỗi luôn fail closed.
+    update(path, change, whole_document=True,
+           after_write=lambda: write_env(pending['path'], pending['keys']) if pending else None)
 
 def valid_evidence(evidence, provider):
     models = dict(google_gemini='gemini-3.8-flash', mistral='mistral-medium-3-5', kira='kira-3.5-pro')
@@ -209,9 +214,43 @@ def hidden_key():
     except getpass.GetPassWarning as exc:
         raise ValueError('Terminal không bảo đảm input ẩn; chưa đọc khóa') from exc
 
+def record_policy(path, provider, expected_digest, event):
+    required = {'id', 'actorId', 'organizationId', 'projectId', 'at', 'kind', 'action', 'target'}
+    if not isinstance(event, dict) or not required <= set(event) or set(event) - required - {'version'} or event['kind'] not in ['INPUT', 'SOURCE', 'PROJECT'] or event['action'] not in ['APPROVE', 'REVOKE'] or not isinstance(event['target'], str) or len(event['target']) > 200:
+        raise ValueError('INVALID_EVIDENCE')
+    for name in ['id', 'actorId', 'organizationId', 'projectId']:
+        uuid.UUID(event[name])
+    datetime.fromisoformat(event['at'].replace('Z', '+00:00'))
+    if event['kind'] == 'INPUT' and not re.fullmatch(r'[a-f0-9]{64}', event['target']):
+        raise ValueError('INVALID_EVIDENCE')
+    def change(providers):
+        state = providers[provider]
+        if state.get('dataPolicy') != 'SYNTHETIC_PUBLIC_APPROVED':
+            raise ValueError('INVALID_EVIDENCE')
+        if event['kind'] == 'INPUT':
+            field = 'approvedInputs'
+            entry = {'organizationId': event['organizationId'], 'projectId': event['projectId'], 'questionHash': event['target']}
+        elif event['kind'] == 'SOURCE':
+            if not isinstance(event.get('version'), str) or not 1 <= len(event['version']) <= 200:
+                raise ValueError('INVALID_EVIDENCE')
+            uuid.UUID(event['target'])
+            field, entry = 'approvedSources', {'id': event['target'], 'version': event['version']}
+        else:
+            field, entry = 'approvedProjects', {'organizationId': event['organizationId'], 'projectId': event['projectId']}
+        rows = state.setdefault(field, [])
+        if event['action'] == 'APPROVE' and entry not in rows:
+            rows.append(entry)
+        if event['action'] == 'REVOKE':
+            state[field] = [row for row in rows if not all(row.get(k) == v for k, v in entry.items())]
+        state['policyRevision'] = event['id']
+        state.setdefault('policyAudit', []).append(event)
+        if len(state['policyAudit']) > 2000 or len(state[field]) > 1000:
+            raise ValueError('POLICY_AUDIT_FULL')
+    update(path, change, expected_digest)
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['key', 'enable', 'disable', 'approve-source', 'approve-project', 'status', 'record-test', 'migrate-env'])
+    parser.add_argument('action', choices=['key', 'enable', 'disable', 'approve-source', 'approve-project', 'status', 'record-test', 'record-policy', 'migrate-env'])
     parser.add_argument('--provider', choices=PROVIDERS)
     parser.add_argument('--file', type=Path, default=Path(os.environ.get('GALAXY_AI_CONFIG_FILE') or '/home/galaxy_os/.runtime/ai-providers.json'))
     parser.add_argument('--organization')
@@ -232,11 +271,11 @@ def main():
         return
     if not args.provider:
         raise ValueError('Cần provider')
-    if args.action == 'record-test':
+    if args.action in ['record-test', 'record-policy']:
         payload = json.loads(sys.stdin.read(16385))
         if set(payload) != {'expectedDigest', 'evidence'}:
             raise ValueError('INVALID_EVIDENCE')
-        record_test(args.file, args.provider, payload['expectedDigest'], payload['evidence'])
+        (record_test if args.action == 'record-test' else record_policy)(args.file, args.provider, payload['expectedDigest'], payload['evidence'])
         print('Đã ghi bằng chứng kiểm thử theo đúng revision; không đổi khóa/policy.')
         return
     if args.action == 'key':
@@ -268,7 +307,7 @@ def main():
                 if isinstance(state, dict):
                     state = {**{k: v for k, v in state.items() if k not in [p[0] for p in PROVIDERS.values()]}, **({PROVIDERS[args.provider][0]: resolved['keys'][PROVIDERS[args.provider][0]]} if PROVIDERS[args.provider][0] in resolved['keys'] else {})}
             credential_present = isinstance(state, dict) and isinstance(state.get(PROVIDERS[args.provider][0]), str) and bool(state[PROVIDERS[args.provider][0]].strip())
-            allowed_fields = {'revision', 'GEMINI_API_KEY', 'MISTRAL_API_KEY', 'KIRA_API_KEY', 'replacementConfirmed', 'enabled', 'modelAccessVerified', 'textLiveVerified', 'imageLiveVerified', 'pdfLiveVerified', 'lastTest', 'tests', 'dataPolicy', 'maxRequestsPerDay', 'maxConcurrent', 'maxOutputTokens', 'approvedProjects', 'approvedSources'}
+            allowed_fields = {'revision', 'GEMINI_API_KEY', 'MISTRAL_API_KEY', 'KIRA_API_KEY', 'replacementConfirmed', 'enabled', 'modelAccessVerified', 'textLiveVerified', 'imageLiveVerified', 'pdfLiveVerified', 'lastTest', 'tests', 'dataPolicy', 'maxRequestsPerDay', 'maxConcurrent', 'maxOutputTokens', 'approvedProjects', 'approvedSources', 'approvedInputs', 'policyRevision', 'policyAudit'}
             limits = {'maxRequestsPerDay': (1, 100000, True), 'maxConcurrent': (1, 4, False), 'maxOutputTokens': (256, 65536, False)}
             if not isinstance(state, dict):
                 state, diagnostic = {}, 'INVALID_CONFIG'

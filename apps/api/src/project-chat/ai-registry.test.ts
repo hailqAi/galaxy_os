@@ -7,6 +7,7 @@ import {
   modelChoices,
   configuredModel,
   assertEgress,
+  assertInput,
 } from './ai-registry';
 
 const directory = mkdtempSync(join(tmpdir(), 'galaxy-ai-config-'));
@@ -25,6 +26,12 @@ const provider = {
   approvedSources: [{ id: 'source', version: 'v1' }],
 };
 const fixture = () => ({ google_gemini: { ...provider } });
+it('không coi cờ client hoặc quyền Project là phê duyệt nội dung nhập GENERAL', () => {
+  const config = configuredModel(fixture(), 'gemini-3.8-flash');
+  expect(() =>
+    assertInput(config, 'org', 'project', 'actor', 'Dữ liệu riêng dán vào'),
+  ).toThrow('INPUT_POLICY_DENIED');
+});
 it('resolves only the explicit private env source, preserving literal keys and evidence', () => {
   const envPath = join(directory, 'ai-providers.env');
   const key = 'fake-$#\'"\\-key';

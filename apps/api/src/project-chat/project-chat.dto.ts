@@ -193,6 +193,7 @@ export class ChatAiConversationDto {
   @IsUUID('4') clientKey!: string;
 }
 export class ChatAiQuestionDto extends ChatAiContextDto {
+  @IsOptional() @IsIn(['GENERAL', 'PROJECT']) mode?: 'GENERAL' | 'PROJECT';
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(3)
@@ -210,6 +211,17 @@ export class ChatAiQuestionDto extends ChatAiContextDto {
   dataClassification?: string;
   @IsUUID('4') clientKey!: string;
   @IsString() @Length(1, 8000) question!: string;
+}
+
+export class ChatAiEgressDto {
+  @IsIn(['gemini-3.8-flash', 'mistral-medium-3-5', 'kira-3.5-pro'])
+  model!: string;
+  @IsIn(['INPUT', 'SOURCE', 'PROJECT']) kind!: 'INPUT' | 'SOURCE' | 'PROJECT';
+  @IsIn(['APPROVE', 'REVOKE']) action!: 'APPROVE' | 'REVOKE';
+  @IsIn([true]) confirmed!: boolean;
+  @IsOptional() @IsString() @Length(1, 8000) question?: string;
+  @IsOptional() @IsUUID('4') sourceId?: string;
+  @IsOptional() @IsString() @Length(1, 200) version?: string;
 }
 
 export class ChatAiActivationDto {

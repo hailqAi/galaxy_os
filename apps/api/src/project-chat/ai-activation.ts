@@ -65,6 +65,14 @@ export async function recordActivation(
   evidence: ActivationEvidence,
 ) {
   const checked = activationEvidence.parse(evidence);
+  return writeAiMetadata(config, 'record-test', checked);
+}
+
+export async function writeAiMetadata(
+  config: Pick<ConfiguredModel, 'provider' | 'fileDigest'>,
+  action: 'record-test' | 'record-policy',
+  evidence: unknown,
+) {
   if (!config.fileDigest || !process.env.GALAXY_AI_CONFIG_FILE)
     throw new AiError('CREDENTIAL_NOT_LOADED');
   await new Promise<void>((done, reject) => {
@@ -72,7 +80,7 @@ export async function recordActivation(
       'python3',
       [
         resolve(__dirname, '../../../../scripts/configure-ai.py'),
-        'record-test',
+        action,
         '--provider',
         config.provider,
         '--file',
@@ -81,11 +89,14 @@ export async function recordActivation(
       {
         timeout: 5000,
         maxBuffer: 4096,
-        env: Object.fromEntries(
-          Object.entries(process.env).filter(
-            ([name]) => !name.endsWith('_API_KEY'),
+        env: {
+          ...Object.fromEntries(
+            Object.entries(process.env).filter(
+              ([name]) => !name.endsWith('_API_KEY'),
+            ),
           ),
-        ),
+          NODE_ENV: process.env.NODE_ENV,
+        },
       },
       (error, _stdout, stderr) => {
         if (error)
@@ -101,7 +112,7 @@ export async function recordActivation(
     );
     child.stdin?.on('error', () => {});
     child.stdin?.end(
-      JSON.stringify({ expectedDigest: config.fileDigest, evidence: checked }),
+      JSON.stringify({ expectedDigest: config.fileDigest, evidence }),
     );
   });
 }

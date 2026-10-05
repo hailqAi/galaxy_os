@@ -57,6 +57,31 @@ class SecretConfigTest(unittest.TestCase):
             status = subprocess.run(status_cmd, capture_output=True, text=True, check=True)
             self.assertFalse(json.loads(status.stdout)['credentialConfigured'])
 
+    def test_env_key_change_never_uses_new_key_under_old_evidence(self):
+        with tempfile.TemporaryDirectory() as root:
+            path, env_path = Path(root) / 'providers.json', Path(root) / 'providers.env'
+            config.save_provider(path, 'kira', 'old-fake-key', 'kiraai.vn')
+            for phase in ['stage', 'activate', 'finalize']:
+                config.migrate_env(path, env_path, Path(root) / 'backup', phase)
+            config.update(path, lambda providers: providers['kira'].update(enabled=True, textLiveVerified=True))
+            previous = config.read_private(path)['providers']['kira']['revision']
+            replace = config.os.replace
+            def fail_metadata(src, dst):
+                if Path(dst) == path:
+                    raise OSError('synthetic write failure')
+                return replace(src, dst)
+            with patch.object(config.os, 'replace', side_effect=fail_metadata):
+                with self.assertRaises(OSError):
+                    config.save_provider(path, 'kira', 'new-fake-key', 'kiraai.vn')
+            self.assertEqual(config.env_credentials({'mode': 'env', 'path': str(env_path)})['keys']['KIRA_API_KEY'], 'old-fake-key')
+            with patch.object(config, 'write_env', side_effect=OSError('synthetic env failure')):
+                with self.assertRaises(OSError):
+                    config.save_provider(path, 'kira', 'new-fake-key', 'kiraai.vn')
+            state = config.read_private(path)['providers']['kira']
+            self.assertFalse(state['enabled'])
+            self.assertFalse(state['textLiveVerified'])
+            self.assertNotEqual(state['revision'], previous)
+
     def test_cli_resolves_environment_override_and_explicit_absolute_path(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'providers.json'

@@ -53,6 +53,12 @@ type ModelChoice = {
   providerLabel: string;
   host: string;
   available: boolean;
+  generalAvailable?: boolean;
+  health?: {
+    status: string;
+    code: string | null;
+    cooldownUntil?: string | null;
+  };
   reason: string | null;
   credentialConfigured: boolean;
   credentialPresent: boolean;
@@ -79,6 +85,7 @@ type ModelChoice = {
   };
 };
 type Answer = {
+  mode?: 'GENERAL' | 'PROJECT';
   model?: string | null;
   modelLabel?: string | null;
   provider?: string | null;
@@ -95,6 +102,7 @@ type Answer = {
   sources: Source[];
 };
 type Conversation = {
+  mode?: 'GENERAL' | 'PROJECT';
   id: string;
   scope: string;
   createdAt?: string;
@@ -143,6 +151,23 @@ export const aiStatusLabel = (
     NETWORK_OR_TLS: 'Không kết nối được nhà cung cấp; cần kiểm tra mạng/TLS',
     EGRESS_POLICY_DENIED:
       'Project hoặc nguồn chưa được phép gửi đến nhà cung cấp đã chọn',
+    INPUT_POLICY_DENIED:
+      'Nội dung nhập chưa được quản trị phê duyệt gửi tới nhà cung cấp này.',
+    SECRET_FILE_MISSING:
+      'API chưa đọc được file env AI; quản trị kiểm tra đường cấu hình.',
+    SECRET_FILE_INVALID: 'Env AI không hợp lệ; quản trị kiểm tra định dạng.',
+    SECRET_FILE_UNREADABLE:
+      'API không có quyền đọc env AI; quản trị kiểm tra owner và quyền file.',
+    RATE_LIMITED_UNKNOWN:
+      'Nhà cung cấp đang chạm hạn mức, chưa xác định thời điểm mở lại; quản trị kiểm tra hạn mức tài khoản.',
+    RATE_LIMITED_TEMPORARY:
+      'Nhà cung cấp đang giới hạn tốc độ. Chờ rồi thử lại theo thời gian được báo.',
+    PROVIDER_COOLDOWN:
+      'Đang chờ thời gian Retry-After của nhà cung cấp; hãy thử lại sau.',
+    QUOTA_EXHAUSTED:
+      'Hạn mức tài khoản đã hết; quản trị kiểm tra quota tại nhà cung cấp.',
+    BILLING_ACTION_REQUIRED:
+      'Nhà cung cấp yêu cầu kiểm tra thanh toán hoặc credit; liên hệ quản trị.',
     ADAPTER_RESPONSE_ERROR:
       'Phản hồi hoặc trích nguồn không đúng contract; chưa phát hành câu trả lời',
     MODEL_RETURNED_DIFFERENT:
@@ -212,11 +237,13 @@ export const aiStatusLabel = (
 const modelStatusLabel = (model: ModelChoice) =>
   model.credentialState && model.credentialState !== 'LOADED'
     ? aiStatusLabel(model.credentialState)
-    : model.providerReason || model.reason
-      ? aiStatusLabel(model.providerReason ?? model.reason!)
-      : model.textLiveVerified
-        ? 'Văn bản đã kiểm chứng live'
-        : 'Cấu hình đã nạp; văn bản chưa kiểm chứng live';
+    : model.health?.code
+      ? aiStatusLabel(model.health.code)
+      : model.providerReason || model.reason
+        ? aiStatusLabel(model.providerReason ?? model.reason!)
+        : model.textLiveVerified
+          ? 'Văn bản đã kiểm chứng live'
+          : 'Cấu hình đã nạp; văn bản chưa kiểm chứng live';
 
 export function AiAnswer({
   answer,
@@ -233,6 +260,9 @@ export function AiAnswer({
 }) {
   return (
     <article className="ai-answer">
+      {answer.mode === 'GENERAL' && (
+        <p className="chat-metadata">Không sử dụng hồ sơ dự án</p>
+      )}
       {answer.status !== 'ACCESS_REVOKED' && answer.question && (
         <h3 className="ai-question">{answer.question}</h3>
       )}
@@ -367,6 +397,15 @@ export function ProjectAi({
   const panel = useRef<HTMLElement>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [models, setModels] = useState<ModelChoice[]>([]);
+  const [mode, setMode] = useState<'GENERAL' | 'PROJECT'>('PROJECT');
+  const choices =
+    mode === 'GENERAL'
+      ? models.map((item) => ({
+          ...item,
+          available: item.generalAvailable ?? item.providerReady,
+          reason: item.providerReason,
+        }))
+      : models;
   const [model, setModel] = useState('');
   const [reasoning, setReasoning] = useState('default');
   const [pilotConfirmed, setPilotConfirmed] = useState(false);
@@ -387,7 +426,7 @@ export function ProjectAi({
   const [sourceIds, setSourceIds] = useState<string[]>([]);
   const modelInitialized = useRef(false);
   const modelStorageKey = `galaxy-ai-model:${actorId}:${projectId}`;
-  const chosenModel = models.find((m) => m.id === model);
+  const chosenModel = choices.find((m) => m.id === model);
   const [list, setList] = useState<Conversation[]>([]);
   const [provider, setProvider] = useState('LOADING');
   const [selected, setSelected] = useState('');
@@ -395,9 +434,11 @@ export function ProjectAi({
   const [scope, setScope] = useState(group);
   const [history, setHistory] = useState<History>();
   const context =
-    selected && history?.answers.length
-      ? (history.context ?? undefined)
-      : initialContext;
+    mode === 'GENERAL'
+      ? undefined
+      : selected && history?.answers.length
+        ? (history.context ?? undefined)
+        : initialContext;
   const presentationActive = useRef(active);
   const [verified, setVerified] = useState(false);
   const [wasActive, setWasActive] = useState(active);
@@ -484,6 +525,7 @@ export function ProjectAi({
         question: string;
         scope: string;
         model: string;
+        mode: 'GENERAL' | 'PROJECT';
         reasoning: string;
         dataClassification: string;
         sourceIds: string[];
@@ -624,6 +666,7 @@ export function ProjectAi({
         const identity = aiSessionKey(projectId, group, initialContext);
         if (
           detail &&
+          detail.mode !== 'GENERAL' &&
           aiSessionKey(
             projectId,
             detail.scope,
@@ -664,11 +707,13 @@ export function ProjectAi({
         setList(
           result.conversations.filter(
             (item) =>
+              (item.mode === 'GENERAL' && item.scope === group) ||
               aiSessionKey(projectId, item.scope, item.context) === identity,
           ),
         );
         setSelected(id);
         setHistory(detail);
+        if (detail?.answers.length) setMode(detail.mode ?? 'PROJECT');
         setLoadError('');
         if (selectedSource === sourceKey.current) setSource(currentSource);
         if (selectedScope === indexScope.current && currentIndex)
@@ -802,6 +847,7 @@ export function ProjectAi({
           question: text,
           scope,
           model,
+          mode,
           reasoning,
           dataClassification: 'SYNTHETIC_PUBLIC_APPROVED',
           sourceIds: [...sourceIds],
@@ -826,6 +872,7 @@ export function ProjectAi({
           clientKey: key.clientKey,
           question: key.question,
           model: key.model,
+          mode: key.mode,
           reasoning: key.reasoning,
           dataClassification: key.dataClassification,
           sourceIds: key.sourceIds,
@@ -1011,6 +1058,34 @@ export function ProjectAi({
         {!verified && loadError && <p role="alert">{loadError}</p>}
         <div className="ai-session-content" hidden={!verified}>
           <div className="ai-context-bar">
+            <label>
+              Chế độ hỏi{' '}
+              <select
+                aria-label="Chế độ hỏi AI"
+                value={mode}
+                disabled={busy || Boolean(retryPin)}
+                onChange={(event) => {
+                  const next = event.target.value as 'GENERAL' | 'PROJECT';
+                  if (next === mode) return;
+                  const draft = question;
+                  select('');
+                  setMode(next);
+                  setQuestion(draft);
+                  setError(
+                    'Đã mở ngữ cảnh sạch cho chế độ mới; hội thoại cũ vẫn trong lịch sử.',
+                  );
+                }}
+              >
+                <option value="PROJECT">Hỏi theo nguồn dự án</option>
+                <option value="GENERAL">Hỏi thông thường</option>
+              </select>
+            </label>
+            {mode === 'GENERAL' && (
+              <p role="status">
+                Không sử dụng hồ sơ dự án. Cần thông tin dự án: chọn Hỏi theo
+                nguồn dự án.
+              </p>
+            )}
             <p className="ai-privacy">
               {group === 'ALL' && !initialContext
                 ? 'Toàn dự án — theo quyền của bạn'
@@ -1019,7 +1094,7 @@ export function ProjectAi({
             </p>
             <div className="ai-model-controls">
               <ModelSelector
-                models={models}
+                models={choices}
                 value={model}
                 onChange={(value) => {
                   setModel(value);
@@ -1075,11 +1150,11 @@ export function ProjectAi({
               if (nearEnd) setNewMessages(false);
             }}
           >
-            {models.length > 0 && !models.some((item) => item.available) && (
+            {choices.length > 0 && !choices.some((item) => item.available) && (
               <details>
                 <summary>Model chưa sẵn sàng</summary>
                 <ul>
-                  {models.map((item) => (
+                  {choices.map((item) => (
                     <li key={item.id}>
                       {item.label}: {modelStatusLabel(item)}
                     </li>
@@ -1112,7 +1187,7 @@ export function ProjectAi({
               >
                 <summary>Cấu hình nhà cung cấp và hạn mức</summary>
                 <p>
-                  Khóa thay thế nhập tại terminal local của máy chủ, input ẩn.
+                  Khóa được API đọc từ env riêng; terminal là tiện ích tùy chọn.
                   Chỉ hồ sơ và phiên bản nguồn giả/công khai được quản trị duyệt
                   mới được gửi.
                 </p>
@@ -1146,6 +1221,40 @@ export function ProjectAi({
                         ? 'Project chưa được duyệt gửi dữ liệu ra nhà cung cấp.'
                         : 'Project được duyệt; từng source/version vẫn được kiểm tra riêng.'}
                     </p>
+                    <div className="flex flex-wrap gap-2">
+                      {(['APPROVE', 'REVOKE'] as const).map((action) => (
+                        <button
+                          type="button"
+                          key={action}
+                          disabled={
+                            busy ||
+                            (action === 'APPROVE' && !item.providerReady)
+                          }
+                          onClick={() =>
+                            void act(async () => {
+                              if (
+                                !window.confirm(
+                                  action === 'APPROVE'
+                                    ? `Duyệt phạm vi Project chỉ gồm dữ liệu giả/công khai được phép cho ${item.label}? Từng nguồn và nội dung nhập vẫn phải duyệt riêng. Không duyệt dữ liệu mật/cá nhân khi tier chưa được xác minh.`
+                                    : `Thu hồi quyền gửi Project tới ${item.label}? Dữ liệu đã gửi trước đó không thể thu hồi từ vendor bằng thao tác này.`,
+                                )
+                              )
+                                return;
+                              await call('/settings/egress', {
+                                model: item.id,
+                                kind: 'PROJECT',
+                                action,
+                                confirmed: true,
+                              });
+                            })
+                          }
+                        >
+                          {action === 'APPROVE'
+                            ? 'Duyệt phạm vi Project'
+                            : 'Thu hồi Project'}
+                        </button>
+                      ))}
+                    </div>
                     <p className="my-2">
                       Kiểm thử quản trị chỉ gửi nguồn tổng hợp cố định: văn bản
                       tối đa 3 câu; ảnh/PDF 1 câu. Không đọc hồ sơ dự án.
@@ -1350,6 +1459,46 @@ export function ProjectAi({
                         />
                       )}
                       {item.label}: {aiStatusLabel(item.status)}
+                      {canConfigure && item.version && (
+                        <span>
+                          {(['APPROVE', 'REVOKE'] as const).map((action) => (
+                            <button
+                              type="button"
+                              key={action}
+                              disabled={
+                                busy ||
+                                !model ||
+                                (action === 'APPROVE' &&
+                                  !chosenModel?.providerReady)
+                              }
+                              onClick={() =>
+                                void act(async () => {
+                                  if (
+                                    !window.confirm(
+                                      action === 'APPROVE'
+                                        ? `Xác nhận phiên bản này là dữ liệu giả/công khai được phép gửi tới ${chosenModel?.label}?`
+                                        : 'Thu hồi quyền gửi phiên bản này? Không xóa nguồn hoặc hội thoại.',
+                                    )
+                                  )
+                                    return;
+                                  await call('/settings/egress', {
+                                    model,
+                                    kind: 'SOURCE',
+                                    action,
+                                    sourceId: item.id,
+                                    version: item.version,
+                                    confirmed: true,
+                                  });
+                                })
+                              }
+                            >
+                              {action === 'APPROVE'
+                                ? 'Duyệt phiên bản'
+                                : 'Thu hồi phiên bản'}
+                            </button>
+                          ))}
+                        </span>
+                      )}
                       {item.nativeFile
                         ? ' · Có thể chọn gửi native khi capability đã được bật; tối đa 3 file, PDF ngắn tối đa 10 trang/file.'
                         : ''}
@@ -1466,6 +1615,51 @@ export function ProjectAi({
                 onChange={setQuestion}
               />
             </label>
+            {canConfigure && (
+              <div className="flex flex-wrap gap-2">
+                {(['APPROVE', 'REVOKE'] as const).map((action) => (
+                  <button
+                    type="button"
+                    key={action}
+                    disabled={
+                      busy ||
+                      !question.trim() ||
+                      !model ||
+                      (action === 'APPROVE' &&
+                        (!chosenModel?.providerReady || !pilotConfirmed))
+                    }
+                    onClick={() =>
+                      void act(async () => {
+                        if (
+                          !window.confirm(
+                            action === 'APPROVE'
+                              ? `Phê duyệt đúng nội dung đang nhập là dữ liệu giả/công khai, gửi tới ${chosenModel?.label}? Áp dụng cho người có quyền AI trong Project; không duyệt file hay lịch sử khác.`
+                              : 'Thu hồi phê duyệt nội dung đang nhập đối với model này?',
+                          )
+                        )
+                          return;
+                        await call('/settings/egress', {
+                          model,
+                          kind: 'INPUT',
+                          action,
+                          question: question.trim(),
+                          confirmed: true,
+                        });
+                        setError(
+                          action === 'APPROVE'
+                            ? 'Đã phê duyệt nội dung này; bấm Hỏi AI để gửi.'
+                            : 'Đã thu hồi phê duyệt nội dung.',
+                        );
+                      })
+                    }
+                  >
+                    {action === 'APPROVE'
+                      ? 'Phê duyệt nội dung nhập'
+                      : 'Thu hồi nội dung nhập'}
+                  </button>
+                ))}
+              </div>
+            )}
             <label className="ai-policy-confirm">
               <input
                 type="checkbox"
@@ -1500,7 +1694,7 @@ export function ProjectAi({
             <div className="ai-composer-actions">
               <button
                 type="button"
-                disabled={busy}
+                disabled={busy || mode === 'GENERAL'}
                 onClick={updateSources}
                 title="Chọn nguồn đã có trong phạm vi được cấp"
               >

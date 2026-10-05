@@ -109,6 +109,38 @@ const settings = z
       .default(null),
     maxConcurrent: z.number().int().min(1).max(4).default(1),
     maxOutputTokens: z.number().int().min(256).max(65536).default(8192),
+    policyRevision: z.string().max(100).optional(),
+    approvedInputs: z
+      .array(
+        z
+          .object({
+            organizationId: z.string(),
+            projectId: z.string(),
+            ownerId: z.string().optional(),
+            questionHash: z.string().regex(/^[a-f0-9]{64}$/),
+          })
+          .strict(),
+      )
+      .max(1000)
+      .default([]),
+    policyAudit: z
+      .array(
+        z
+          .object({
+            id: z.string().uuid(),
+            actorId: z.string().uuid(),
+            organizationId: z.string().uuid(),
+            projectId: z.string().uuid(),
+            at: z.string().datetime(),
+            kind: z.enum(['INPUT', 'SOURCE', 'PROJECT']),
+            action: z.enum(['APPROVE', 'REVOKE']),
+            target: z.string().max(200),
+            version: z.string().max(200).optional(),
+          })
+          .strict(),
+      )
+      .max(2000)
+      .default([]),
     approvedProjects: z
       .array(
         z
@@ -337,6 +369,25 @@ export function configuredModel(
   };
 }
 export type ConfiguredModel = ReturnType<typeof configuredModel>;
+export function assertInput(
+  config: ConfiguredModel,
+  organizationId: string,
+  projectId: string,
+  ownerId: string,
+  question: string,
+) {
+  const questionHash = createHash('sha256').update(question).digest('hex');
+  if (
+    !config.approvedInputs.some(
+      (input) =>
+        input.organizationId === organizationId &&
+        input.projectId === projectId &&
+        (!input.ownerId || input.ownerId === ownerId) &&
+        input.questionHash === questionHash,
+    )
+  )
+    throw new AiError('INPUT_POLICY_DENIED');
+}
 export function assertEgress(
   config: ConfiguredModel,
   organizationId: string,
@@ -388,6 +439,7 @@ export function modelChoices(
       providerLabel: model.providerLabel,
       host: model.host,
       available: reason === null,
+      generalAvailable: providerReason === null,
       providerReady: providerReason === null,
       providerReason,
       sourcePolicy,
@@ -461,6 +513,7 @@ export const aiContextSchema = z
 export type AiContext = z.infer<typeof aiContextSchema>;
 
 const requestSchema = z.object({
+  mode: z.enum(['GENERAL', 'PROJECT']).default('PROJECT'),
   version: z.literal(1),
   provider: z.enum(['google_gemini', 'mistral', 'kira']),
   model: z.string(),

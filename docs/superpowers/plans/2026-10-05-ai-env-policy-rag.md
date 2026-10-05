@@ -4,7 +4,7 @@
 
 **Goal:** Giữ credential hoạt động, tách chat thường/RAG và chứng minh citation trên DB fixture riêng, phát hành qua artifact/systemd.
 
-**Architecture:** Tái sử dụng registry, adapter fetch, ChatAiConversation/Answer/Dependency, lexical index và ACCESS_ADMIN. Secret tách khỏi metadata bằng một resolver backend/CLI, không thêm framework, IAM hay migration.
+**Architecture:** Tái sử dụng registry, adapter fetch, ChatAiConversation/Answer/Dependency, lexical index và ACCESS_ADMIN. Secret tách khỏi metadata bằng một resolver backend/CLI, không thêm framework hoặc IAM. Kiểm thử GENERAL chứng minh cần một migration CHECK: chỉ GENERAL được hoàn tất với citation rỗng; không sửa migration cũ.
 
 **Tech Stack:** NestJS/Prisma/PostgreSQL, Next.js, Node fetch, Python CLI, systemd.
 
