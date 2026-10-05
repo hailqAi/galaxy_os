@@ -295,3 +295,50 @@ it('labels requested OpenRouter separately from actual returned model and source
   expect(html).not.toContain('Chi phí tiền chưa xác định');
   expect(aiStatusLabel('PROVIDER_PAUSED')).toContain('tạm dừng');
 });
+
+it.each(['TEMPORARY_ERROR', 'RATE_LIMITED_UNKNOWN'])(
+  'shows paused before historical health %s and keeps the option disabled',
+  (healthCode) => {
+    const html = renderToStaticMarkup(
+      createElement(ModelSelector, {
+        models: [
+          {
+            id: 'paused-model',
+            provider: 'mistral',
+            label: 'Paused provider',
+            providerLabel: 'Mistral',
+            host: 'api.mistral.ai',
+            available: false,
+            generalAvailable: false,
+            paused: true,
+            reason: 'PROVIDER_PAUSED',
+            providerReason: 'PROVIDER_PAUSED',
+            credentialState: 'LOADED',
+            credentialConfigured: true,
+            credentialPresent: true,
+            providerReady: false,
+            sourcePolicy: 'DENIED',
+            configLoaded: true,
+            lastTest: 'NOT_RUN',
+            adminEnabled: true,
+            accountVisible: false,
+            textLiveVerified: false,
+            revision: 'r1',
+            health: { status: 'DEGRADED', code: healthCode },
+            capabilities: {
+              reasoningModes: ['default'],
+              imageInput: false,
+              pdfInput: false,
+            },
+            limits: { requestsPerDay: null, concurrent: 1, outputTokens: 8192 },
+          },
+        ],
+        value: '',
+        onChange: () => {},
+      }),
+    );
+    expect(html).toContain('Nhà cung cấp đang tạm dừng');
+    expect(html).not.toContain(aiStatusLabel(healthCode));
+    expect(html).toMatch(/<option[^>]*value="paused-model"[^>]*disabled=""/);
+  },
+);

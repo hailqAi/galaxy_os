@@ -116,6 +116,19 @@ class SecretConfigTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(path.read_bytes(), before)
 
+    def test_openrouter_missing_entry_is_distinct_from_invalid_present_configuration(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'providers.json'
+            config.save_provider(path, 'mistral', 'synthetic-only', 'api.mistral.ai')
+            command = [sys.executable, '-B', str(Path(config.__file__).resolve()), 'status', '--provider', 'openrouter', '--file', str(path)]
+            before = path.read_bytes()
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(result.stdout)['credentialState'], 'PROVIDER_ENTRY_MISSING')
+            self.assertEqual(path.read_bytes(), before)
+            config.update(path, lambda providers: providers.update(openrouter={'revision': 'r1', 'costMode': 'PAID'}))
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(result.stdout)['credentialState'], 'INVALID_CONFIG')
+
     def test_env_migration_preserves_keys_metadata_and_has_no_secret_fallback(self):
         with tempfile.TemporaryDirectory() as root:
             path, env_path = Path(root) / 'providers.json', Path(root) / 'providers.env'

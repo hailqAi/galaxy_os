@@ -252,15 +252,17 @@ export const aiStatusLabel = (
   })[status] ?? fallback;
 
 const modelStatusLabel = (model: ModelChoice) =>
-  model.credentialState && model.credentialState !== 'LOADED'
-    ? aiStatusLabel(model.credentialState)
-    : model.health?.code
-      ? aiStatusLabel(model.health.code)
-      : model.providerReason || model.reason
-        ? aiStatusLabel(model.providerReason ?? model.reason!)
-        : model.textLiveVerified
-          ? 'Văn bản đã kiểm chứng live'
-          : 'Cấu hình đã nạp; văn bản chưa kiểm chứng live';
+  model.paused
+    ? aiStatusLabel('PROVIDER_PAUSED')
+    : model.credentialState && model.credentialState !== 'LOADED'
+      ? aiStatusLabel(model.credentialState)
+      : model.health?.code
+        ? aiStatusLabel(model.health.code)
+        : model.providerReason || model.reason
+          ? aiStatusLabel(model.providerReason ?? model.reason!)
+          : model.textLiveVerified
+            ? 'Văn bản đã kiểm chứng live'
+            : 'Cấu hình đã nạp; văn bản chưa kiểm chứng live';
 
 export function AiAnswer({
   answer,

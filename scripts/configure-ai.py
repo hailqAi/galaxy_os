@@ -327,7 +327,9 @@ def main():
             credential_present = isinstance(state, dict) and isinstance(state.get(PROVIDERS[args.provider][0]), str) and bool(state[PROVIDERS[args.provider][0]].strip())
             allowed_fields = {'revision', 'GEMINI_API_KEY', 'MISTRAL_API_KEY', 'KIRA_API_KEY', 'OPENROUTER_API_KEY', 'LLAMA_CLOUD_API_KEY', 'replacementConfirmed', 'enabled', 'modelAccessVerified', 'textLiveVerified', 'imageLiveVerified', 'pdfLiveVerified', 'lastTest', 'tests', 'dataPolicy', 'maxRequestsPerDay', 'maxConcurrent', 'maxOutputTokens', 'approvedProjects', 'approvedSources', 'approvedInputs', 'policyRevision', 'policyAudit', 'paused', 'costMode', 'category'}
             limits = {'maxRequestsPerDay': (1, 100000, True), 'maxConcurrent': (1, 4, False), 'maxOutputTokens': (256, 65536, False)}
-            if not isinstance(state, dict):
+            if args.provider not in providers:
+                diagnostic = 'STORE_INVALID_FORMAT' if set(providers) - set(PROVIDERS) else 'PROVIDER_ENTRY_MISSING' if providers else 'EMPTY_STORE'
+            elif not isinstance(state, dict):
                 state, diagnostic = {}, 'INVALID_CONFIG'
             elif (set(state) - allowed_fields or
                   any(k in state and type(state[k]) is not bool for k in ['enabled', 'replacementConfirmed', 'paused']) or
@@ -344,8 +346,6 @@ def main():
                 state, diagnostic = {}, 'INVALID_CONFIG'
             elif (args.provider == 'openrouter' and state.get('costMode') != 'FREE_ONLY') or (args.provider == 'llama_cloud' and (state.get('category') != 'DOCUMENT_KNOWLEDGE' or set(state) - {'revision', 'category', 'enabled', 'replacementConfirmed', 'LLAMA_CLOUD_API_KEY'})):
                 state, diagnostic = {}, 'INVALID_CONFIG'
-            elif args.provider not in providers:
-                diagnostic = 'STORE_INVALID_FORMAT' if set(providers) - set(PROVIDERS) else 'PROVIDER_ENTRY_MISSING' if providers else 'EMPTY_STORE'
             elif secret_status != 'LOADED':
                 diagnostic = secret_status
             elif not credential_present:
