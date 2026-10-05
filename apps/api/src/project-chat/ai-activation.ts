@@ -78,7 +78,15 @@ export async function recordActivation(
         '--file',
         process.env.GALAXY_AI_CONFIG_FILE!,
       ],
-      { timeout: 5000, maxBuffer: 4096 },
+      {
+        timeout: 5000,
+        maxBuffer: 4096,
+        env: Object.fromEntries(
+          Object.entries(process.env).filter(
+            ([name]) => !name.endsWith('_API_KEY'),
+          ),
+        ),
+      },
       (error, _stdout, stderr) => {
         if (error)
           reject(

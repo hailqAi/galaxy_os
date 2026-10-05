@@ -17,6 +17,46 @@ config = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(config)
 
 class SecretConfigTest(unittest.TestCase):
+    def test_env_migration_preserves_keys_metadata_and_has_no_secret_fallback(self):
+        with tempfile.TemporaryDirectory() as root:
+            path, env_path = Path(root) / 'providers.json', Path(root) / 'providers.env'
+            key = 'fake-$#\'"\\-key'
+            config.save_provider(path, 'kira', key, 'kiraai.vn')
+            before = json.loads(path.read_text())
+            command = [sys.executable, '-B', str(Path(config.__file__).resolve()), 'migrate-env', '--file', str(path), '--env-file', str(env_path), '--backup-dir', str(Path(root) / 'backup')]
+            result = subprocess.run(command + ['--phase', 'stage'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(path.read_text()), before)
+            self.assertEqual(env_path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(json.loads(env_path.read_text().split('=', 1)[1]), key)
+            result = subprocess.run(command + ['--phase', 'activate'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            status_cmd = [sys.executable, '-B', str(Path(config.__file__).resolve()), 'status', '--file', str(path), '--provider', 'kira']
+            status = subprocess.run(status_cmd, capture_output=True, text=True, check=True)
+            self.assertTrue(json.loads(status.stdout)['credentialConfigured'])
+            self.assertEqual(json.loads(status.stdout)['credentialSource'], 'env')
+            self.assertNotIn(key, result.stdout + result.stderr + status.stdout + status.stderr)
+            env_path.write_text('KIRA_API_KEY="different"\n')
+            current = path.read_bytes()
+            conflict = subprocess.run(command + ['--phase', 'stage'], capture_output=True, text=True)
+            self.assertNotEqual(conflict.returncode, 0)
+            self.assertIn('CONFLICT', conflict.stderr)
+            self.assertEqual(path.read_bytes(), current)
+            env_path.write_text('KIRA_API_KEY=' + json.dumps(key) + '\n')
+            result = subprocess.run(command + ['--phase', 'finalize'], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            metadata = json.loads(path.read_text())
+            self.assertNotIn('KIRA_API_KEY', metadata['providers']['kira'])
+            self.assertEqual(metadata['providers']['kira']['revision'], before['providers']['kira']['revision'])
+            self.assertEqual(json.loads((Path(root) / 'backup/ai-providers.before-env.json').read_text()), before)
+            config.save_provider(path, 'kira', 'fake-new-key', 'kiraai.vn')
+            self.assertNotIn('fake-new-key', path.read_text())
+            self.assertEqual(json.loads(env_path.read_text().split('=', 1)[1]), 'fake-new-key')
+            self.assertFalse(json.loads(path.read_text())['providers']['kira']['enabled'])
+            env_path.unlink()
+            status = subprocess.run(status_cmd, capture_output=True, text=True, check=True)
+            self.assertFalse(json.loads(status.stdout)['credentialConfigured'])
+
     def test_cli_resolves_environment_override_and_explicit_absolute_path(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'providers.json'

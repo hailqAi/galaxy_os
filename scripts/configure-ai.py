@@ -13,6 +13,7 @@ import tempfile
 import uuid
 import warnings
 import stat as stat_module
+import subprocess
 
 PROVIDERS = {
     'google_gemini': ('GEMINI_API_KEY', 'generativelanguage.googleapis.com'),
@@ -31,13 +32,15 @@ def read_private(path, metadata=False):
         with os.fdopen(fd, 'r', closefd=False) as stream:
             raw = stream.read()
             data = json.loads(raw)
-        if not isinstance(data, dict) or set(data) != {'providers'} or not isinstance(data.get('providers'), dict):
+        if not isinstance(data, dict) or set(data) - {'providers', 'credentialSource'} or not isinstance(data.get('providers'), dict):
             raise ValueError('Cấu hình không hợp lệ; không ghi đè')
+        if 'credentialSource' in data and (not isinstance(data['credentialSource'], dict) or set(data['credentialSource']) != {'mode', 'path'} or data['credentialSource']['mode'] != 'env' or not isinstance(data['credentialSource']['path'], str) or not Path(data['credentialSource']['path']).is_absolute()):
+            raise ValueError('INVALID_CREDENTIAL_SOURCE')
         return (data, hashlib.sha256(raw.encode()).hexdigest()) if metadata else data
     finally:
         os.close(fd)
 
-def update(path, operation, expected_digest=None):
+def update(path, operation, expected_digest=None, whole_document=False):
     path = Path(path)
     if path.is_symlink():
         raise ValueError('Không dùng symlink cho cấu hình')
@@ -49,7 +52,7 @@ def update(path, operation, expected_digest=None):
         data, digest = read_private(path, metadata=True)
         if expected_digest is not None and digest != expected_digest:
             raise ValueError('CONFIG_CHANGED')
-        operation(data['providers'])
+        operation(data if whole_document else data['providers'])
         fd, temporary = tempfile.mkstemp(dir=path.parent, prefix='.ai-')
         with os.fdopen(fd, 'w') as stream:
             json.dump(data, stream, ensure_ascii=False, indent=2)
@@ -62,14 +65,87 @@ def update(path, operation, expected_digest=None):
             os.unlink(temporary)
         os.close(lock)
 
+def env_credentials(source):
+    # Cùng resolver với API; dữ liệu private chỉ đi qua pipe trong máy.
+    result = subprocess.run(['node', str(Path(__file__).with_name('ai-credentials.cjs'))], input=json.dumps(source), capture_output=True, text=True, timeout=5, check=True,
+                            env={k: v for k, v in os.environ.items() if not k.endswith('_API_KEY')})
+    return json.loads(result.stdout)
+
+def write_env(path, keys):
+    path = Path(path)
+    if not path.is_absolute() or path.is_symlink():
+        raise ValueError('INVALID_CREDENTIAL_SOURCE')
+    if any(name not in [v[0] for v in PROVIDERS.values()] or not isinstance(key, str) or not key or len(key) > 4096 or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in key) for name, key in keys.items()):
+        raise ValueError('INVALID_CREDENTIAL')
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix='.ai-env-')
+    try:
+        with os.fdopen(fd, 'w') as stream:
+            for name, key in sorted(keys.items()):
+                stream.write(name + '=' + json.dumps(key, ensure_ascii=True) + '\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+def migrate_env(path, env_path, backup_dir, phase):
+    if not all(p and p.is_absolute() for p in [env_path, backup_dir]):
+        raise ValueError('INVALID_CREDENTIAL_SOURCE')
+    def change(data):
+        source = {'mode': 'env', 'path': str(env_path)}
+        if data.get('credentialSource', source) != source:
+            raise ValueError('CONFLICT')
+        keys = {name: state[name] for provider, state in data['providers'].items() for name, _host in [PROVIDERS[provider]] if state.get(name)}
+        current = env_credentials(source)
+        if env_path.exists() or env_path.is_symlink():
+            if current['status'] != 'LOADED' or any(current['keys'].get(name) != key for name, key in keys.items()):
+                raise ValueError('CONFLICT')
+        elif phase != 'stage' or not keys:
+            raise ValueError('SECRET_FILE_MISSING')
+        backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        info = backup_dir.lstat()
+        if not stat_module.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise ValueError('BACKUP_UNSAFE')
+        backup = backup_dir / 'ai-providers.before-env.json'
+        if not backup.exists():
+            fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, 'w') as stream:
+                json.dump(data, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+        if phase == 'stage':
+            if not env_path.exists():
+                write_env(env_path, keys)
+            return
+        if phase == 'finalize' and data.get('credentialSource') != source:
+            raise ValueError('ENV_NOT_ACTIVE')
+        data['credentialSource'] = source
+        if phase == 'finalize':
+            for provider, state in data['providers'].items():
+                name = PROVIDERS[provider][0]
+                if not current['keys'].get(name):
+                    raise ValueError('SECRET_FILE_MISSING')
+                for key_name, _ in PROVIDERS.values():
+                    state.pop(key_name, None)
+    update(path, change, whole_document=True)
+
 def save_provider(path, provider, key, host):
     name, expected_host = PROVIDERS[provider]
     if host != expected_host or not key.strip() or any(c.isspace() for c in key) or len(key) > 4096:
         raise ValueError('Host cấp khóa hoặc giá trị không hợp lệ; không thử gửi khóa')
-    def change(providers):
+    def change(document):
+        providers = document['providers']
         previous = providers.get(provider, {})
+        source = document.get('credentialSource')
+        if source:
+            resolved = env_credentials(source)
+            if resolved['status'] != 'LOADED':
+                raise ValueError(resolved['status'])
+            write_env(Path(source['path']), {**resolved['keys'], name: key})
         providers[provider] = {
-            **previous, name: key, 'revision': str(uuid.uuid4()),
+            **previous, **({name: key} if not source else {}), 'revision': str(uuid.uuid4()),
             'replacementConfirmed': True, 'enabled': False,
             'modelAccessVerified': False, 'textLiveVerified': False,
             'imageLiveVerified': False, 'pdfLiveVerified': False, 'lastTest': 'NOT_RUN', 'tests': [],
@@ -78,7 +154,10 @@ def save_provider(path, provider, key, host):
             'approvedProjects': previous.get('approvedProjects', []),
             'approvedSources': previous.get('approvedSources', []),
         }
-    update(path, change)
+        if source:
+            for key_name, _ in PROVIDERS.values():
+                providers[provider].pop(key_name, None)
+    update(path, change, whole_document=True)
 
 def valid_evidence(evidence, provider):
     models = dict(google_gemini='gemini-3.8-flash', mistral='mistral-medium-3-5', kira='kira-3.5-pro')
@@ -132,16 +211,27 @@ def hidden_key():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['key', 'enable', 'disable', 'approve-source', 'approve-project', 'status', 'record-test'])
-    parser.add_argument('--provider', choices=PROVIDERS, required=True)
+    parser.add_argument('action', choices=['key', 'enable', 'disable', 'approve-source', 'approve-project', 'status', 'record-test', 'migrate-env'])
+    parser.add_argument('--provider', choices=PROVIDERS)
     parser.add_argument('--file', type=Path, default=Path(os.environ.get('GALAXY_AI_CONFIG_FILE') or '/home/galaxy_os/.runtime/ai-providers.json'))
     parser.add_argument('--organization')
     parser.add_argument('--project')
     parser.add_argument('--source')
     parser.add_argument('--version')
+    parser.add_argument('--env-file', type=Path)
+    parser.add_argument('--backup-dir', type=Path)
+    parser.add_argument('--phase', choices=['stage', 'activate', 'finalize'])
     args = parser.parse_args()
     if not args.file.is_absolute():
         raise ValueError('Đường cấu hình cần tuyệt đối')
+    if args.action == 'migrate-env':
+        if not args.phase:
+            raise ValueError('Cần phase migration')
+        migrate_env(args.file, args.env_file, args.backup_dir, args.phase)
+        print('Đã thực hiện bước env; chưa chứng minh API effective. Không hiển thị credential.')
+        return
+    if not args.provider:
+        raise ValueError('Cần provider')
     if args.action == 'record-test':
         payload = json.loads(sys.stdin.read(16385))
         if set(payload) != {'expectedDigest', 'evidence'}:
@@ -163,6 +253,7 @@ def main():
         return
     if args.action == 'status':
         state, owner, mode, schema_valid, credential_present = {}, None, None, False, False
+        credential_source, secret_status = 'json', 'LOADED'
         try:
             info = args.file.lstat()
             owner, mode = info.st_uid, oct(stat_module.S_IMODE(info.st_mode))
@@ -170,6 +261,12 @@ def main():
             schema_valid = True
             providers = data['providers']
             state = providers.get(args.provider, {})
+            if data.get('credentialSource'):
+                credential_source = 'env'
+                resolved = env_credentials(data['credentialSource'])
+                secret_status = resolved['status']
+                if isinstance(state, dict):
+                    state = {**{k: v for k, v in state.items() if k not in [p[0] for p in PROVIDERS.values()]}, **({PROVIDERS[args.provider][0]: resolved['keys'][PROVIDERS[args.provider][0]]} if PROVIDERS[args.provider][0] in resolved['keys'] else {})}
             credential_present = isinstance(state, dict) and isinstance(state.get(PROVIDERS[args.provider][0]), str) and bool(state[PROVIDERS[args.provider][0]].strip())
             allowed_fields = {'revision', 'GEMINI_API_KEY', 'MISTRAL_API_KEY', 'KIRA_API_KEY', 'replacementConfirmed', 'enabled', 'modelAccessVerified', 'textLiveVerified', 'imageLiveVerified', 'pdfLiveVerified', 'lastTest', 'tests', 'dataPolicy', 'maxRequestsPerDay', 'maxConcurrent', 'maxOutputTokens', 'approvedProjects', 'approvedSources'}
             limits = {'maxRequestsPerDay': (1, 100000, True), 'maxConcurrent': (1, 4, False), 'maxOutputTokens': (256, 65536, False)}
@@ -190,6 +287,8 @@ def main():
                 state, diagnostic = {}, 'INVALID_CONFIG'
             elif args.provider not in providers:
                 diagnostic = 'STORE_INVALID_FORMAT' if set(providers) - set(PROVIDERS) else 'PROVIDER_ENTRY_MISSING' if providers else 'EMPTY_STORE'
+            elif secret_status != 'LOADED':
+                diagnostic = secret_status
             elif not credential_present:
                 diagnostic = 'CREDENTIAL_EMPTY'
             elif not state.get('replacementConfirmed'):
@@ -205,6 +304,7 @@ def main():
         current_tests = [t for t in state.get('tests', []) if t['revision'] == state.get('revision')]
         tests = [t for t in current_tests if t['result'] == 'PASS']
         result = {k: state.get(k) for k in ['revision', 'enabled', 'replacementConfirmed', 'dataPolicy', 'maxRequestsPerDay', 'maxConcurrent', 'maxOutputTokens']}
+        result['credentialSource'] = credential_source
         result.update(storePath=str(args.file), ownerUid=owner, mode=mode, rootSchemaValid=schema_valid, credentialState=diagnostic, configLoaded=schema_valid, credentialPresent=credential_present, credentialConfigured=diagnostic == 'LOADED', modelAccessVerified=bool(tests), textLiveVerified=any(t.get('capability') == 'text' for t in tests), imageLiveVerified=any(t.get('capability') == 'image' for t in tests), pdfLiveVerified=any(t.get('capability') == 'pdf' for t in tests), lastTest=current_tests[-1]['result'] if current_tests else 'NOT_RUN')
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
@@ -234,7 +334,7 @@ if __name__ == '__main__':
     try:
         main()
     except (ValueError, OSError, KeyError, TypeError) as error:
-        if str(error) in ['CONFIG_CHANGED', 'INVALID_EVIDENCE']:
+        if str(error) in ['CONFIG_CHANGED', 'INVALID_EVIDENCE', 'CONFLICT', 'SECRET_FILE_MISSING', 'ENV_NOT_ACTIVE']:
             print(str(error), file=sys.stderr)
             sys.exit(1)
         print('Không cập nhật: kiểm tra owner/quyền file, host và tham số. Không ghi đè cấu hình lỗi.', file=sys.stderr)

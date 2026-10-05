@@ -7,6 +7,7 @@ import {
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { readCredentials } from '../../../../scripts/ai-credentials.cjs';
 
 export const AI_MODELS = [
   {
@@ -142,6 +143,7 @@ const settings = z
   );
 export type AiSettings = z.infer<typeof settings>;
 type ConfigMetadata = {
+  credentialSource?: 'json' | 'env';
   loadStatus?: 'LOADED' | 'CREDENTIAL_NOT_LOADED';
   fileDigest?: string;
   invalidProviders?: AiProvider[];
@@ -186,14 +188,24 @@ export function readAiConfig(
       return unloaded('STORE_INVALID_FORMAT');
     }
     const root = z
-      .object({ providers: z.record(z.string(), z.unknown()) })
+      .object({
+        providers: z.record(z.string(), z.unknown()),
+        credentialSource: z
+          .object({ mode: z.literal('env'), path: z.string().startsWith('/') })
+          .strict()
+          .optional(),
+      })
       .strict()
       .safeParse(document);
     if (!root.success) return unloaded('STORE_INVALID_FORMAT');
+    const secret = root.data.credentialSource
+      ? readCredentials(root.data.credentialSource)
+      : null;
     const result: AiConfig = Object.defineProperties(
       {},
       {
         loadStatus: { value: 'LOADED' },
+        credentialSource: { value: secret ? 'env' : 'json' },
         fileDigest: { value: createHash('sha256').update(raw).digest('hex') },
         invalidProviders: { value: [] },
         credentialStates: { value: {} },
@@ -209,7 +221,20 @@ export function readAiConfig(
         ? 'PROVIDER_ENTRY_MISSING'
         : 'EMPTY_STORE';
     for (const model of AI_MODELS) {
-      const entry = root.data.providers[model.provider];
+      const original = root.data.providers[model.provider];
+      const entry =
+        secret && original && typeof original === 'object'
+          ? {
+              ...Object.fromEntries(
+                Object.entries(original).filter(
+                  ([key]) => !AI_MODELS.some((m) => m.keyName === key),
+                ),
+              ),
+              ...(secret.keys[model.keyName]
+                ? { [model.keyName]: secret.keys[model.keyName] }
+                : {}),
+            }
+          : original;
       const parsed = settings.safeParse(entry);
       if (parsed.success) result[model.provider] = parsed.data;
       else if (entry !== undefined)
@@ -221,17 +246,19 @@ export function readAiConfig(
       result.credentialPresence![model.provider] =
         typeof key === 'string' && Boolean(key.trim());
       result.credentialStates![model.provider] =
-        entry === undefined
-          ? missingState
-          : entry &&
-              typeof entry === 'object' &&
-              (!key || (typeof key === 'string' && !key.trim()))
-            ? 'CREDENTIAL_EMPTY'
-            : parsed.success
-              ? parsed.data.replacementConfirmed
-                ? 'LOADED'
-                : 'CREDENTIAL_NOT_CONFIRMED'
-              : 'INVALID_CONFIG';
+        secret && secret.status !== 'LOADED'
+          ? secret.status
+          : entry === undefined
+            ? missingState
+            : entry &&
+                typeof entry === 'object' &&
+                (!key || (typeof key === 'string' && !key.trim()))
+              ? 'CREDENTIAL_EMPTY'
+              : parsed.success
+                ? parsed.data.replacementConfirmed
+                  ? 'LOADED'
+                  : 'CREDENTIAL_NOT_CONFIRMED'
+                : 'INVALID_CONFIG';
     }
     return result;
   } catch (error) {
@@ -255,6 +282,13 @@ export function configuredModel(
     throw new AiError('CREDENTIAL_NOT_LOADED');
   if (config.invalidProviders?.includes(model.provider))
     throw new AiError('INVALID_CONFIG');
+  if (
+    config.credentialSource === 'env' &&
+    config.credentialStates?.[model.provider] !== 'LOADED'
+  )
+    throw new AiError(
+      config.credentialStates?.[model.provider] ?? 'CREDENTIAL_EMPTY',
+    );
   const result = settings.safeParse(config[model.provider]);
   if (!result.success) throw new AiError('MISSING_CREDENTIAL');
   const state = result.data;
@@ -360,6 +394,7 @@ export function modelChoices(
       credentialPresent:
         config.credentialPresence?.[model.provider] ??
         Boolean(state?.[model.keyName]?.trim()),
+      credentialSource: config.credentialSource ?? 'json',
       credentialState:
         config.credentialStates?.[model.provider] ??
         (state?.[model.keyName]?.trim() && state.replacementConfirmed

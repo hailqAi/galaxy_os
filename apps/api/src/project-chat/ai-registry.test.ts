@@ -25,6 +25,48 @@ const provider = {
   approvedSources: [{ id: 'source', version: 'v1' }],
 };
 const fixture = () => ({ google_gemini: { ...provider } });
+it('resolves only the explicit private env source, preserving literal keys and evidence', () => {
+  const envPath = join(directory, 'ai-providers.env');
+  const key = 'fake-$#\'"\\-key';
+  const document = {
+    providers: fixture(),
+    credentialSource: { mode: 'env', path: envPath },
+  };
+  writeFileSync(path, JSON.stringify(document), { mode: 0o600 });
+  writeFileSync(envPath, `GEMINI_API_KEY=${JSON.stringify(key)}\n`, {
+    mode: 0o600,
+  });
+  const env = { GALAXY_AI_CONFIG_FILE: path, GOOGLE_API_KEY: 'wrong-old-key' };
+  const resolved = configuredModel(readAiConfig(env), 'gemini-3.8-flash');
+  expect(resolved.key).toBe(key);
+  expect(resolved.revision).toBe(provider.revision);
+  expect(modelChoices(readAiConfig(env), 'org', 'project')[0]).toMatchObject({
+    credentialState: 'LOADED',
+    credentialSource: 'env',
+  });
+  expect(
+    JSON.stringify(modelChoices(readAiConfig(env), 'org', 'project')),
+  ).not.toContain(key);
+  for (const invalid of [
+    '',
+    'GEMINI_API_KEY=""\n',
+    'GEMINI_API_KEY="bad\\nkey"\n',
+    'GEMINI_API_KEY=unquoted\n',
+  ]) {
+    writeFileSync(envPath, invalid);
+    expect(() =>
+      configuredModel(readAiConfig(env), 'gemini-3.8-flash'),
+    ).toThrow();
+    expect(
+      modelChoices(readAiConfig(env), 'org', 'project')[0]
+        ?.credentialConfigured,
+    ).toBe(false);
+  }
+  rmSync(envPath);
+  expect(() =>
+    configuredModel(readAiConfig(env), 'gemini-3.8-flash'),
+  ).toThrow();
+});
 afterEach(() => {
   try {
     rmSync(path);
