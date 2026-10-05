@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { answerFromProvider } from './ai-provider';
-import { AI_MODELS, configuredModel } from './ai-registry';
+import { AI_MODELS, AiError, configuredModel } from './ai-registry';
 const sources = [
   { handle: 'S1', text: 'Mẫu công khai GH-42 rộng 900 mm, chưa được duyệt.' },
 ];
@@ -25,7 +25,91 @@ const config = (id: string) => {
     id,
   );
 };
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+it('retry503 hữu hạn trong cùng model, kiểm quyền trước mỗi outbound', async () => {
+  vi.useFakeTimers();
+  let attempts = 0;
+  const bodies: string[] = [];
+  vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+    attempts++;
+    bodies.push(String(init.body));
+    return new Response('{}', { status: 503 });
+  });
+  let gates = 0;
+  const result = answerFromProvider(
+    config('gemini-3.8-flash'),
+    'GH-42?',
+    sources,
+    new AbortController().signal,
+    {
+      beforeAttempt: async () => {
+        gates++;
+      },
+    },
+  );
+  const check = expect(result).rejects.toMatchObject({
+    code: 'TEMPORARY_ERROR',
+    httpStatus: 503,
+  });
+  await Promise.all([vi.runAllTimersAsync(), check]);
+  expect(attempts).toBe(3);
+  expect(gates).toBe(3);
+  expect(new Set(bodies).size).toBe(1);
+});
+it('thu hồi trong backoff chặn lượt gửi kế tiếp', async () => {
+  vi.useFakeTimers();
+  let attempts = 0,
+    gates = 0;
+  vi.stubGlobal('fetch', async () => {
+    attempts++;
+    return new Response('{}', { status: 503 });
+  });
+  const result = answerFromProvider(
+    config('gemini-3.8-flash'),
+    'GH-42?',
+    sources,
+    new AbortController().signal,
+    {
+      beforeAttempt: async () => {
+        if (++gates > 1) throw new AiError('ACCESS_REVOKED');
+      },
+    },
+  );
+  const check = expect(result).rejects.toThrow('ACCESS_REVOKED');
+  await Promise.all([vi.runAllTimersAsync(), check]);
+  expect(attempts).toBe(1);
+});
+it.each([
+  [503, {}, '120', 'TEMPORARY_ERROR'],
+  [429, { code: '1300', type: 'rate_limited' }, null, 'RATE_LIMITED_UNKNOWN'],
+  [429, { error: { code: 'insufficient_quota' } }, '1', 'QUOTA_EXHAUSTED'],
+  [402, {}, null, 'BILLING_ACTION_REQUIRED'],
+])(
+  'không retry sớm quá Retry-After hoặc quota không rõ/dài hạn (%i)',
+  async (status, body, retryAfter, code) => {
+    let attempts = 0;
+    vi.stubGlobal('fetch', async () => {
+      attempts++;
+      return new Response(JSON.stringify(body), {
+        status: Number(status),
+        headers: retryAfter ? { 'Retry-After': String(retryAfter) } : {},
+      });
+    });
+    await expect(
+      answerFromProvider(
+        config('mistral-medium-3-5'),
+        'GH-42?',
+        sources,
+        new AbortController().signal,
+        { beforeAttempt: async () => {} },
+      ),
+    ).rejects.toMatchObject({ code, httpStatus: status });
+    expect(attempts).toBe(1);
+  },
+);
 it.each(AI_MODELS)(
   'maps $provider endpoint, secret and final-only response with real usage',
   async (model) => {
@@ -123,7 +207,7 @@ it.each([
   [401, 'INVALID_CREDENTIAL'],
   [403, 'PROVIDER_FORBIDDEN'],
   [404, 'MODEL_NOT_AVAILABLE'],
-  [429, 'RATE_LIMITED'],
+  [429, 'RATE_LIMITED_UNKNOWN'],
   [503, 'TEMPORARY_ERROR'],
 ])('classifies %i without leaking response or retry', async (status, code) => {
   const fetcher = vi.fn(
@@ -224,15 +308,15 @@ it('rejects unknown citations and late cancellation even if transport ignores ab
 
 it.each([
   [400, { error: { code: 'parameter_unknown' } }, 'UNSUPPORTED_PARAMETER'],
-  [429, { error: { code: 'quota_exceeded' } }, 'ACCOUNT_QUOTA_OR_BILLING'],
-  [429, { error: { code: 'rate_limit_exceeded' } }, 'RATE_LIMITED'],
-  [402, {}, 'ACCOUNT_QUOTA_OR_BILLING'],
+  [429, { error: { code: 'quota_exceeded' } }, 'QUOTA_EXHAUSTED'],
+  [429, { error: { code: 'rate_limit_exceeded' } }, 'RATE_LIMITED_UNKNOWN'],
+  [402, {}, 'BILLING_ACTION_REQUIRED'],
   [
     401,
     { error: { code: 'invalid_api_key', message: 'NEVER_EXPOSE' } },
     'INVALID_CREDENTIAL',
   ],
-  [429, { error: { code: 'insufficient_quota' } }, 'ACCOUNT_QUOTA_OR_BILLING'],
+  [429, { error: { code: 'insufficient_quota' } }, 'QUOTA_EXHAUSTED'],
   [400, { error: { code: 'unsupported_parameter' } }, 'UNSUPPORTED_PARAMETER'],
   [404, { error: { code: 'model_not_found' } }, 'MODEL_NOT_AVAILABLE'],
 ])(

@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, ChatAiSourceIndex, ChatAiAnswer } from '@prisma/client';
@@ -53,6 +54,7 @@ const adminRunWhere = {
 
 @Injectable()
 export class ProjectAiService {
+  private readonly logger = new Logger(ProjectAiService.name);
   constructor(
     @Inject(PrismaService) private readonly db: PrismaService,
     @Inject(ProjectChatService) private readonly chat: ProjectChatService,
@@ -927,7 +929,24 @@ export class ProjectAiService {
           fixture.questions[index]!,
           fixture.sources,
           signal,
-          { history, media: fixture.media },
+          {
+            history,
+            media: fixture.media,
+            beforeAttempt: () => this.authorized(actor, projectId, gate),
+            diagnostic: (event) =>
+              this.logger.log(
+                JSON.stringify({
+                  request_id: currentId,
+                  stage: 'PROVIDER',
+                  provider_id: config.provider,
+                  model_id: config.model,
+                  endpoint: config.endpoint,
+                  config_version: config.revision,
+                  policy_reason: 'ADMIN_SYNTHETIC_FIXTURE',
+                  ...event,
+                }),
+              ),
+          },
         );
         if (!index) firstResult = result;
         evidence.returnedModel = result.returnedModel;
@@ -1678,6 +1697,16 @@ export class ProjectAiService {
     if (!claimed.started) return claimed.view;
     const config = claimed.config;
     const pin = requestMetadata(claimed.answer.usage);
+    let diagnostic: Prisma.InputJsonObject = {
+      request_id: id,
+      stage: 'RETRIEVAL',
+      provider_id: pin?.provider ?? 'legacy',
+      model_id: config.model,
+      config_version: pin?.revision ?? null,
+      policy_reason: null,
+      outbound_attempted: false,
+      upstream_status: null,
+    };
     let priorTurns: { question: string; answer: string }[] = [];
     const controller = new AbortController();
     this.running.set(id, controller);
@@ -1926,34 +1955,39 @@ export class ProjectAiService {
       );
       if (context) {
         // Final gate immediately before sending context. No DB lock spans provider I/O.
-        const allowed = await this.authorized(
-          actor,
-          projectId,
-          async (tx, grantId) => {
-            const answer = await this.ownedAnswer(
-              tx,
-              actor,
-              projectId,
-              id,
-              grantId,
-            );
-            const visible = await this.view(
-              tx,
-              actor,
-              projectId,
-              answer,
-              grantId,
-            );
-            if (
-              pin &&
-              visible.status !== 'RUNNING' &&
-              visible.status !== 'ACCESS_REVOKED'
-            )
-              throw new AiError(visible.status);
-            return grantId === claimed.grantId && visible.status === 'RUNNING';
-          },
-        );
-        if (!allowed) throw new NotFoundException();
+        const beforeAttempt = async () => {
+          const allowed = await this.authorized(
+            actor,
+            projectId,
+            async (tx, grantId) => {
+              const answer = await this.ownedAnswer(
+                tx,
+                actor,
+                projectId,
+                id,
+                grantId,
+              );
+              const visible = await this.view(
+                tx,
+                actor,
+                projectId,
+                answer,
+                grantId,
+              );
+              if (
+                pin &&
+                visible.status !== 'RUNNING' &&
+                visible.status !== 'ACCESS_REVOKED'
+              )
+                throw new AiError(visible.status);
+              return (
+                grantId === claimed.grantId && visible.status === 'RUNNING'
+              );
+            },
+          );
+          if (!allowed) throw new NotFoundException();
+        };
+        if (!('provider' in config)) await beforeAttempt();
         controller.signal.throwIfAborted();
         const result = await answerFromProvider(
           config!,
@@ -1961,6 +1995,16 @@ export class ProjectAiService {
           context,
           controller.signal,
           {
+            beforeAttempt,
+            diagnostic: (event) => {
+              diagnostic = {
+                ...diagnostic,
+                stage: 'PROVIDER',
+                policy_reason: 'ALLOWED',
+                ...event,
+              };
+              this.logger.log(JSON.stringify(diagnostic));
+            },
             reasoning: pin?.reasoning,
             history: priorTurns,
             media: native.map((item) => ({
@@ -2007,6 +2051,7 @@ export class ProjectAiService {
                     tokens: result.usage,
                     returnedModel: result.returnedModel,
                     dataPolicyResult: 'ALLOWED',
+                    diagnostic,
                   }
                 : (result.usage ?? Prisma.DbNull),
               completedAt: new Date(),
@@ -2016,6 +2061,18 @@ export class ProjectAiService {
         });
       }
     } catch (error) {
+      diagnostic = {
+        ...diagnostic,
+        stage: diagnostic.outbound_attempted
+          ? 'DELIVERY_OR_PROVIDER'
+          : 'POLICY',
+        policy_reason: this.denied(error)
+          ? 'ACCESS_REVOKED'
+          : error instanceof AiError
+            ? error.code
+            : 'PROVIDER_OR_SOURCE_FAILED',
+      };
+      this.logger.log(JSON.stringify(diagnostic));
       await this.db.chatAiAnswer.updateMany({
         where: {
           id,
@@ -2032,6 +2089,7 @@ export class ProjectAiService {
               ? error.code
               : 'PROVIDER_OR_SOURCE_FAILED',
           completedAt: new Date(),
+          ...(pin && { usage: { request: pin, diagnostic } }),
           // Abort/timeout cannot prove the provider stopped; hold the bounded reservation.
         },
       });

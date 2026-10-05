@@ -173,6 +173,15 @@ export async function answerFromProvider(
 }
 
 export type ProviderOptions = {
+  beforeAttempt?: () => Promise<void>;
+  diagnostic?: (event: {
+    attempt: number;
+    outbound_attempted: boolean;
+    upstream_status: number | null;
+    upstream_code: string | null;
+    retry_after_ms: number | null;
+    duration_ms: number;
+  }) => void;
   reasoning?: string;
   history?: { question: string; answer: string }[];
   media?: { handle: string; mime: string; bytes: Buffer }[];
@@ -183,18 +192,31 @@ const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const chunk = z.object({ type: z.string(), text: z.string().optional() });
 
 async function vendorError(response: Response) {
+  const header = response.headers.get('retry-after');
+  const delay =
+    header === null
+      ? NaN
+      : /^\d+(?:\.\d+)?$/.test(header)
+        ? Number(header) * 1000
+        : Date.parse(header) - Date.now();
+  const upstream: { code?: string; retryAfterMs?: number } = {};
+  if (Number.isFinite(delay) && delay >= 0 && delay <= Number.MAX_SAFE_INTEGER)
+    upstream.retryAfterMs = delay;
   const fallback =
     (
       {
         401: 'INVALID_CREDENTIAL',
-        402: 'ACCOUNT_QUOTA_OR_BILLING',
+        402: 'BILLING_ACTION_REQUIRED',
         403: 'PROVIDER_FORBIDDEN',
         404: 'MODEL_NOT_AVAILABLE',
-        429: 'RATE_LIMITED',
+        429:
+          upstream.retryAfterMs !== undefined
+            ? 'RATE_LIMITED_TEMPORARY'
+            : 'RATE_LIMITED_UNKNOWN',
       } as Record<number, string>
     )[response.status] ??
     (response.status >= 500 ? 'TEMPORARY_ERROR' : 'PROVIDER_REJECTED');
-  if (!response.body) return new AiError(fallback, response.status);
+  if (!response.body) return new AiError(fallback, response.status, upstream);
   const reader = response.body.getReader();
   const parts: Uint8Array[] = [];
   let size = 0;
@@ -207,13 +229,14 @@ async function vendorError(response: Response) {
       const part = await Promise.race([reader.read(), timeout]);
       if (part.done) break;
       size += part.value.byteLength;
-      if (size > 16384) return new AiError(fallback, response.status);
+      if (size > 16384) return new AiError(fallback, response.status, upstream);
       parts.push(part.value);
     }
     const body = JSON.parse(Buffer.concat(parts).toString('utf8'));
     // Chỉ so mã contract; không đưa message/body của vendor vào log hoặc UI.
     const codes = [
       body?.code,
+      body?.type,
       body?.error?.code,
       body?.error?.type,
       body?.error?.status,
@@ -221,29 +244,65 @@ async function vendorError(response: Response) {
       .filter((v) => typeof v === 'string')
       .map((v: string) => v.toLowerCase());
     const has = (...values: string[]) => values.some((v) => codes.includes(v));
+    const known = [
+      '1300',
+      'rate_limited',
+      'rate_limit_exceeded',
+      'rate_limit_error',
+      'insufficient_quota',
+      'quota_exceeded',
+      'billing_hard_limit_reached',
+      'credit_balance_too_low',
+      'payment_required',
+      'unavailable',
+      'resource_exhausted',
+      'invalid_api_key',
+    ];
+    upstream.code = known.find((code) => codes.includes(code));
+    const retryInfo = Array.isArray(body?.error?.details)
+      ? body.error.details.find(
+          (detail: Record<string, unknown>) =>
+            detail?.['@type'] === 'type.googleapis.com/google.rpc.RetryInfo',
+        )
+      : undefined;
+    const retrySeconds =
+      typeof retryInfo?.retryDelay === 'string' &&
+      /^\d+(?:\.\d+)?s$/.test(retryInfo.retryDelay)
+        ? Number(retryInfo.retryDelay.slice(0, -1))
+        : NaN;
+    if (
+      Number.isFinite(retrySeconds) &&
+      retrySeconds * 1000 <= Number.MAX_SAFE_INTEGER
+    )
+      upstream.retryAfterMs = Math.max(
+        upstream.retryAfterMs ?? 0,
+        retrySeconds * 1000,
+      );
     const code = has('invalid_api_key', 'invalid_key', 'unauthenticated')
       ? 'INVALID_CREDENTIAL'
       : has(
-            'insufficient_quota',
             'billing_hard_limit_reached',
             'credit_balance_too_low',
             'payment_required',
-            'quota_exceeded',
           )
-        ? 'ACCOUNT_QUOTA_OR_BILLING'
-        : has('model_not_found', 'model_not_available', 'model_access_denied')
-          ? 'MODEL_NOT_AVAILABLE'
-          : has(
-                'unsupported_parameter',
-                'invalid_parameter',
-                'invalid_argument',
-                'parameter_unknown',
-              )
-            ? 'UNSUPPORTED_PARAMETER'
-            : fallback;
-    return new AiError(code, response.status);
+        ? 'BILLING_ACTION_REQUIRED'
+        : has('insufficient_quota', 'quota_exceeded')
+          ? 'QUOTA_EXHAUSTED'
+          : has('model_not_found', 'model_not_available', 'model_access_denied')
+            ? 'MODEL_NOT_AVAILABLE'
+            : has(
+                  'unsupported_parameter',
+                  'invalid_parameter',
+                  'invalid_argument',
+                  'parameter_unknown',
+                )
+              ? 'UNSUPPORTED_PARAMETER'
+              : response.status === 429 && upstream.retryAfterMs !== undefined
+                ? 'RATE_LIMITED_TEMPORARY'
+                : fallback;
+    return new AiError(code, response.status, upstream);
   } catch {
-    return new AiError(fallback, response.status);
+    return new AiError(fallback, response.status, upstream);
   } finally {
     clearTimeout(timer);
     void reader.cancel().catch(() => {});
@@ -356,31 +415,83 @@ async function answerFromSelectedProvider(
             : {}),
         };
   const combined = AbortSignal.any([signal, AbortSignal.timeout(90000)]);
+  const deadline = performance.now() + 90000;
   let response: Response;
-  try {
-    response = await fetch(model.endpoint, {
-      method: 'POST',
-      redirect: 'error',
-      signal: combined,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(model.provider === 'google_gemini'
-          ? { 'x-goog-api-key': config.key }
-          : { Authorization: `Bearer ${config.key}` }),
-      },
-      body: JSON.stringify(body),
+  for (let attempt = 1; ; attempt++) {
+    combined.throwIfAborted();
+    await options.beforeAttempt?.();
+    combined.throwIfAborted();
+    const started = performance.now();
+    try {
+      response = await fetch(model.endpoint, {
+        method: 'POST',
+        redirect: 'error',
+        signal: combined,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(model.provider === 'google_gemini'
+            ? { 'x-goog-api-key': config.key }
+            : { Authorization: `Bearer ${config.key}` }),
+        },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      options.diagnostic?.({
+        attempt,
+        outbound_attempted: true,
+        upstream_status: null,
+        upstream_code: null,
+        retry_after_ms: null,
+        duration_ms: Math.round(performance.now() - started),
+      });
+      throw new AiError(
+        signal.aborted
+          ? 'CANCELLED'
+          : combined.aborted
+            ? 'PROVIDER_TIMEOUT_UNKNOWN'
+            : 'NETWORK_OR_TLS',
+      );
+    }
+    combined.throwIfAborted();
+    const error = response.ok ? null : await vendorError(response);
+    options.diagnostic?.({
+      attempt,
+      outbound_attempted: true,
+      upstream_status: response.status,
+      upstream_code: error?.upstream.code ?? null,
+      retry_after_ms: error?.upstream.retryAfterMs ?? null,
+      duration_ms: Math.round(performance.now() - started),
     });
-  } catch {
-    throw new AiError(
-      signal.aborted
-        ? 'CANCELLED'
-        : combined.aborted
-          ? 'PROVIDER_TIMEOUT_UNKNOWN'
-          : 'NETWORK_OR_TLS',
+    if (!error) break;
+    const waitMs = Math.max(
+      error.upstream.retryAfterMs ?? 0,
+      500 * 2 ** (attempt - 1) + Math.floor(Math.random() * 250),
     );
+    // Không retry nếu không có gate recheck; không tự gửi lại request có kết quả mơ hồ.
+    if (
+      !options.beforeAttempt ||
+      attempt >= 3 ||
+      !['TEMPORARY_ERROR', 'RATE_LIMITED_TEMPORARY'].includes(error.code) ||
+      waitMs >= deadline - performance.now()
+    )
+      throw error;
+    await new Promise<void>((resolve, reject) => {
+      const cancel = () => {
+        clearTimeout(timer);
+        reject(
+          new AiError(
+            signal.aborted ? 'CANCELLED' : 'PROVIDER_TIMEOUT_UNKNOWN',
+          ),
+        );
+      };
+      const timer = setTimeout(() => {
+        combined.removeEventListener('abort', cancel);
+        resolve();
+      }, waitMs);
+      combined.addEventListener('abort', cancel, { once: true });
+      if (combined.aborted) cancel();
+    });
   }
-  combined.throwIfAborted();
-  if (!response.ok) throw await vendorError(response);
   if (!response.body)
     throw new AiError('ADAPTER_RESPONSE_ERROR', response.status);
   const reader = response.body.getReader();
