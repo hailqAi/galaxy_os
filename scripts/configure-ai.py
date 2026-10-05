@@ -77,21 +77,66 @@ def env_credentials(source):
                             env={k: v for k, v in os.environ.items() if not k.endswith('_API_KEY')})
     return json.loads(result.stdout)
 
-def write_env(path, keys):
+def private_bytes(path, limit):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if not stat_module.S_ISREG(info.st_mode) or info.st_size > limit or info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise ValueError('STORE_UNREADABLE')
+        with os.fdopen(fd, 'rb', closefd=False) as stream:
+            raw = stream.read(limit + 1)
+        if len(raw) > limit:
+            raise ValueError('STORE_UNREADABLE')
+        return raw
+    finally:
+        os.close(fd)
+
+def backup_credentials(path, env_path, directory, expected_digest, env_raw):
+    metadata_raw = private_bytes(path, 262144)
+    if hashlib.sha256(metadata_raw).hexdigest() != expected_digest or private_bytes(env_path, 32768) != env_raw:
+        raise ValueError('CONFIG_CHANGED')
+    directory = Path(directory)
+    if not directory.is_absolute() or directory.is_symlink():
+        raise ValueError('BACKUP_UNSAFE')
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = directory.stat()
+    if not stat_module.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ValueError('BACKUP_UNSAFE')
+    snapshot = Path(tempfile.mkdtemp(prefix='setup-', dir=directory))
+    for name, raw in [('ai-providers.json', metadata_raw), ('ai-providers.env', env_raw)]:
+        fd = os.open(snapshot / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+
+def env_text(keys, prefix=''):
+    if any(name not in [v[0] for v in PROVIDERS.values()] or not isinstance(key, str) or not key or len(key) > 4096 or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in key) for name, key in keys.items()):
+        raise ValueError('INVALID_CREDENTIAL')
+    text = prefix + ('' if not prefix or prefix.endswith('\n') else '\n')
+    text += ''.join(name + '=' + json.dumps(key, ensure_ascii=True) + '\n' for name, key in sorted(keys.items()))
+    if len(text.encode('utf8')) > 32768:
+        raise ValueError('INVALID_CREDENTIAL')
+    return text
+
+def write_env(path, keys, prefix='', *, validate_only=False, expected_raw=None):
     path = Path(path)
     if not path.is_absolute() or path.is_symlink():
         raise ValueError('INVALID_CREDENTIAL_SOURCE')
-    if any(name not in [v[0] for v in PROVIDERS.values()] or not isinstance(key, str) or not key or len(key) > 4096 or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in key) for name, key in keys.items()):
-        raise ValueError('INVALID_CREDENTIAL')
+    text = env_text(keys, prefix)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix='.ai-env-')
     try:
         with os.fdopen(fd, 'w') as stream:
-            for name, key in sorted(keys.items()):
-                stream.write(name + '=' + json.dumps(key, ensure_ascii=True) + '\n')
+            stream.write(text)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        if env_credentials({'mode': 'env', 'path': temporary})['status'] != 'LOADED':
+            raise ValueError('INVALID_CREDENTIAL')
+        if expected_raw is not None and private_bytes(path, 32768) != expected_raw:
+            raise ValueError('CONFIG_CHANGED')
+        if not validate_only:
+            os.replace(temporary, path)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -137,9 +182,9 @@ def migrate_env(path, env_path, backup_dir, phase):
                     state.pop(key_name, None)
     update(path, change, whole_document=True)
 
-def save_provider(path, provider, key, host):
+def save_provider(path, provider, key, host, *, activate=False, expected_digest=None, expected_keys=None, backup_dir=None):
     name, expected_host = PROVIDERS[provider]
-    if host != expected_host or not key.strip() or any(c.isspace() for c in key) or len(key) > 4096:
+    if host != expected_host or not key.strip() or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in key) or len(key) > 4096:
         raise ValueError('Host cấp khóa hoặc giá trị không hợp lệ; không thử gửi khóa')
     pending = {}
     def change(document):
@@ -147,19 +192,36 @@ def save_provider(path, provider, key, host):
             raise ValueError('ENV_REQUIRED')
         providers = document.setdefault('connections', {}) if provider == 'llama_cloud' else document['providers']
         previous = providers.get(provider, {})
+        if not isinstance(previous, dict):
+            raise ValueError('INVALID_CONFIG')
         source = document.get('credentialSource')
         if source:
+            env_raw = private_bytes(Path(source['path']), 32768) if backup_dir else None
             resolved = env_credentials(source)
             if resolved['status'] != 'LOADED':
                 raise ValueError(resolved['status'])
-            pending.update(path=Path(source['path']), keys={**resolved['keys'], name: key})
+            if expected_keys is not None:
+                if resolved['keys'] != expected_keys:
+                    raise ValueError('CONFIG_CHANGED')
+                if any(key_name in state for state in [*document['providers'].values(), *document.get('connections', {}).values()] if isinstance(state, dict) for key_name, _ in PROVIDERS.values()):
+                    raise ValueError('CONFLICT')
+            if resolved['keys'].get(name) != key:
+                pending.update(path=Path(source['path']), keys={name: key} if expected_keys is not None else {**resolved['keys'], name: key}, prefix=env_raw.decode('utf8') if expected_keys is not None else '')
+                env_text(pending['keys'], pending['prefix'])
+            if backup_dir:
+                backup_credentials(path, Path(source['path']), backup_dir, expected_digest, env_raw)
+            if pending and expected_keys is not None:
+                write_env(pending['path'], pending['keys'], pending['prefix'], validate_only=True, expected_raw=env_raw)
+                pending['expected_raw'] = env_raw
         providers[provider] = {
             **previous, **({name: key} if not source else {}), 'revision': str(uuid.uuid4()),
-            'replacementConfirmed': True, 'enabled': False,
+            'replacementConfirmed': True, 'enabled': activate,
             'modelAccessVerified': False, 'textLiveVerified': False,
-            'imageLiveVerified': False, 'pdfLiveVerified': False, 'lastTest': 'NOT_RUN', 'tests': [],
-            'dataPolicy': 'SYNTHETIC_PUBLIC_APPROVED',
-            'maxRequestsPerDay': None, 'maxConcurrent': 1, 'maxOutputTokens': 2048 if provider == 'openrouter' else 8192,
+            'imageLiveVerified': False, 'pdfLiveVerified': False,
+            'lastTest': previous.get('lastTest', 'NOT_RUN') if expected_keys is not None else 'NOT_RUN',
+            'tests': previous.get('tests', []) if expected_keys is not None else [],
+            'dataPolicy': previous.get('dataPolicy', 'SYNTHETIC_PUBLIC_APPROVED') if expected_keys is not None else 'SYNTHETIC_PUBLIC_APPROVED',
+            'maxRequestsPerDay': previous.get('maxRequestsPerDay'), 'maxConcurrent': previous.get('maxConcurrent', 1), 'maxOutputTokens': previous.get('maxOutputTokens', 2048 if provider == 'openrouter' else 8192),
             'approvedProjects': previous.get('approvedProjects', []),
             'approvedSources': previous.get('approvedSources', []),
         }
@@ -170,9 +232,70 @@ def save_provider(path, provider, key, host):
         if source:
             for key_name, _ in PROVIDERS.values():
                 providers[provider].pop(key_name, None)
-    # Hai file không atomic cùng nhau: metadata disabled trước, env sau; lỗi luôn fail closed.
-    update(path, change, whole_document=True,
-           after_write=lambda: write_env(pending['path'], pending['keys']) if pending else None)
+    # Hai file không atomic cùng nhau; credential thiếu không thể dispatch dù metadata enabled.
+    update(path, change, expected_digest=expected_digest, whole_document=True,
+           after_write=lambda: write_env(**pending) if pending else None)
+
+def setup_snapshot(path, env_path):
+    document, digest = read_private(path, metadata=True)
+    source = {'mode': 'env', 'path': str(env_path)}
+    if document.get('credentialSource') != source:
+        raise ValueError('CONFLICT')
+    resolved = env_credentials(source)
+    if resolved['status'] != 'LOADED':
+        raise ValueError(resolved['status'])
+    return document, digest, resolved['keys']
+
+def activate_existing(path, provider, env_path, backup_dir):
+    if provider not in ['openrouter', 'llama_cloud']:
+        raise ValueError('INVALID_CONFIG')
+    document, digest, keys = setup_snapshot(path, env_path)
+    name, host = PROVIDERS[provider]
+    if not keys.get(name):
+        raise ValueError('SECRET_FILE_MISSING')
+    save_provider(path, provider, keys[name], host, activate=provider == 'openrouter', expected_digest=digest, expected_keys=keys, backup_dir=backup_dir)
+
+def setup_missing(path, env_path, backup_dir):
+    if not sys.stdin.isatty() or not sys.stderr.isatty():
+        raise ValueError('Nhập khóa tại terminal tương tác có input ẩn')
+    if not all(p.is_absolute() for p in [path, env_path, backup_dir]):
+        raise ValueError('INVALID_CREDENTIAL_SOURCE')
+    print(f'secretEnvPath={env_path}\nmetadataJsonPath={path}')
+    print('Tệp JSON chỉ lưu metadata; khóa bí mật chỉ lưu trong tệp env riêng 0600.')
+    setup_snapshot(path, env_path)  # Không hỏi khóa khi nguồn hiện hữu chưa đọc được.
+    success = True
+    for provider in ['openrouter', 'llama_cloud']:
+        name, host = PROVIDERS[provider]
+        print(f'{provider} · {host} · {name}')
+        document, digest, keys = setup_snapshot(path, env_path)
+        state = (document.get('connections', {}) if provider == 'llama_cloud' else document['providers']).get(provider, {})
+        if not isinstance(state, dict) or (provider == 'openrouter' and state.get('costMode') not in [None, 'FREE_ONLY']):
+            print(f'{provider}: CONFLICT; không thay đổi provider này.')
+            success = False
+            continue
+        if keys.get(name):
+            print(f'{name}: đã có; không nhập lại hoặc ghi lại khóa.')
+            ready = state.get('replacementConfirmed') is True and (state.get('enabled') is True and state.get('costMode') == 'FREE_ONLY' if provider == 'openrouter' else state.get('category') == 'DOCUMENT_KNOWLEDGE')
+            if ready:
+                continue
+            key = keys[name]
+        else:
+            if provider == 'llama_cloud':
+                print('LlamaCloud tùy chọn: Enter để bỏ qua; không xử lý tài liệu.')
+            key = hidden_key()
+            if not key:
+                print(f'{name}: chưa có; không ghi giá trị rỗng.')
+                if provider == 'openrouter':
+                    return False
+                continue
+        try:
+            save_provider(path, provider, key, host, activate=provider == 'openrouter', expected_digest=digest, expected_keys=keys, backup_dir=backup_dir)
+            print(f'{provider}: đã lưu cục bộ; chưa kiểm chứng kết nối hoặc gọi dịch vụ.')
+        except ValueError as error:
+            code = str(error) if str(error) in ['CONFIG_CHANGED', 'CONFLICT', 'BACKUP_UNSAFE', 'INVALID_CONFIG'] else 'INVALID_CONFIG'
+            print(f'{provider}: {code}; không ghi đè thay đổi khác.')
+            success = False
+    return success
 
 def valid_evidence(evidence, provider):
     models = dict(google_gemini='gemini-3.8-flash', mistral='mistral-medium-3-5', kira='kira-3.5-pro', openrouter='openrouter/free')
@@ -260,9 +383,9 @@ def record_policy(path, provider, expected_digest, event):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['key', 'enable', 'disable', 'pause', 'resume', 'register', 'approve-source', 'approve-project', 'status', 'record-test', 'record-policy', 'migrate-env'])
+    parser.add_argument('action', choices=['setup-missing', 'activate-existing', 'key', 'enable', 'disable', 'pause', 'resume', 'register', 'approve-source', 'approve-project', 'status', 'record-test', 'record-policy', 'migrate-env'])
     parser.add_argument('--provider', choices=PROVIDERS)
-    parser.add_argument('--file', type=Path, default=Path(os.environ.get('GALAXY_AI_CONFIG_FILE') or '/home/galaxy_os/.runtime/ai-providers.json'))
+    parser.add_argument('--file', type=Path)
     parser.add_argument('--organization')
     parser.add_argument('--project')
     parser.add_argument('--source')
@@ -271,8 +394,22 @@ def main():
     parser.add_argument('--backup-dir', type=Path)
     parser.add_argument('--phase', choices=['stage', 'activate', 'finalize'])
     args = parser.parse_args()
+    canonical_setup = args.action in ['setup-missing', 'activate-existing']
+    if args.file is None:
+        args.file = Path('/home/galaxy_os/.runtime/ai-providers.json' if canonical_setup else os.environ.get('GALAXY_AI_CONFIG_FILE') or '/home/galaxy_os/.runtime/ai-providers.json')
+    if canonical_setup:
+        args.env_file = args.env_file or Path('/home/galaxy_os/.runtime/ai-providers.env')
+        args.backup_dir = args.backup_dir or Path('/home/galaxy_os/.runtime/ai-credential-backups')
     if not args.file.is_absolute():
         raise ValueError('Đường cấu hình cần tuyệt đối')
+    if args.action == 'setup-missing':
+        if not setup_missing(args.file, args.env_file, args.backup_dir):
+            raise ValueError('SETUP_PARTIAL')
+        return
+    if args.action == 'activate-existing':
+        activate_existing(args.file, args.provider, args.env_file, args.backup_dir)
+        print('Đã kích hoạt credential hiện có; evidence cũ đã hết hiệu lực, chưa gọi provider.')
+        return
     if args.action == 'migrate-env':
         if not args.phase:
             raise ValueError('Cần phase migration')
@@ -397,8 +534,14 @@ def main():
 if __name__ == '__main__':
     try:
         main()
+    except KeyboardInterrupt:
+        print('Đã dừng nhập; các khóa đã lưu trước đó được giữ nguyên.', file=sys.stderr)
+        sys.exit(130)
+    except EOFError:
+        print('Đã kết thúc nhập; các khóa đã lưu trước đó được giữ nguyên.', file=sys.stderr)
+        sys.exit(1)
     except (ValueError, OSError, KeyError, TypeError) as error:
-        if str(error) in ['CONFIG_CHANGED', 'INVALID_EVIDENCE', 'CONFLICT', 'SECRET_FILE_MISSING', 'ENV_NOT_ACTIVE', 'ENV_REQUIRED']:
+        if str(error) in ['CONFIG_CHANGED', 'INVALID_EVIDENCE', 'CONFLICT', 'SECRET_FILE_MISSING', 'ENV_NOT_ACTIVE', 'ENV_REQUIRED', 'SETUP_PARTIAL', 'BACKUP_UNSAFE']:
             print(str(error), file=sys.stderr)
             sys.exit(1)
         print('Không cập nhật: kiểm tra owner/quyền file, host và tham số. Không ghi đè cấu hình lỗi.', file=sys.stderr)

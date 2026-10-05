@@ -351,4 +351,225 @@ class SecretConfigTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 config.save_provider(link, 'kira', 'synthetic-kira', 'kiraai.vn')
 
+class SetupMissingTest(unittest.TestCase):
+    def fixture(self, root):
+        path, env_path, backup = Path(root) / 'providers.json', Path(root) / 'providers.env', Path(root) / 'setup-backups'
+        for provider in ['google_gemini', 'mistral', 'kira']:
+            config.save_provider(path, provider, 'fake-' + provider, config.PROVIDERS[provider][1])
+        for phase in ['stage', 'activate', 'finalize']:
+            config.migrate_env(path, env_path, Path(root) / 'legacy-backup', phase)
+        config.update(path, lambda providers: providers['mistral'].update(paused=True, policyRevision='preserve-policy'))
+        return path, env_path, backup
+
+    def terminal(self, path, env_path, backup, answers):
+        command = [sys.executable, '-B', str(Path(config.__file__).resolve()), 'setup-missing', '--file', str(path), '--env-file', str(env_path), '--backup-dir', str(backup)]
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execv(sys.executable, command)
+        output, sent = b'', 0
+        deadline = time.monotonic() + 8
+        ended = False
+        try:
+            while time.monotonic() < deadline:
+                ready, _, _ = select.select([fd], [], [], 0.1)
+                if not ready:
+                    continue
+                try:
+                    part = os.read(fd, 4096)
+                except OSError:
+                    ended = True
+                    break
+                if not part:
+                    ended = True
+                    break
+                output += part
+                prompts = output.decode(errors='replace').count('(ẩn):')
+                if prompts > sent:
+                    if sent >= len(answers):
+                        break
+                    answer = answers[sent]
+                    os.write(fd, b'\x03' if answer is None else (answer + '\n').encode())
+                    sent += 1
+            if not ended:
+                os.kill(pid, 9)
+            _, status = os.waitpid(pid, 0)
+            return os.waitstatus_to_exitcode(status), output.decode(errors='replace')
+        finally:
+            os.close(fd)
+
+    def call(self, path, env_path, backup, answers):
+        answer_iterator = iter(answers)
+        with patch.object(config.sys.stdin, 'isatty', return_value=True), patch.object(config.sys.stderr, 'isatty', return_value=True), patch.object(config, 'hidden_key', side_effect=lambda: (value() if callable(value := next(answer_iterator)) else value)):
+            return config.setup_missing(path, env_path, backup)
+
+    def test_terminal_missing_keys_preserves_old_three_backups_and_idempotent_rerun(self):
+        with tempfile.TemporaryDirectory() as root:
+            path, env_path, backup = self.fixture(root)
+            before_json, before_env = path.read_bytes(), env_path.read_bytes()
+            sibling = config.read_private(path)['providers']
+            router, llama = 'fake-$#\'"\\-router', 'fake-llama'
+            rc, output = self.terminal(path, env_path, backup, [router, llama])
+            self.assertEqual(rc, 0, output)
+            self.assertIn('secretEnvPath=' + str(env_path), output)
+            self.assertIn('metadataJsonPath=' + str(path), output)
+            self.assertIn('openrouter.ai', output)
+            self.assertIn('api.cloud.llamaindex.ai', output)
+            self.assertNotIn(router, output)
+            self.assertNotIn(llama, output)
+            data = config.read_private(path)
+            for provider, state in sibling.items():
+                self.assertEqual(data['providers'][provider], state)
+            self.assertTrue(data['providers']['openrouter']['enabled'])
+            self.assertEqual(data['providers']['openrouter']['costMode'], 'FREE_ONLY')
+            self.assertEqual(data['providers']['openrouter']['tests'], [])
+            self.assertEqual(data['connections']['llama_cloud']['category'], 'DOCUMENT_KNOWLEDGE')
+            self.assertFalse(data['connections']['llama_cloud']['enabled'])
+            keys = config.env_credentials(data['credentialSource'])['keys']
+            self.assertEqual(len(keys), 5)
+            self.assertEqual(keys['OPENROUTER_API_KEY'], router)
+            self.assertEqual(keys['LLAMA_CLOUD_API_KEY'], llama)
+            self.assertNotIn(router, path.read_text())
+            self.assertNotIn(llama, path.read_text())
+            self.assertEqual(backup.stat().st_mode & 0o777, 0o700)
+            snapshots = sorted(backup.iterdir())
+            self.assertEqual(len(snapshots), 2)
+            self.assertTrue(any((entry / 'ai-providers.json').read_bytes() == before_json and (entry / 'ai-providers.env').read_bytes() == before_env for entry in snapshots))
+            for entry in snapshots:
+                self.assertEqual(entry.stat().st_mode & 0o777, 0o700)
+                for file in entry.iterdir():
+                    self.assertEqual(file.stat().st_mode & 0o777, 0o600)
+                    self.assertEqual(file.stat().st_uid, os.getuid())
+            after = path.read_bytes(), env_path.read_bytes()
+            rc, output = self.terminal(path, env_path, backup, [])
+            self.assertEqual(rc, 0, output)
+            self.assertNotIn('(ẩn):', output)
+            self.assertEqual((path.read_bytes(), env_path.read_bytes()), after)
+            self.assertEqual(len(list(backup.iterdir())), 2)
+
+    def test_optional_llama_skip_or_cancel_keeps_openrouter_saved_before_next_prompt(self):
+        for llama in ['', None]:
+            with self.subTest(llama=llama), tempfile.TemporaryDirectory() as root:
+                path, env_path, backup = self.fixture(root)
+                rc, output = self.terminal(path, env_path, backup, ['fake-router', llama])
+                self.assertEqual(rc, 0 if llama == '' else 130, output)
+                data = config.read_private(path)
+                self.assertTrue(data['providers']['openrouter']['enabled'])
+                self.assertEqual(config.env_credentials(data['credentialSource'])['keys']['OPENROUTER_API_KEY'], 'fake-router')
+                self.assertNotIn('LLAMA_CLOUD_API_KEY', env_path.read_text())
+
+    def test_openrouter_empty_or_cancel_never_mutates_files(self):
+        for answer in ['', None]:
+            with self.subTest(answer=answer), tempfile.TemporaryDirectory() as root:
+                path, env_path, backup = self.fixture(root)
+                before = path.read_bytes(), env_path.read_bytes()
+                rc, output = self.terminal(path, env_path, backup, [answer])
+                self.assertNotEqual(rc, 0, output)
+                self.assertEqual((path.read_bytes(), env_path.read_bytes()), before)
+                self.assertFalse(backup.exists())
+
+    def test_unknown_env_variable_fails_before_prompt_and_preserves_bytes(self):
+        with tempfile.TemporaryDirectory() as root:
+            path, env_path, backup = self.fixture(root)
+            with env_path.open('a') as stream:
+                stream.write('UNRELATED_VAR="must-preserve"\n')
+            before = path.read_bytes(), env_path.read_bytes()
+            with self.assertRaises(ValueError):
+                self.call(path, env_path, backup, [])
+            self.assertEqual((path.read_bytes(), env_path.read_bytes()), before)
+            self.assertFalse(backup.exists())
+
+    def test_existing_pending_keys_activate_once_and_keep_comments_and_policy(self):
+        with tempfile.TemporaryDirectory() as root:
+            path, env_path, backup = self.fixture(root)
+            with env_path.open('a') as stream:
+                stream.write('# keep-comment\nOPENROUTER_API_KEY="fake-existing"\nLLAMA_CLOUD_API_KEY="fake-existing-llama"\n')
+            original_env = env_path.read_bytes()
+            config.update(path, lambda providers: providers.update(openrouter={'revision': 'pending', 'enabled': False, 'replacementConfirmed': False, 'dataPolicy': 'SYNTHETIC_PUBLIC_APPROVED', 'costMode': 'FREE_ONLY', 'maxConcurrent': 2, 'approvedInputs': [{'questionHash': 'a' * 64, 'organizationId': 'org', 'projectId': 'project'}], 'tests': []}))
+            self.assertTrue(self.call(path, env_path, backup, []))
+            self.assertEqual(env_path.read_bytes(), original_env)
+            router = config.read_private(path)['providers']['openrouter']
+            self.assertTrue(router['enabled'])
+            self.assertEqual(router['maxConcurrent'], 2)
+            self.assertEqual(router['approvedInputs'][0]['questionHash'], 'a' * 64)
+            self.assertNotEqual(router['revision'], 'pending')
+            after = path.read_bytes(), env_path.read_bytes()
+            self.assertTrue(self.call(path, env_path, backup, []))
+            self.assertEqual((path.read_bytes(), env_path.read_bytes()), after)
+
+    def test_concurrent_config_change_during_prompt_is_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as root:
+            path, env_path, backup = self.fixture(root)
+            def change_then_answer():
+                config.update(path, lambda providers: providers['kira'].update(policyRevision='concurrent'))
+                return 'fake-router'
+            self.assertFalse(self.call(path, env_path, backup, [change_then_answer, '']))
+            self.assertEqual(config.read_private(path)['providers']['kira']['policyRevision'], 'concurrent')
+            self.assertNotIn('OPENROUTER_API_KEY', env_path.read_text())
+            self.assertFalse(backup.exists())
+
+    def test_setup_default_paths_ignore_shell_override_and_reject_secret_pipe(self):
+        with patch.object(config, 'setup_missing', return_value=True, create=True) as setup, patch.dict(os.environ, {'GALAXY_AI_CONFIG_FILE': '/tmp/wrong.json'}), patch.object(sys, 'argv', ['configure-ai.py', 'setup-missing']):
+            config.main()
+            setup.assert_called_once_with(Path('/home/galaxy_os/.runtime/ai-providers.json'), Path('/home/galaxy_os/.runtime/ai-providers.env'), Path('/home/galaxy_os/.runtime/ai-credential-backups'))
+        with tempfile.TemporaryDirectory() as root:
+            path, env_path, backup = self.fixture(root)
+            before = path.read_bytes(), env_path.read_bytes()
+            command = [sys.executable, '-B', str(Path(config.__file__).resolve()), 'setup-missing', '--file', str(path), '--env-file', str(env_path), '--backup-dir', str(backup)]
+            result = subprocess.run(command, input='fake-do-not-consume', capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn('fake-do-not-consume', result.stdout + result.stderr)
+            self.assertEqual((path.read_bytes(), env_path.read_bytes()), before)
+
+    def test_activation_existing_key_keeps_old_evidence_policy_and_other_providers(self):
+        with tempfile.TemporaryDirectory() as root:
+            path, env_path, backup = self.fixture(root)
+            config.save_provider(path, 'openrouter', 'fake-old-router', 'openrouter.ai')
+            original = config.read_private(path)
+            router = original['providers']['openrouter']
+            evidence = dict(revision=router['revision'], provider='openrouter', requestedModel='openrouter/free', returnedModel='vendor/actual', capability='text', fixtureVersion='galaxy-ai-activation-v1', testedAt='2026-10-05T00:00:00.000Z', requestId=str(uuid.uuid4()), result='PASS', httpStatus=200, usage=None)
+            config.record_test(path, 'openrouter', hashlib.sha256(path.read_bytes()).hexdigest(), evidence)
+            config.update(path, lambda providers: providers['openrouter'].update(policyRevision='keep-policy', maxConcurrent=2))
+            config.write_env(env_path, {**config.env_credentials(original['credentialSource'])['keys'], 'OPENROUTER_API_KEY': 'fake-manually-changed-router'})
+            before_env = env_path.read_bytes()
+            command = [sys.executable, '-B', str(Path(config.__file__).resolve()), 'activate-existing', '--provider', 'openrouter', '--file', str(path), '--env-file', str(env_path), '--backup-dir', str(backup)]
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            after = config.read_private(path)
+            self.assertNotEqual(after['providers']['openrouter']['revision'], router['revision'])
+            self.assertEqual(after['providers']['openrouter']['tests'], [evidence])
+            self.assertEqual(after['providers']['openrouter']['lastTest'], 'PASS')
+            self.assertEqual(after['providers']['openrouter']['policyRevision'], 'keep-policy')
+            self.assertEqual(after['providers']['openrouter']['maxConcurrent'], 2)
+            self.assertTrue(after['providers']['openrouter']['enabled'])
+            self.assertEqual(env_path.read_bytes(), before_env)
+            for provider in ['google_gemini', 'mistral', 'kira']:
+                self.assertEqual(after['providers'][provider], original['providers'][provider])
+
+    def test_final_env_size_and_shared_parser_invalid_keys_never_modify_canonical_files(self):
+        for key, padding in [('f' * 1000, 32000), ('fake-\ufeff-router', 0), ('😀' * 4096, 0)]:
+            with self.subTest(key_length=len(key), padding=padding), tempfile.TemporaryDirectory() as root:
+                path, env_path, backup = self.fixture(root)
+                if padding:
+                    with env_path.open('a') as stream:
+                        stream.write('#' + 'x' * padding + '\n')
+                before = path.read_bytes(), env_path.read_bytes()
+                self.assertFalse(self.call(path, env_path, backup, [key, '']))
+                self.assertEqual((path.read_bytes(), env_path.read_bytes()), before)
+                self.assertEqual(config.env_credentials(config.read_private(path)['credentialSource'])['status'], 'LOADED')
+
+    def test_env_edit_after_backup_is_not_overwritten_by_appending_a_stale_prefix(self):
+        with tempfile.TemporaryDirectory() as root:
+            path, env_path, backup = self.fixture(root)
+            original_backup = config.backup_credentials
+            concurrent_env = []
+            def race(*args):
+                original_backup(*args)
+                with env_path.open('a') as stream:
+                    stream.write('# concurrent-preserved\n')
+                concurrent_env.append(env_path.read_bytes())
+            with patch.object(config, 'backup_credentials', side_effect=race):
+                self.assertFalse(self.call(path, env_path, backup, ['fake-router', '']))
+            self.assertEqual(env_path.read_bytes(), concurrent_env[0])
+            self.assertNotIn('OPENROUTER_API_KEY', env_path.read_text())
+
 if __name__ == '__main__': unittest.main()
