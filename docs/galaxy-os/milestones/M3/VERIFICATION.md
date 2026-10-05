@@ -1,5 +1,96 @@
 # M3 — Kiểm chứng AI đa nhà cung cấp
 
+## 05/10 — env/chat/RAG nghiệm thu mới
+
+CODE_SHA=TESTED_SHA `3a00f4ed9274fa5d7fb9c47dc3ea2ef3e4eb43c7`, TESTED_TREE `255c32426efbb33fd3e6d66b1d58e08bec2cd6c6`;
+release `local-a33d8a12318c`. Source ứng dụng từ `106e8ad` đã qua full suite;
+commit cuối `3a00f4e` chỉ sửa câu hỏi smoke để yêu cầu chữ số, giữ assertion.
+Build snapshot sạch theo pipeline hiện hữu; main và fixture cuối cùng chạy cùng artifact.
+
+| Gate/lệnh                                                         | Kết quả và evidence                                                                                                       |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm test` qua env fixture                                       | API70files/1285PASS+1skip, Web561, Edge5, document1; `/tmp/galaxy-ai-full-test-final.log`                                 |
+| `python3 -m unittest discover -s scripts -p test_configure_ai.py` | 10PASS; `/tmp/galaxy-ai-python-final.log`                                                                                 |
+| `pnpm lint`, `pnpm typecheck`, `pnpm format:check`                | PASS; `/tmp/galaxy-ai-lint-final.log`, `galaxy-ai-types-final.log`, `galaxy-ai-format-final.log`                          |
+| `prepare-local-release.py build`                                  | API/Web/Edge PASS; `/tmp/galaxy-ai-release-accepted-build.log`; không secret trong build env                              |
+| Opt-in `playwright test --config=playwright.m2.config.ts`         | 1PASS gồm Kira4bước+Chrome, Gemini text/cross-model và ghi Mistral429; `/tmp/galaxy-ai-live-fixture-final-v2.log`         |
+| RAG trên release cuối                                             | Kira200,2citation,semanticSupported=true; `accepted-release-rag.json`                                                     |
+| Chrome nguồn/file                                                 | đúng version/đoạn, download200; `accepted-chrome-citation.json/png`                                                       |
+| Main Chrome sau env/restart                                       | popup560/1100,font16/26,composer112,session/9Project giữ; `main-after-cutover.json`                                       |
+| Main GENERAL qua UI                                               | Kira200,1create/1dispatch,0sources; `main-general-smoke.json`                                                             |
+| Secret/config audit                                               | 3keys boolean preserved, JSON metadata-only,3242artifact files/diff/log không có giá trị key; `secret-cutover-audit.json` |
+| Real policy                                                       | 9Project×3provider DENIED sau restart; `main-real-policy-check.json`                                                      |
+| Runtime/network                                                   | schema84/0pending/READY, localhost/LAN200,Edge/keeper giữ,public503; `runtime-final.json`, `network-smoke.json`           |
+
+Evidence JSON/PNG/runtime/log archived ngoài Git tại
+`/home/galaxy_os/.runtime/ai-env-policy-20261005/` (task logs trong `task-logs/`).
+Không upload key, prompt thật, signed URL, cookie hoặc raw upstream error vào tài liệu.
+
+### Cách chạy fixture có kiểm soát
+
+Dùng native Node `--env-file=scripts/m3-isolated.env.example` nạp **env mẫu test**,
+spawn `pnpm test` với env đó; guard xác nhận DB/user riêng. Full suite không nhận khóa:
+
+```bash
+node --env-file=scripts/m3-isolated.env.example -e 'const r = require("node:child_process").spawnSync("pnpm", ["test"], {stdio:"inherit", env:process.env}); process.exit(r.status ?? 1)'
+```
+
+Live cần hai test service trỏ cùng artifact production, fixture API dùng env test
+và metadata `/tmp/galaxy-os-g00-20260930m3/live-ai.json` tham chiếu canonical secret;
+chỉ API smoke được đọc secret. Worker dùng env mẫu cộng:
+
+```text
+GALAXY_AI_CONFIG_FILE=/tmp/galaxy-os-g00-20260930m3/live-ai.json
+GALAXY_AI_LIVE_FIXTURE=confirmed
+M2_CHROME_CDP_ENDPOINT=http://127.0.0.1:33005
+```
+
+Chạy `pnpm --filter @galaxy/web exec playwright test --config=playwright.m2.config.ts`.
+Đây là opt-in vendor thật có chi phí/hạn mức, không chạy trong unit workers.
+Chrome154 qua CDP bridge, context fixture riêng, không đóng context/session người dùng.
+Không seed main, đổi datasource3000, hoặc dùng production data trong fixture.
+Sau nghiệm thu đã dừng hai service live fixture; giữ DB/storage và evidence ngoài Git.
+
+### Phân biệt mock và live
+
+Integration32 ca dùng DB fixture+mock vendor chứng minh egress-denied outbound0,
+GENERAL không index/context, project/actor/guest/source isolation, nguồn không duyệt,
+revoke trước retrieval/retry/delivery/history/cache, lịch sử dẫn xuất8turn, model switch,
+shared cooldown và provider-disabled/no-key revoke. Unit26adapter+10registry+4provider
+kiểm503/429/budget/Retry-After/JSON/citation. UI561 gồm nháp,model,duplicate/cancel/reconnect,
+không phải561ca vendor live.
+
+Live: main Kira request `4bf4458e-f77a-4eda-a8ad-05471eb4a4b6`; fixture Kira RAG
+`4810a93e-6ecb-49a3-baa9-e3ae94ae8fb2`, final release followup
+`d059a324-36fe-4768-baf8-2f4e4ca5bedc`; Gemini text
+`5117b7a2-5cc9-4346-98cf-1a8d5fa0965d`, cross-model
+`77d3486b-f3e7-47c0-a322-1bcba871c80e`; Mistral429
+`e14c6f1e-fe1e-42d8-abf9-522f6d8c78c0`.
+Request Gemini `a3488e3e-d3e6-4e0a-8389-cdc13214598f` trước đó là bằng chứng
+503→503→200 với Retry-After30s,3attempt. Endpoint/requested/returned model khớp registry.
+
+### Lỗi đã gặp và giới hạn giữ lại
+
+- Followup Kira HTTP200 code-fenced JSON từng bị ADAPTER_RESPONSE_ERROR; thêm diagnostic
+  fixed-stage, unit RED→GREEN, parser chỉ nhận một fence trọn vẹn. Không log response thô.
+- Test live ban đầu nhầm scope ALL với P04 CONSULTING; sửa harness vào route AI hiện hữu.
+- Câu số học từng trả đúng chữ “bốn” nhưng assertion đòi“4”; đổi prompt fixture yêu cầu
+  chữ số, **không nới assertion**. Giữ logfailed, chỉ lượt sau được ghi PASS.
+- Một full-v2 M2test timeout5s khi chạy chung fixture; exactcase4570ms PASS và full
+  chạy riêng cuối PASS, không đổi timeout/assertion hoặc xóa test.
+- Build sandbox lỗi bind nội bộ Turbopack EPERM; chạy lại pipeline với quyền cần thiết
+  PASS, giữ artifact/log failed riêng, không next dev hoặc chiếm cổng main.
+- `ai-native-source.test.ts:65` skip PDF parser do thiếu `/usr/bin/pdfinfo`.
+  Đây là test PDF/version/page thực, không tính PASS; text lexical citation không dùng nó.
+- Mistral subtype quota chưa rõ; không suy ra key sai hoặc hết credit. Image/PDF chưa
+  live; không tuyên bố toàn bộ AI READY. Tier/điều khoản dữ liệu thật chưa được xác minh.
+
+---
+
+## Lịch sử trước bản env/chat/RAG ngày 05/10
+
+Các nhận định dưới đây thuộc các lần bàn giao cũ; trạng thái hiện hành là phần trên.
+
 ## 05/10 — AI floating chat + typography và provider live
 
 Thiết kế owner approved current prompt, thực thi INLINE. CODE_SHA=TESTED_SHA

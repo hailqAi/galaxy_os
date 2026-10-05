@@ -1,5 +1,105 @@
 # Bàn giao popup AI, typography và kích hoạt provider — 05/10/2026
 
+## Hiện hành — env, chat và RAG đã phát hành local ngày 05/10
+
+Thực thi INLINE theo phương án owner đã chốt, Ponytail full. Không làm lại popup,
+P04 hoặc typography; không router, vector DB, OCR, dependency hay IAM song song.
+Worktree `/home/galaxy_os/.worktrees/m2-a-20260928`, branch `m2/project-chat-20260928`.
+Baseline HEAD `bbd139032fd693e22492af5ac02a1dfc106669bf`, tree
+`212655545a70e3b1313575e2524fde9e53a20558`, sạch; runtime trước là
+`local-df7ba5a5c974`/code `11af11543196b80dc6f35abbfba9b1b329768390`.
+Đã xác nhận3credential LOADED/enabled ở baseline, không quay lại giả định store rỗng.
+
+CODE_SHA=TESTED_SHA: `3a00f4ed9274fa5d7fb9c47dc3ea2ef3e4eb43c7`. TESTED_TREE: `255c32426efbb33fd3e6d66b1d58e08bec2cd6c6`.
+Release: `local-a33d8a12318c`; Web BUILD_ID `wVAJZE1Lwm17a1L7QI9Jt`.
+Artifact `/home/galaxy_os/.runtime/releases/ai-env-policy-final-v2-20261005`.
+API487972/Web487385 được systemd quản lý, cùng release/schema84, pending0.
+Tài liệu được commit local riêng sau code; DOCS_COMMIT_SHA xem commit chứa mục này.
+Không push/merge/tag/remote deploy/reset/restore dữ liệu.
+
+### Nguyên nhân đã truy được
+
+1. UI map thông báo ở `apps/web/features/project-chat/project-ai.tsx:152` đúng
+   `EGRESS_POLICY_DENIED`, không phải missing key. Request PROJECT đi qua
+   `ProjectAiService.ask` (`project-ai.service.ts:1418`), tới
+   `assertEgress` (`ai-registry.ts:392–411`): Project phải được duyệt và từng nguồn/
+   version phải được duyệt cho provider. Cả9Project main chưa có approval. Gate này
+   chặn trước retrieval/provider dispatch; lỗi đó không tạo outbound. `available`
+   trước đây phụ thuộc Project approval nên text cũng bị khóa trong cùng đường hỏi.
+2. GENERAL cần contract lưu answer0citation. CHECK cũ bắt buộc1citation cho mọi
+   COMPLETED; đã tạo migration mới `20261005034416_ai_general_answer_citations`
+   bằng `prisma:migrate --create-only` trên fixture, review SQL rồi deploy. Giữ1–12
+   citation cho RAG/legacy; không rewrite applied migration hoặc reset DB.
+3. Kira followup HTTP200 đôi khi bọc JSON trong code fence; parser cũ JSON.parse
+   trực tiếp từ chối. `ai-provider.ts:619` chỉ nhận một fence JSON trọn vẹn;
+   schema/citation handles vẫn kiểm nghiêm. Regression RED→GREEN và live followup PASS.
+4. Gemini503/Mistral429 đến từ upstream adapter gọi endpoint cố định ở
+   `ai-registry.ts:11`, không từ proxy Galaxy hoặc trạng thái credential.
+   `ai-provider.ts:202` phân loại lỗi, `:422` kiểm quyền trước từng attempt;
+   `project-ai.service.ts:2247` cấp callback gate và kiểm delivery. Không có SDK
+   retry, không tự gửi thêm từ popup/panel hoặc đổi provider.
+
+### Kết quả có giới hạn rõ
+
+| Hạng mục                      | Kết quả                                                                                                             |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| ENV_SECRET_SOURCE             | `/home/galaxy_os/.runtime/ai-providers.env`, backend loader,0600/uid1000                                            |
+| JSON_METADATA_ONLY_STATUS     | Đã finalize; metadata/revision/model/policy/evidence giữ                                                            |
+| CREDENTIALS_PRESERVED         | Boolean đúng cho3provider; không nhập lại, không xoay key                                                           |
+| API_EFFECTIVE_CONFIG          | 3LOADED/source env sau restart; Web/build/global manager không có key                                               |
+| KIRA_TEXT_STATUS              | LIVE PASS main request `4bf4458e-f77a-4eda-a8ad-05471eb4a4b6`, GENERAL,0source,1dispatch                            |
+| KIRA_PROJECT_RAG_STATUS       | LIVE PASS fixture; trên release cuối request `d059a324-36fe-4768-baf8-2f4e4ca5bedc`,2citation, đúng hai mã vật liệu |
+| GEMINI_503_FINDING_AND_RESULT | Upstream503; đã thấy503→503→200,30s Retry-After,3attempt. Text/RAG fixture cuối200 lần đầu                          |
+| MISTRAL_429_TYPE_AND_RESULT   | Upstream429/code1300, không Retry-After, RATE_LIMITED_UNKNOWN;1attempt; chưa xác định tài khoản/quota               |
+| BOUNDED_RETRY_STATUS          | Tối đa3attempt/90s; recheck quyền; không retry quota/429 không rõ, không fallback                                   |
+| GENERAL_CHAT_STATUS           | Chạy được khi đúng input được duyệt; không lấy hồ sơ/lịch sử RAG; giữ old conversation                              |
+| SOURCE_ACCESS_WORKFLOW        | ACCESS_ADMIN+AI, Project/source/version/provider, audit/revision/revoke; pilot synthetic                            |
+| FIXTURE_DB_ISOLATION          | DB `galaxy_os_g00_20260930m3`:55435, Redis56382, API33001/Web33002, storage/session riêng                           |
+| LIVE_CITATION_EVIDENCE        | Chrome mở nguồn đúng version/đoạn, tải file200; semantic mã chốt `SYN-OAK-314` khác PI `SYN-WALNUT-271`             |
+| CROSS_MODEL_LIVE_STATUS       | Kira→Gemini trong cùng conversation PASS; Mistral LIVE_NOT_VERIFIED                                                 |
+| SKIPPED_TEST_DISPOSITION      | 1PDF parser test thiếu pdfinfo; SKIPPED, không phải PASS; không chặn lexical text citation                          |
+| POPUP_RUNTIME_REGRESSION      | 560/1100,16/26,composer112, nháp/minimize/expand/session/9Project PASS; P04 giữ code/layout                         |
+| REMAINING_BLOCKERS            | Mistral quota subtype; Gemini có thể còn503; ảnh/PDF chưa live; dữ liệu thật chưa có approval/tier phù hợp          |
+
+Main nguồn thật9Project×3provider vẫn DENIED. Chỉ phê duyệt một câu số học public
+cho smoke GENERAL; không duyệt Project/source thật, không tạo Project demo trong DB main.
+Nguồn Rev03/PI Rev02 của fixture là hai file text upload qua nghiệp vụ, mỗi file có
+technical version1+checksum và đoạn dòng1–4; tên Rev03/Rev02 là revision nghiệp vụ,
+không tự nhận đã tạo chuỗi ba version trên một file. Lexical index hiện hữu được dùng.
+Nguồn cũ và phòng riêng bị loại; negative cross-Project/guest/revoke/cache kiểm bằng
+DB fixture+mock, không gọi vendor thật cho mỗi ca từ chối.
+
+### File thay đổi và kiểm tra
+
+- `scripts/ai-credentials.cjs`, `.d.cts`, `configure-ai.py`, `test_configure_ai.py`:
+  resolver/atomic migration, CLI, conflict/no fallback/fault injection.
+- `ai-registry.ts`, `ai-provider.ts`, `ai-activation.ts`, `project-ai.service.ts`,
+  `project-chat.controller.ts`, `project-chat.dto.ts` trong API project-chat:
+  modes/policy/audit/health/retry/diagnostic; unit và integration đi kèm.
+- Migration CHECK mới; `project-ai.tsx` và test Web, `playwright.m2.config.ts`,
+  `m3-live-rag.spec.ts`, `m3-project-ai.spec.ts`: state và nghiệm thu trong khung cũ.
+- Plan `docs/superpowers/plans/2026-10-05-ai-env-policy-rag.md`; ACTIVATION,
+  VERIFICATION, HANDOFF, STATUS và PROJECT_STATUS cập nhật bằng evidence thực.
+
+Full regression API1285PASS+1skip/Web561/Edge5/document1; Python10PASS;
+lint/typecheck/format và artifact API/Web/Edge build PASS. Bộ live Chrome cuối1PASS,
+nhưng receipt Mistral vẫn FAILED đúng429; PASS harness không đồng nghĩa provider PASS.
+Astra/high review read-only đã chỉ ra và sửa revoke lịch sử dẫn xuất >6turn,
+key write trước metadata-disable, GENERAL history context và rollback/migration
+preflight. Lần review cuối không còn Critical/Important; Ponytail/correctness/security/
+authorization/UX đã đối soát. Metadata model thực thi root: UNVERIFIED.
+
+Windows localhost/LAN200, API LAN không mở, public HTTPS503 với TLS verified qua
+LAN resolve; WAN chưa kiểm. EdgePID308598/keeper Running-Limited giữ nguyên.
+Rollback được review tĩnh, chưa diễn tập; giữ schema84/data và chỉ dùng key hiện hành.
+[Hướng dẫn vận hành, cấp phép và giới hạn](ACTIVATION.md), [lệnh/evidence](../VERIFICATION.md).
+
+---
+
+## Lịch sử trước bản env/chat/RAG ngày 05/10
+
+Các nhận định dưới đây thuộc các lần bàn giao cũ; trạng thái hiện hành là phần trên.
+
 ## Quyết định và kết quả hiện hành
 
 DESIGN_APPROVAL_STATUS: **OWNER_APPROVED_CURRENT_PROMPT**. Chủ dự án đã duyệt rõ

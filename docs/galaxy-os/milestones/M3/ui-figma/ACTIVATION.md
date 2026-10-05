@@ -1,5 +1,134 @@
 # Kích hoạt và xác minh AI
 
+## Hiện hành 05/10 — env backend đã chuyển và kiểm API
+
+Release `local-a33d8a12318c`; CODE_SHA=TESTED_SHA
+`3a00f4ed9274fa5d7fb9c47dc3ea2ef3e4eb43c7`. Ba credential đã có ở baseline,
+được chuyển nguyên giá trị, không nhập lại hoặc xoay khóa. API sau restart báo
+`credentialSource=env`, `credentialState=LOADED` cho cả ba provider. Active JSON
+đã bỏ mọi trường API key, giữ revision, model flags, policy và evidence trước đó.
+
+### Nguồn cấu hình duy nhất
+
+- Secret canonical: `/home/galaxy_os/.runtime/ai-providers.env`, owner
+  `hailq_glx`/uid1000, mode0600. Đây **không phải mã hóa**.
+- Metadata canonical: `/home/galaxy_os/.runtime/ai-providers.json`, mode0600;
+  `credentialSource={"mode":"env","path":"/home/galaxy_os/.runtime/ai-providers.env"}`.
+- `galaxy-os-api.service` tham chiếu private API env
+  `/home/galaxy_os/.runtime/ai-env-policy-20261005/api.env`, nơi giữ
+  `GALAXY_AI_CONFIG_FILE` trỏ metadata. Backend đọc secret bằng
+  `scripts/ai-credentials.cjs`; Python CLI dùng cùng resolver. Khóa được truyền
+  trực tiếp vào adapter, không lấy `GOOGLE_API_KEY` từ môi trường SDK.
+- Web/build/Edge/global systemd manager không nhận ba khóa. Không thêm khóa vào
+  `.env.local`, `NEXT_PUBLIC_*`, shell profile hoặc literal trong service unit.
+- File secret dùng **mỗi dòng `KEY=JSON_STRING`**, chỉ ba tên `GEMINI_API_KEY`,
+  `MISTRAL_API_KEY`, `KIRA_API_KEY`. Không shell source/eval; không nạp file này như
+  dotenv hay systemd EnvironmentFile. JSON escaping giữ `$`, `#`, nháy và
+  backslash; giá trị có whitespace/control/newline bị từ chối. Test dùng khóa giả.
+- Mode env thiếu/sai/rỗng/quyền không hợp lệ sẽ lỗi rõ, **không fallback JSON**.
+  Migration stage/activate/finalize đã kiểm boolean giữ cả ba khóa/revision.
+  Backup0600 trong thư mục0700 ngoài Git tại
+  `/home/galaxy_os/.runtime/ai-env-policy-20261005/secret-backup/`.
+  Không đổi quyền đệ quy thư mục runtime dùng chung.
+
+### Đổi khóa khi có nhu cầu thật
+
+Không cần chạy CLI mỗi lần chat. Tiện ích tùy chọn trong worktree canonical:
+
+```bash
+python3 scripts/configure-ai.py status --provider kira
+python3 scripts/configure-ai.py key --provider kira
+python3 scripts/configure-ai.py enable --provider kira
+systemctl --user restart galaxy-os-api.service
+python3 scripts/local-runtime.py status
+```
+
+`key` chỉ dùng terminal input ẩn, xác nhận host; trong mode env nó ghi env atomic,
+đổi revision và đặt provider disabled/evidence chưa kiểm trước khi ghi secret.
+Chỉ enable sau khi xác nhận đúng tài khoản/host. Không ghi key vào argv. Không dùng
+chỉnh tay env để giữ lại cờ kiểm chứng của credential cũ. API đọc lại ở mỗi gate;
+restart đúng API là bước đối soát cutover, rồi xem **Cấu hình nhà cung cấp và hạn mức**
+hoặc GET `/api/v1/project-chat/projects/:id/ai/settings`: source/state/revision,
+adminEnabled, providerReady, health, lastSuccessfulCallAt và từng capability.
+Lưu file hay CLI status riêng chưa phải bằng chứng API đã nạp. Khi thay khóa phải
+smoke lại capability liên quan; không khôi phục khóa đã thu hồi từ backup.
+
+### Kết quả provider thực
+
+| Provider / endpoint cố định                                                                 | Kết quả mới                                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kira `kira-3.5-pro` — `https://kiraai.vn/api/v1/chat/completions`                           | Text main GENERAL PASS sau env; fixture lexical RAG, hỏi tiếp, chat mới, citation Chrome PASS. Requested/returned đều `kira-3.5-pro`.                                             |
+| Gemini `gemini-3.8-flash` — `https://generativelanguage.googleapis.com/v1beta/interactions` | Một request fixture gặp503→503→200, Retry-After30s mỗi lần được tôn trọng. Smoke cuối text và đổi model/RAG đều200 lần đầu; requested/returned khớp. Không bảo đảm vendor hết503. |
+| Mistral `mistral-medium-3-5` — `https://api.mistral.ai/v1/chat/completions`                 | Upstream429, code đã làm sạch `1300`, không Retry-After. `RATE_LIMITED_UNKNOWN`, 1attempt, không tự retry; text/RAG live BLOCKED. Chưa có căn cứ quota tháng/credit/billing.      |
+
+Health tại main phản ánh lượt gọi của tổ chức main: Kira NORMAL sau smoke mới;
+Gemini/Mistral còn receipt lỗi cũ. Evidence mới ở DB fixture không được chép vào
+DB main hoặc giả làm ADMIN_SMOKE. Gemini vẫn chọn được cho text khi đủ policy;
+textLiveVerified quản trị ở main còn false, không khóa text bằng cờ PDF pending.
+Ảnh/PDF chưa live verified, chưa bật; lexical không phải semantic embeddings/OCR.
+
+### Sử dụng chat và cấp phép nguồn
+
+Trong khung hiện có chọn **Hỏi thông thường** hoặc **Hỏi theo nguồn dự án**.
+GENERAL hiện “Không sử dụng hồ sơ dự án”, không tự lấy file, tên khách, metadata,
+summary hay lịch sử RAG. Đổi chế độ mở ngữ cảnh sạch; hội thoại cũ còn nguyên.
+Pilot vẫn yêu cầu quản trị duyệt **đúng nội dung nhập** theo Project/provider;
+checkbox người gửi không tự cấp quyền. Một câu mới/chỉnh nội dung chưa duyệt vẫn
+bị `INPUT_POLICY_DENIED` — không được dùng GENERAL để gửi dữ liệu mật dán tay.
+
+Quản trị phải có `ACCESS_ADMIN` và quyền AI hiện hữu. Trong cấu hình chọn provider,
+duyệt Project thử, từng nguồn/phiên bản cụ thể và nội dung hỏi; không mặc định tất cả.
+API `POST /project-chat/projects/:id/ai/settings/egress` nhận
+`kind=PROJECT|SOURCE|INPUT`, `action=APPROVE|REVOKE`, model và phạm vi cụ thể;
+backend kiểm actor/Project/source/version. Policy revision, actor, thời gian và
+phạm vi được ghi atomic cùng audit trong metadata. Thu hồi vẫn làm được khi
+provider disabled hoặc thiếu credential; không xóa tài liệu/hội thoại.
+
+Mọi retrieval/dispatch/retry/delivery/source viewer và lịch sử dẫn xuất đều kiểm
+lại quyền/egress. Chỉ một phần nguồn được phép thì UI báo phạm vi; không có nguồn
+hợp lệ thì không giả vờ đã đọc. Sau khi đã gửi vendor, thu hồi chặn phần tiếp theo
+và delivery; không tuyên bố lấy lại được dữ liệu đã gửi.
+
+**Dữ liệu thật vẫn chưa được mở**: kiểm9Project×3provider đều DENIED sau restart.
+`SYNTHETIC_PUBLIC_APPROVED` giữ nguyên. Workflow quản trị đã dùng được trên fixture;
+việc duyệt dữ liệu cá nhân/giá vốn/hợp đồng thật còn cần xác minh tier/điều khoản và
+chấp thuận phạm vi cụ thể. Lượt này không có căn cứ để mở cả9Project hoặc phòng riêng
+cho khách. Env hợp lệ không thay quyết định dữ liệu hay quota vendor.
+
+### Retry, rollback và bằng chứng
+
+Native fetch, không SDK retry. Một lớp adapter sở hữu retry: tối đa3 lần gọi gồm
+lần đầu, deadline tổng90s, backoff/jitter, Retry-After/RetryInfo; nếu thời gian chờ
+vượt deadline thì dừng. Chỉ retry lỗi tạm thời có căn cứ, không429 không rõ subtype,
+không quota dài hạn hoặc timeout không rõ kết quả. Lease/concurrency dùng chung
+credential qua DB; không thêm quota lượt/ngày, không key/account/model rotation.
+
+Mã **bổ sung mới trong patch này**: `INPUT_POLICY_DENIED`,
+`RATE_LIMITED_UNKNOWN`, `RATE_LIMITED_TEMPORARY`, `QUOTA_EXHAUSTED`,
+`BILLING_ACTION_REQUIRED`, `PROVIDER_COOLDOWN`, `INVALID_CREDENTIAL_SOURCE`,
+`SECRET_FILE_MISSING`, `SECRET_FILE_INVALID`, `SECRET_FILE_UNREADABLE`.
+`EGRESS_POLICY_DENIED`, `TEMPORARY_ERROR`, `ADAPTER_RESPONSE_ERROR` đã tồn tại.
+Diagnostic server chỉ metadata request/stage/provider/model/config revision,
+policy reason/outbound/status/code/duration/retry; không prompt/header/key/raw error.
+
+Rollback giữ schema84 và dữ liệu; code cũ tương thích CHECK mới. Recipe và unit/
+manifest cũ ở thư mục private `ai-env-policy-20261005/rollback`, được review tĩnh;
+**chưa diễn tập rollback thực tế**. Nếu cần chạy code JSON cũ, materialize credential
+**hiện hành từ env** vào JSON dưới lock rồi đổi source mode; không copy key từ backup,
+không restore DB. Không chạy lại nguyên cutover script để rollback.
+
+Evidence private: `cutover-result.json`, `secret-cutover-audit.json`,
+`main-general-smoke.json`, `main-real-policy-check.json`, `final-live-evidence.json`,
+`accepted-release-rag.json`, `accepted-chrome-citation.json`, `network-smoke.json`
+trong `/home/galaxy_os/.runtime/ai-env-policy-20261005/`.
+[Kiểm chứng và lệnh](../VERIFICATION.md), [bàn giao](HANDOFF.md).
+
+---
+
+## Lịch sử trước bản env/chat/RAG ngày 05/10
+
+Các nhận định dưới đây thuộc các lần bàn giao cũ; trạng thái hiện hành là phần trên.
+
 Cập nhật05/10: **3credential đã được tìm thấy trong store canonical hiện hữu**,
 replacementConfirmed=true nhưng ban đầu enabled=false. Đã dùng đúng CLI `enable`
 từng provider; không nhập lại, không tạo store khác, không sửa resolver/adapter T1.

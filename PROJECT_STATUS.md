@@ -1,5 +1,36 @@
 # Project status
 
+## AI env/chat/RAG — phát hành local 05/10/2026, có giới hạn vendor
+
+Release `local-a33d8a12318c`, CODE_SHA=TESTED_SHA `3a00f4ed9274fa5d7fb9c47dc3ea2ef3e4eb43c7`;
+TESTED_TREE `255c32426efbb33fd3e6d66b1d58e08bec2cd6c6`. INLINE theo thiết kế owner đã chốt.
+Ba khóa đã chuyển nguyên vẹn sang `/home/galaxy_os/.runtime/ai-providers.env`0600;
+active JSON metadata-only, API3LOADED/source env sau restart, không key vào Web/build.
+Kira GENERAL main và RAG/citation fixture live PASS; Gemini text và Kira→Gemini RAG
+fixture PASS, có bằng chứng503 retry3lần hữu hạn. Mistral429/code1300 vẫn
+RATE_LIMITED_UNKNOWN/BLOCKED; ảnh/PDF chưa live verified.
+
+DB fixture riêng `galaxy_os_g00_20260930m3`:55435,storage/session/queue riêng; lexical
+index, hai mã vật liệu được nguồn hỗ trợ, Chrome mở citation/file đúng version200.
+Không còn chờ chọn fixture.9Project thật×3provider vẫn DENIED; chỉ câu số học public
+được duyệt để smoke GENERAL. Workflow ACCESS_ADMIN duyệt/thu hồi Project/source/version/
+provider và input có audit đã dùng trên fixture; mở dữ liệu thật còn cần scope/tier phù hợp.
+
+FullAPI1285+1PDFskip/Web561/Edge5/document1/Python10,lint/types/format/build PASS;
+review không còn Critical/Important. CHECK migration84 cho GENERAL0citation, RAG vẫn
+bắt buộc citation; không reset/restore dữ liệu. Popup560/1100,font16/26,composer112,
+P04/session/9Project và localhost/LAN giữ; Edge/keeper không restart,public vẫn đóng.
+Không push/merge. Không ghi toàn bộ AI hoàn tất.
+
+[Handoff hiện hành](docs/galaxy-os/milestones/M3/ui-figma/HANDOFF.md) và [vận hành env/model/source](docs/galaxy-os/milestones/M3/ui-figma/ACTIVATION.md)
+ghi file/dòng, lệnh, request ID, capability và blocker còn lại.
+
+---
+
+## Lịch sử trước bản env/chat/RAG ngày 05/10
+
+Các nhận định dưới đây thuộc các lần bàn giao cũ; trạng thái hiện hành là phần trên.
+
 ## AI floating chat + typography — đã phát hành local 05/10/2026
 
 DESIGN_APPROVAL_STATUS: **OWNER_APPROVED_CURRENT_PROMPT**. Chủ dự án đã duyệt
