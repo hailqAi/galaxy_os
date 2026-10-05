@@ -3,6 +3,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  AI_MODELS,
   readAiConfig,
   modelChoices,
   configuredModel,
@@ -81,9 +82,9 @@ afterEach(() => {
     /* Error code checked below. */
   }
 });
-it('keeps three disabled choices without credentials and never exposes keys', () => {
+it('keeps four disabled choices without credentials and never exposes keys', () => {
   const models = modelChoices({}, 'org', 'project');
-  expect(models).toHaveLength(3);
+  expect(models).toHaveLength(4);
   expect(
     models.every((m) => !m.available && m.reason === 'MISSING_CREDENTIAL'),
   ).toBe(true);
@@ -269,4 +270,82 @@ it('chỉ bật capability từ evidence đúng revision/model, không tự làm
       'project',
     )[0]?.textLiveVerified,
   ).toBe(false);
+});
+
+it('OpenRouter is GENERAL-only FREE_ONLY, LlamaCloud is a separate env connection', () => {
+  const envPath = join(directory, 'connections.env');
+  writeFileSync(
+    envPath,
+    [
+      'GEMINI_API_KEY',
+      'MISTRAL_API_KEY',
+      'KIRA_API_KEY',
+      'OPENROUTER_API_KEY',
+      'LLAMA_CLOUD_API_KEY',
+    ]
+      .map((name) => `${name}=${JSON.stringify('synthetic-' + name)}`)
+      .join('\n'),
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    path,
+    JSON.stringify({
+      providers: {
+        openrouter: {
+          ...provider,
+          GEMINI_API_KEY: undefined,
+          costMode: 'FREE_ONLY',
+        },
+      },
+      connections: {
+        llama_cloud: {
+          revision: 'lc1',
+          category: 'DOCUMENT_KNOWLEDGE',
+          enabled: false,
+          replacementConfirmed: true,
+        },
+      },
+      credentialSource: { mode: 'env', path: envPath },
+    }),
+    { mode: 0o600 },
+  );
+  const resolved = readAiConfig({ GALAXY_AI_CONFIG_FILE: path });
+  expect(configuredModel(resolved, 'openrouter/free')).toMatchObject({
+    provider: 'openrouter',
+    key: 'synthetic-OPENROUTER_API_KEY',
+    costMode: 'FREE_ONLY',
+  });
+  expect(AI_MODELS.some((m) => String(m.provider) === 'llama_cloud')).toBe(
+    false,
+  );
+  expect(
+    modelChoices(resolved, 'org', 'project').find(
+      (m) => m.id === 'openrouter/free',
+    ),
+  ).toMatchObject({
+    available: false,
+    generalAvailable: true,
+    reason: 'GENERAL_ONLY',
+    costMode: 'FREE_ONLY',
+  });
+  expect(
+    JSON.stringify(modelChoices(resolved, 'org', 'project')),
+  ).not.toContain('synthetic-OPENROUTER_API_KEY');
+  rmSync(envPath);
+});
+it('paused blocks dispatch while historical configuration retains current input policy', () => {
+  const paused = { google_gemini: { ...provider, paused: true } };
+  expect(() => configuredModel(paused, 'gemini-3.8-flash')).toThrow(
+    'PROVIDER_PAUSED',
+  );
+  expect(configuredModel(paused, 'gemini-3.8-flash', true)).toMatchObject({
+    paused: true,
+    enabled: true,
+  });
+  expect(modelChoices(paused, 'org', 'project')[0]).toMatchObject({
+    available: false,
+    generalAvailable: false,
+    reason: 'PROVIDER_PAUSED',
+    paused: true,
+  });
 });

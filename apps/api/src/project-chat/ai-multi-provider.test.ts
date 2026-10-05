@@ -110,7 +110,7 @@ it.each([
     expect(attempts).toBe(1);
   },
 );
-it.each(AI_MODELS)(
+it.each(AI_MODELS.filter((model) => model.provider !== 'openrouter'))(
   'maps $provider endpoint, secret and final-only response with real usage',
   async (model) => {
     const fetcher = vi.fn(async (url, init) => {

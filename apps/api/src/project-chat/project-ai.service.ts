@@ -604,10 +604,30 @@ export class ProjectAiService {
       await this.access.authority(tx, actor, projectId, 'ACCESS_ADMIN');
       return {
         models: await this.operationalModels(tx, actor, projectId),
+        connections: readAiConfig().connections ?? {},
         configuration: 'TERMINAL_LOCAL',
         dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
       };
     });
+  }
+  private costViolation(
+    tx: Prisma.TransactionClient,
+    model: string,
+    revision: string,
+  ) {
+    return model === 'openrouter/free'
+      ? tx.chatAiAnswer.findFirst({
+          where: {
+            model,
+            errorCode: 'FREE_ONLY_COST_VIOLATION',
+            OR: [
+              { usage: { path: ['request', 'revision'], equals: revision } },
+              { usage: { path: ['activation', 'revision'], equals: revision } },
+            ],
+          },
+          select: { completedAt: true },
+        })
+      : Promise.resolve(null);
   }
   private async operationalModels(
     tx: Prisma.TransactionClient,
@@ -640,6 +660,11 @@ export class ProjectAiService {
             },
           ],
         } satisfies Prisma.ChatAiAnswerWhereInput;
+        const costViolation = await this.costViolation(
+          tx,
+          model.id,
+          model.revision ?? '',
+        );
         const last = await tx.chatAiAnswer.findFirst({
           where: {
             ...where,
@@ -676,15 +701,25 @@ export class ProjectAiService {
         });
         return {
           ...model,
+          ...(costViolation && {
+            available: false,
+            generalAvailable: false,
+            providerReady: false,
+            providerReason: 'FREE_ONLY_COST_VIOLATION',
+            reason: 'FREE_ONLY_COST_VIOLATION',
+          }),
           lastSuccessfulCallAt: success?.completedAt ?? null,
           health: {
-            status:
-              last?.status === 'COMPLETED'
+            status: costViolation
+              ? 'DEGRADED'
+              : last?.status === 'COMPLETED'
                 ? 'NORMAL'
                 : last
                   ? 'DEGRADED'
                   : 'UNKNOWN',
-            code: last?.errorCode ?? null,
+            code: costViolation
+              ? 'FREE_ONLY_COST_VIOLATION'
+              : (last?.errorCode ?? null),
             checkedAt: last?.completedAt ?? null,
           },
         };
@@ -766,6 +801,20 @@ export class ProjectAiService {
             ) SELECT TRUE AS locked FROM quota_lock`,
     );
     const now = new Date();
+    if (
+      'provider' in config &&
+      (await this.costViolation(tx, config.model, config.revision))
+    ) {
+      await tx.chatAiAnswer.update({
+        where: { id },
+        data: {
+          status: 'FAILED',
+          errorCode: 'FREE_ONLY_COST_VIOLATION',
+          completedAt: now,
+        },
+      });
+      return false;
+    }
     const recent =
       'provider' in config
         ? await tx.chatAiAnswer.findFirst({
@@ -948,6 +997,8 @@ export class ProjectAiService {
         let config: ConfiguredModel;
         try {
           config = configuredModel(readAiConfig(), input.model);
+          if (config.provider === 'openrouter')
+            throw new AiError('GENERAL_ONLY');
         } catch (e) {
           throw new ConflictException(
             e instanceof AiError ? e.code : 'INVALID_CONFIG',
@@ -1252,7 +1303,7 @@ export class ProjectAiService {
   private selectedConfig(answer: ChatAiAnswer, requireRevision = true) {
     const pin = requestMetadata(answer.usage);
     if (!pin) return null;
-    const config = configuredModel(readAiConfig(), pin.model);
+    const config = configuredModel(readAiConfig(), pin.model, !requireRevision);
     if (
       config.provider !== pin.provider ||
       (requireRevision &&
@@ -1416,6 +1467,8 @@ export class ProjectAiService {
       if (input.model) {
         try {
           const config = configuredModel(readAiConfig(), input.model);
+          if (config.provider === 'openrouter' && mode !== 'GENERAL')
+            throw new AiError('GENERAL_ONLY');
           if (mode === 'PROJECT')
             assertEgress(
               config,
@@ -1562,7 +1615,9 @@ export class ProjectAiService {
       try {
         const config = this.selectedConfig(
           answer,
-          answer.status !== 'COMPLETED',
+          !['COMPLETED', 'FAILED', 'FAILED_UNKNOWN', 'CANCELLED'].includes(
+            answer.status,
+          ),
         )!;
         assertInput(
           config,
@@ -1652,6 +1707,21 @@ export class ProjectAiService {
         !Array.isArray(answer.usage)
           ? (answer.usage.returnedModel ?? null)
           : null,
+      ...(pin?.provider === 'openrouter' &&
+      answer.usage &&
+      typeof answer.usage === 'object' &&
+      !Array.isArray(answer.usage)
+        ? {
+            gatewayRequestId: answer.usage.gatewayRequestId ?? null,
+            upstreamProvider: answer.usage.upstreamProvider ?? null,
+            cost: answer.usage.cost ?? {
+              status: 'UNKNOWN',
+              value: null,
+              source: null,
+            },
+            catalogueVerifiedAt: answer.usage.catalogueVerifiedAt ?? null,
+          }
+        : {}),
       usage:
         answer.usage &&
         typeof answer.usage === 'object' &&
@@ -2269,6 +2339,11 @@ export class ProjectAiService {
                 visible.status !== 'ACCESS_REVOKED'
               )
                 throw new AiError(visible.status);
+              if (
+                'provider' in config &&
+                (await this.costViolation(tx, config.model, config.revision))
+              )
+                throw new AiError('FREE_ONLY_COST_VIOLATION');
               return (
                 grantId === claimed.grantId && visible.status === 'RUNNING'
               );
@@ -2341,6 +2416,12 @@ export class ProjectAiService {
                     request: pin,
                     tokens: result.usage,
                     returnedModel: result.returnedModel,
+                    ...(pin.provider === 'openrouter' && {
+                      gatewayRequestId: result.gatewayRequestId,
+                      upstreamProvider: result.upstreamProvider,
+                      cost: result.cost,
+                      catalogueVerifiedAt: result.catalogueVerifiedAt,
+                    }),
                     dataPolicyResult: 'ALLOWED',
                     diagnostic,
                   }
@@ -2365,6 +2446,26 @@ export class ProjectAiService {
             : 'PROVIDER_OR_SOURCE_FAILED',
       };
       this.logger.log(JSON.stringify(diagnostic));
+      // A known charge survives a concurrent cancel; preserve the terminal lifecycle status.
+      if (
+        pin?.provider === 'openrouter' &&
+        error instanceof AiError &&
+        error.code === 'FREE_ONLY_COST_VIOLATION' &&
+        error.providerEvidence
+      ) {
+        await this.db.chatAiAnswer.updateMany({
+          where: {
+            id,
+            organizationId: actor.organizationId,
+            projectId,
+            ownerId: actor.userId,
+          },
+          data: {
+            errorCode: error.code,
+            usage: { request: pin, diagnostic, ...error.providerEvidence },
+          },
+        });
+      }
       await this.db.chatAiAnswer.updateMany({
         where: {
           id,
@@ -2381,7 +2482,15 @@ export class ProjectAiService {
               ? error.code
               : 'PROVIDER_OR_SOURCE_FAILED',
           completedAt: new Date(),
-          ...(pin && { usage: { request: pin, diagnostic } }),
+          ...(pin && {
+            usage: {
+              request: pin,
+              diagnostic,
+              ...(error instanceof AiError && error.providerEvidence
+                ? error.providerEvidence
+                : {}),
+            },
+          }),
           // Abort/timeout cannot prove the provider stopped; hold the bounded reservation.
         },
       });

@@ -19,6 +19,8 @@ PROVIDERS = {
     'google_gemini': ('GEMINI_API_KEY', 'generativelanguage.googleapis.com'),
     'mistral': ('MISTRAL_API_KEY', 'api.mistral.ai'),
     'kira': ('KIRA_API_KEY', 'kiraai.vn'),
+    'openrouter': ('OPENROUTER_API_KEY', 'openrouter.ai'),
+    'llama_cloud': ('LLAMA_CLOUD_API_KEY', 'api.cloud.llamaindex.ai'),
 }
 
 def read_private(path, metadata=False):
@@ -32,8 +34,10 @@ def read_private(path, metadata=False):
         with os.fdopen(fd, 'r', closefd=False) as stream:
             raw = stream.read()
             data = json.loads(raw)
-        if not isinstance(data, dict) or set(data) - {'providers', 'credentialSource'} or not isinstance(data.get('providers'), dict):
+        if not isinstance(data, dict) or set(data) - {'providers', 'credentialSource', 'connections'} or not isinstance(data.get('providers'), dict):
             raise ValueError('Cấu hình không hợp lệ; không ghi đè')
+        if 'connections' in data and (not isinstance(data['connections'], dict) or set(data['connections']) - {'llama_cloud'}):
+            raise ValueError('INVALID_CONFIG')
         if 'credentialSource' in data and (not isinstance(data['credentialSource'], dict) or set(data['credentialSource']) != {'mode', 'path'} or data['credentialSource']['mode'] != 'env' or not isinstance(data['credentialSource']['path'], str) or not Path(data['credentialSource']['path']).is_absolute()):
             raise ValueError('INVALID_CREDENTIAL_SOURCE')
         return (data, hashlib.sha256(raw.encode()).hexdigest()) if metadata else data
@@ -139,7 +143,9 @@ def save_provider(path, provider, key, host):
         raise ValueError('Host cấp khóa hoặc giá trị không hợp lệ; không thử gửi khóa')
     pending = {}
     def change(document):
-        providers = document['providers']
+        if provider in ['openrouter', 'llama_cloud'] and not document.get('credentialSource'):
+            raise ValueError('ENV_REQUIRED')
+        providers = document.setdefault('connections', {}) if provider == 'llama_cloud' else document['providers']
         previous = providers.get(provider, {})
         source = document.get('credentialSource')
         if source:
@@ -153,10 +159,14 @@ def save_provider(path, provider, key, host):
             'modelAccessVerified': False, 'textLiveVerified': False,
             'imageLiveVerified': False, 'pdfLiveVerified': False, 'lastTest': 'NOT_RUN', 'tests': [],
             'dataPolicy': 'SYNTHETIC_PUBLIC_APPROVED',
-            'maxRequestsPerDay': None, 'maxConcurrent': 1, 'maxOutputTokens': 8192,
+            'maxRequestsPerDay': None, 'maxConcurrent': 1, 'maxOutputTokens': 2048 if provider == 'openrouter' else 8192,
             'approvedProjects': previous.get('approvedProjects', []),
             'approvedSources': previous.get('approvedSources', []),
         }
+        if provider == 'openrouter':
+            providers[provider]['costMode'] = 'FREE_ONLY'
+        if provider == 'llama_cloud':
+            providers[provider] = {'revision': providers[provider]['revision'], 'category': 'DOCUMENT_KNOWLEDGE', 'enabled': False, 'replacementConfirmed': True}
         if source:
             for key_name, _ in PROVIDERS.values():
                 providers[provider].pop(key_name, None)
@@ -165,7 +175,7 @@ def save_provider(path, provider, key, host):
            after_write=lambda: write_env(pending['path'], pending['keys']) if pending else None)
 
 def valid_evidence(evidence, provider):
-    models = dict(google_gemini='gemini-3.8-flash', mistral='mistral-medium-3-5', kira='kira-3.5-pro')
+    models = dict(google_gemini='gemini-3.8-flash', mistral='mistral-medium-3-5', kira='kira-3.5-pro', openrouter='openrouter/free')
     fields = {'revision', 'provider', 'requestedModel', 'returnedModel', 'capability', 'fixtureVersion', 'testedAt', 'requestId', 'result', 'httpStatus', 'usage'}
     if (not isinstance(evidence, dict) or set(evidence) != fields or
         provider not in models or evidence['provider'] != provider or evidence['requestedModel'] != models[provider] or
@@ -250,7 +260,7 @@ def record_policy(path, provider, expected_digest, event):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['key', 'enable', 'disable', 'approve-source', 'approve-project', 'status', 'record-test', 'record-policy', 'migrate-env'])
+    parser.add_argument('action', choices=['key', 'enable', 'disable', 'pause', 'resume', 'register', 'approve-source', 'approve-project', 'status', 'record-test', 'record-policy', 'migrate-env'])
     parser.add_argument('--provider', choices=PROVIDERS)
     parser.add_argument('--file', type=Path, default=Path(os.environ.get('GALAXY_AI_CONFIG_FILE') or '/home/galaxy_os/.runtime/ai-providers.json'))
     parser.add_argument('--organization')
@@ -271,6 +281,14 @@ def main():
         return
     if not args.provider:
         raise ValueError('Cần provider')
+    if args.action == 'register':
+        if args.provider != 'llama_cloud':
+            raise ValueError('DOCUMENT_CONNECTION_ONLY')
+        def register(document):
+            document.setdefault('connections', {}).setdefault('llama_cloud', {'revision': str(uuid.uuid4()), 'category': 'DOCUMENT_KNOWLEDGE', 'enabled': False, 'replacementConfirmed': False})
+        update(args.file, register, whole_document=True)
+        print('Đã đăng ký kết nối tài liệu; chờ credential, chưa gọi dịch vụ.')
+        return
     if args.action in ['record-test', 'record-policy']:
         payload = json.loads(sys.stdin.read(16385))
         if set(payload) != {'expectedDigest', 'evidence'}:
@@ -298,7 +316,7 @@ def main():
             owner, mode = info.st_uid, oct(stat_module.S_IMODE(info.st_mode))
             data = read_private(args.file)
             schema_valid = True
-            providers = data['providers']
+            providers = data.get('connections', {}) if args.provider == 'llama_cloud' else data['providers']
             state = providers.get(args.provider, {})
             if data.get('credentialSource'):
                 credential_source = 'env'
@@ -307,13 +325,13 @@ def main():
                 if isinstance(state, dict):
                     state = {**{k: v for k, v in state.items() if k not in [p[0] for p in PROVIDERS.values()]}, **({PROVIDERS[args.provider][0]: resolved['keys'][PROVIDERS[args.provider][0]]} if PROVIDERS[args.provider][0] in resolved['keys'] else {})}
             credential_present = isinstance(state, dict) and isinstance(state.get(PROVIDERS[args.provider][0]), str) and bool(state[PROVIDERS[args.provider][0]].strip())
-            allowed_fields = {'revision', 'GEMINI_API_KEY', 'MISTRAL_API_KEY', 'KIRA_API_KEY', 'replacementConfirmed', 'enabled', 'modelAccessVerified', 'textLiveVerified', 'imageLiveVerified', 'pdfLiveVerified', 'lastTest', 'tests', 'dataPolicy', 'maxRequestsPerDay', 'maxConcurrent', 'maxOutputTokens', 'approvedProjects', 'approvedSources', 'approvedInputs', 'policyRevision', 'policyAudit'}
+            allowed_fields = {'revision', 'GEMINI_API_KEY', 'MISTRAL_API_KEY', 'KIRA_API_KEY', 'OPENROUTER_API_KEY', 'LLAMA_CLOUD_API_KEY', 'replacementConfirmed', 'enabled', 'modelAccessVerified', 'textLiveVerified', 'imageLiveVerified', 'pdfLiveVerified', 'lastTest', 'tests', 'dataPolicy', 'maxRequestsPerDay', 'maxConcurrent', 'maxOutputTokens', 'approvedProjects', 'approvedSources', 'approvedInputs', 'policyRevision', 'policyAudit', 'paused', 'costMode', 'category'}
             limits = {'maxRequestsPerDay': (1, 100000, True), 'maxConcurrent': (1, 4, False), 'maxOutputTokens': (256, 65536, False)}
             if not isinstance(state, dict):
                 state, diagnostic = {}, 'INVALID_CONFIG'
             elif (set(state) - allowed_fields or
-                  any(k in state and type(state[k]) is not bool for k in ['enabled', 'replacementConfirmed']) or
-                  (credential_present and not all(k in state for k in ['revision', 'dataPolicy'])) or
+                  any(k in state and type(state[k]) is not bool for k in ['enabled', 'replacementConfirmed', 'paused']) or
+                  (credential_present and not all(k in state for k in (['revision', 'category'] if args.provider == 'llama_cloud' else ['revision', 'dataPolicy']))) or
                   any(k in state and state[k] is not None and type(state[k]) is not int for k in ['maxRequestsPerDay', 'maxConcurrent', 'maxOutputTokens']) or
                   any(k in state and ((state[k] is None and not nullable) or (state[k] is not None and not low <= state[k] <= high)) for k, (low, high, nullable) in limits.items()) or
                   ('revision' in state and (not isinstance(state['revision'], str) or not 1 <= len(state['revision']) <= 100)) or
@@ -323,6 +341,8 @@ def main():
                   not isinstance(state.get('tests', []), list) or
                   len(state.get('tests', [])) > 3 or
                   any(not valid_evidence(t, args.provider) or t['result'] in [state.get(key_name) for key_name, _ in PROVIDERS.values()] for t in state.get('tests', []))):
+                state, diagnostic = {}, 'INVALID_CONFIG'
+            elif (args.provider == 'openrouter' and state.get('costMode') != 'FREE_ONLY') or (args.provider == 'llama_cloud' and (state.get('category') != 'DOCUMENT_KNOWLEDGE' or set(state) - {'revision', 'category', 'enabled', 'replacementConfirmed', 'LLAMA_CLOUD_API_KEY'})):
                 state, diagnostic = {}, 'INVALID_CONFIG'
             elif args.provider not in providers:
                 diagnostic = 'STORE_INVALID_FORMAT' if set(providers) - set(PROVIDERS) else 'PROVIDER_ENTRY_MISSING' if providers else 'EMPTY_STORE'
@@ -342,15 +362,20 @@ def main():
             diagnostic = 'STORE_UNREADABLE' if str(error) == 'STORE_UNREADABLE' else 'STORE_INVALID_FORMAT'
         current_tests = [t for t in state.get('tests', []) if t['revision'] == state.get('revision')]
         tests = [t for t in current_tests if t['result'] == 'PASS']
-        result = {k: state.get(k) for k in ['revision', 'enabled', 'replacementConfirmed', 'dataPolicy', 'maxRequestsPerDay', 'maxConcurrent', 'maxOutputTokens']}
+        result = {k: state.get(k) for k in ['revision', 'enabled', 'paused', 'category', 'costMode', 'replacementConfirmed', 'dataPolicy', 'maxRequestsPerDay', 'maxConcurrent', 'maxOutputTokens']}
         result['credentialSource'] = credential_source
         result.update(storePath=str(args.file), ownerUid=owner, mode=mode, rootSchemaValid=schema_valid, credentialState=diagnostic, configLoaded=schema_valid, credentialPresent=credential_present, credentialConfigured=diagnostic == 'LOADED', modelAccessVerified=bool(tests), textLiveVerified=any(t.get('capability') == 'text' for t in tests), imageLiveVerified=any(t.get('capability') == 'image' for t in tests), pdfLiveVerified=any(t.get('capability') == 'pdf' for t in tests), lastTest=current_tests[-1]['result'] if current_tests else 'NOT_RUN')
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
+    if args.provider == 'llama_cloud':
+        raise ValueError('DOCUMENT_CONNECTION_ONLY')
     def change(providers):
         state = providers.get(args.provider)
         if not state:
             raise ValueError('Chưa nhập khóa thay thế')
+        if args.action in ['pause', 'resume']:
+            state['paused'] = args.action == 'pause'
+            return
         if args.action == 'approve-project':
             if not args.organization or not args.project:
                 raise ValueError('Cần organization/project ID của hồ sơ giả hoặc public-approved')
@@ -373,7 +398,7 @@ if __name__ == '__main__':
     try:
         main()
     except (ValueError, OSError, KeyError, TypeError) as error:
-        if str(error) in ['CONFIG_CHANGED', 'INVALID_EVIDENCE', 'CONFLICT', 'SECRET_FILE_MISSING', 'ENV_NOT_ACTIVE']:
+        if str(error) in ['CONFIG_CHANGED', 'INVALID_EVIDENCE', 'CONFLICT', 'SECRET_FILE_MISSING', 'ENV_NOT_ACTIVE', 'ENV_REQUIRED']:
             print(str(error), file=sys.stderr)
             sys.exit(1)
         print('Không cập nhật: kiểm tra owner/quyền file, host và tham số. Không ghi đè cấu hình lỗi.', file=sys.stderr)

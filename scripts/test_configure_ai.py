@@ -3,6 +3,9 @@ import json
 import hashlib
 import uuid
 import os
+import pty
+import select
+import time
 from pathlib import Path
 import tempfile
 import unittest
@@ -17,6 +20,102 @@ config = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(config)
 
 class SecretConfigTest(unittest.TestCase):
+    def test_new_credentials_are_env_only_and_document_connection_is_not_chat(self):
+        with tempfile.TemporaryDirectory() as root:
+            path, env_path = Path(root) / 'providers.json', Path(root) / 'providers.env'
+            config.save_provider(path, 'kira', 'synthetic-old', 'kiraai.vn')
+            for phase in ['stage', 'activate', 'finalize']:
+                config.migrate_env(path, env_path, Path(root) / 'backup', phase)
+            previous = config.read_private(path)['providers']['kira']
+            config.save_provider(path, 'openrouter', 'synthetic-router', 'openrouter.ai')
+            config.save_provider(path, 'llama_cloud', 'synthetic-llama', 'api.cloud.llamaindex.ai')
+            data = config.read_private(path)
+            self.assertEqual(data['providers']['kira'], previous)
+            self.assertNotIn('llama_cloud', data['providers'])
+            self.assertEqual(data['providers']['openrouter']['costMode'], 'FREE_ONLY')
+            self.assertEqual(data['connections']['llama_cloud']['category'], 'DOCUMENT_KNOWLEDGE')
+            self.assertNotIn('synthetic-', path.read_text())
+            self.assertEqual(config.env_credentials(data['credentialSource'])['keys'], {'KIRA_API_KEY': 'synthetic-old', 'OPENROUTER_API_KEY': 'synthetic-router', 'LLAMA_CLOUD_API_KEY': 'synthetic-llama'})
+            self.assertEqual(env_path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(env_path.stat().st_uid, os.getuid())
+            for provider in ['openrouter', 'llama_cloud']:
+                command = [sys.executable, '-B', str(Path(config.__file__).resolve()), 'status', '--provider', provider, '--file', str(path)]
+                result = subprocess.run(command, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(json.loads(result.stdout)['credentialConfigured'])
+                self.assertNotIn('synthetic-', result.stdout + result.stderr)
+
+    def test_new_provider_without_env_fails_closed_and_pause_preserves_revision(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'providers.json'
+            with self.assertRaisesRegex(ValueError, 'ENV_REQUIRED'):
+                config.save_provider(path, 'openrouter', 'synthetic-router', 'openrouter.ai')
+            config.save_provider(path, 'mistral', 'synthetic-old', 'api.mistral.ai')
+            before = config.read_private(path)['providers']['mistral']
+            command = [sys.executable, '-B', str(Path(config.__file__).resolve()), 'pause', '--provider', 'mistral', '--file', str(path)]
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(config.read_private(path)['providers']['mistral'], {**before, 'paused': True})
+            for provider in ['openrouter', 'llama_cloud']:
+                result = subprocess.run([sys.executable, '-B', str(Path(config.__file__).resolve()), 'key', '--provider', provider, '--file', str(path)], input='synthetic-do-not-read', capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn('synthetic-do-not-read', result.stdout + result.stderr)
+
+    def test_new_key_cli_uses_hidden_terminal_input_without_echo(self):
+        with tempfile.TemporaryDirectory() as root:
+            path, env_path = Path(root) / 'providers.json', Path(root) / 'providers.env'
+            config.save_provider(path, 'kira', 'synthetic-old', 'kiraai.vn')
+            for phase in ['stage', 'activate', 'finalize']:
+                config.migrate_env(path, env_path, Path(root) / 'backup', phase)
+            for provider, secret in [('openrouter', 'fake-hidden-router'), ('llama_cloud', 'fake-hidden-llama')]:
+                pid, fd = pty.fork()
+                if pid == 0:
+                    os.execv(sys.executable, [sys.executable, '-B', str(Path(config.__file__).resolve()), 'key', '--provider', provider, '--file', str(path)])
+                output = b''
+                sent_host = sent_key = False
+                deadline = time.monotonic() + 5
+                try:
+                    while time.monotonic() < deadline:
+                        ready, _, _ = select.select([fd], [], [], 0.1)
+                        if not ready:
+                            continue
+                        try:
+                            part = os.read(fd, 4096)
+                        except OSError:
+                            break
+                        if not part:
+                            break
+                        output += part
+                        text = output.decode(errors='replace')
+                        if 'Nhập lại host' in text and not sent_host:
+                            os.write(fd, (config.PROVIDERS[provider][1] + '\n').encode())
+                            sent_host = True
+                        if '(ẩn):' in text and not sent_key:
+                            os.write(fd, (secret + '\n').encode())
+                            sent_key = True
+                    if not sent_key:
+                        os.kill(pid, 9)
+                    _, status = os.waitpid(pid, 0)
+                    self.assertEqual(os.waitstatus_to_exitcode(status), 0, output.decode(errors='replace'))
+                    self.assertNotIn(secret, output.decode(errors='replace'))
+                    self.assertEqual(config.env_credentials(config.read_private(path)['credentialSource'])['keys'][config.PROVIDERS[provider][0]], secret)
+                finally:
+                    os.close(fd)
+
+    def test_register_document_connection_is_metadata_only_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'providers.json'
+            command = [sys.executable, '-B', str(Path(config.__file__).resolve()), 'register', '--provider', 'llama_cloud', '--file', str(path)]
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = config.read_private(path)
+            self.assertEqual(data['providers'], {})
+            self.assertFalse(data['connections']['llama_cloud']['replacementConfirmed'])
+            before = path.read_bytes()
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(path.read_bytes(), before)
+
     def test_env_migration_preserves_keys_metadata_and_has_no_secret_fallback(self):
         with tempfile.TemporaryDirectory() as root:
             path, env_path = Path(root) / 'providers.json', Path(root) / 'providers.env'
@@ -125,8 +224,8 @@ class SecretConfigTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'providers.json'
             with ThreadPoolExecutor(max_workers=3) as pool:
-                list(pool.map(lambda p: config.save_provider(path, p, 'synthetic-only', config.PROVIDERS[p][1]), config.PROVIDERS))
-            self.assertEqual(set(config.read_private(path)['providers']), set(config.PROVIDERS))
+                list(pool.map(lambda p: config.save_provider(path, p, 'synthetic-only', config.PROVIDERS[p][1]), ['google_gemini', 'mistral', 'kira']))
+            self.assertEqual(set(config.read_private(path)['providers']), set(['google_gemini', 'mistral', 'kira']))
 
     def test_status_never_prints_malformed_metadata_and_distinguishes_unconfirmed_key(self):
         with tempfile.TemporaryDirectory() as root:

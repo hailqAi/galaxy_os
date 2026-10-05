@@ -49,14 +49,49 @@ export const AI_MODELS = [
     outputLimit: 8192,
     nativeMedia: false,
   },
+  {
+    id: 'openrouter/free',
+    provider: 'openrouter',
+    label: 'OpenRouter — Tự chọn model miễn phí',
+    providerLabel: 'OpenRouter',
+    host: 'openrouter.ai',
+    keyName: 'OPENROUTER_API_KEY',
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    reasoning: ['default'],
+    contextLimit: null,
+    outputLimit: 8192,
+    nativeMedia: false,
+  },
 ] as const;
 export type AiProvider = (typeof AI_MODELS)[number]['provider'];
+export type ProviderEvidence = {
+  gatewayRequestId: string | null;
+  upstreamProvider: string | null;
+  returnedModel: string | null;
+  catalogueVerifiedAt: string | null;
+  cost: {
+    status: 'KNOWN' | 'UNKNOWN';
+    value: number | null;
+    source: 'usage.cost' | null;
+    details: Record<string, number | null> | null;
+  };
+};
 export class AiError extends Error {
   constructor(
     readonly code: string,
     readonly httpStatus: number | null = null,
-    readonly upstream: { code?: string; retryAfterMs?: number } = {},
+    readonly upstream: {
+      code?: string;
+      retryAfterMs?: number;
+      limitSource?: 'OPENROUTER' | 'UPSTREAM' | 'UNKNOWN';
+      rateLimit?: {
+        limit: number | null;
+        remaining: number | null;
+        reset: number | null;
+      };
+    } = {},
     readonly adapterStage: string | null = null,
+    readonly providerEvidence: ProviderEvidence | null = null,
   ) {
     super(code);
   }
@@ -64,7 +99,7 @@ export class AiError extends Error {
 export const activationEvidence = z
   .object({
     revision: z.string().min(1).max(100),
-    provider: z.enum(['google_gemini', 'mistral', 'kira']),
+    provider: z.enum(['google_gemini', 'mistral', 'kira', 'openrouter']),
     requestedModel: z.string().max(100),
     returnedModel: z.string().max(200).nullable(),
     capability: z.enum(['text', 'image', 'pdf']),
@@ -89,6 +124,9 @@ const settings = z
     GEMINI_API_KEY: z.string().min(1).max(4096).optional(),
     MISTRAL_API_KEY: z.string().min(1).max(4096).optional(),
     KIRA_API_KEY: z.string().min(1).max(4096).optional(),
+    OPENROUTER_API_KEY: z.string().min(1).max(4096).optional(),
+    costMode: z.literal('FREE_ONLY').optional(),
+    paused: z.boolean().default(false),
     replacementConfirmed: z.boolean().default(false),
     enabled: z.boolean().default(false),
     modelAccessVerified: z.boolean().default(false),
@@ -165,7 +203,12 @@ const settings = z
   .strict()
   .refine(
     (state) =>
-      ![state.GEMINI_API_KEY, state.MISTRAL_API_KEY, state.KIRA_API_KEY].some(
+      ![
+        state.GEMINI_API_KEY,
+        state.MISTRAL_API_KEY,
+        state.KIRA_API_KEY,
+        state.OPENROUTER_API_KEY,
+      ].some(
         (key) =>
           key &&
           [
@@ -177,6 +220,16 @@ const settings = z
   );
 export type AiSettings = z.infer<typeof settings>;
 type ConfigMetadata = {
+  connections?: {
+    llama_cloud?: {
+      category: 'DOCUMENT_KNOWLEDGE';
+      revision: string;
+      enabled: boolean;
+      credentialConfigured: boolean;
+      credentialState: string;
+      status: 'NOT_VERIFIED' | 'CREDENTIAL_PENDING';
+    };
+  };
   credentialSource?: 'json' | 'env';
   loadStatus?: 'LOADED' | 'CREDENTIAL_NOT_LOADED';
   fileDigest?: string;
@@ -224,6 +277,20 @@ export function readAiConfig(
     const root = z
       .object({
         providers: z.record(z.string(), z.unknown()),
+        connections: z
+          .object({
+            llama_cloud: z
+              .object({
+                category: z.literal('DOCUMENT_KNOWLEDGE'),
+                revision: z.string().min(1).max(100),
+                enabled: z.boolean(),
+                replacementConfirmed: z.boolean(),
+              })
+              .strict()
+              .optional(),
+          })
+          .strict()
+          .optional(),
         credentialSource: z
           .object({ mode: z.literal('env'), path: z.string().startsWith('/') })
           .strict()
@@ -246,6 +313,32 @@ export function readAiConfig(
         credentialPresence: { value: {} },
       },
     );
+    const connection = root.data.connections?.llama_cloud;
+    if (connection)
+      result.connections = {
+        llama_cloud: {
+          category: connection.category,
+          revision: connection.revision,
+          enabled: connection.enabled,
+          credentialConfigured: Boolean(
+            secret?.status === 'LOADED' &&
+              secret.keys.LLAMA_CLOUD_API_KEY &&
+              connection.replacementConfirmed,
+          ),
+          credentialState:
+            secret?.status === 'LOADED'
+              ? secret.keys.LLAMA_CLOUD_API_KEY
+                ? 'LOADED'
+                : 'CREDENTIAL_EMPTY'
+              : (secret?.status ?? 'ENV_REQUIRED'),
+          status:
+            secret?.status === 'LOADED' &&
+            secret.keys.LLAMA_CLOUD_API_KEY &&
+            connection.replacementConfirmed
+              ? 'NOT_VERIFIED'
+              : 'CREDENTIAL_PENDING',
+        },
+      };
     const ids = Object.keys(root.data.providers);
     const missingState = ids.some(
       (id) => !AI_MODELS.some((m) => m.provider === id),
@@ -309,6 +402,7 @@ export function readAiConfig(
 export function configuredModel(
   config: Partial<Record<AiProvider, unknown>> & ConfigMetadata,
   id: string,
+  historical = false,
 ) {
   const model = AI_MODELS.find((m) => m.id === id);
   if (!model) throw new AiError('MODEL_NOT_AVAILABLE');
@@ -329,6 +423,12 @@ export function configuredModel(
   const key = state[model.keyName];
   if (!key?.trim() || !state.replacementConfirmed)
     throw new AiError('MISSING_CREDENTIAL');
+  if (
+    model.provider === 'openrouter' &&
+    (state.costMode !== 'FREE_ONLY' || config.credentialSource !== 'env')
+  )
+    throw new AiError('INVALID_CONFIG');
+  if (!historical && state.paused) throw new AiError('PROVIDER_PAUSED');
   if (!state.enabled) throw new AiError('MODEL_DISABLED');
   if (state.maxOutputTokens > model.outputLimit)
     throw new AiError('INVALID_CONFIG');
@@ -336,6 +436,7 @@ export function configuredModel(
     Object.entries(state).filter(
       ([key]) =>
         ![
+          'paused',
           'tests',
           'lastTest',
           'modelAccessVerified',
@@ -432,9 +533,12 @@ export function modelChoices(
       : 'DENIED';
     const reason =
       providerReason ??
+      (model.provider === 'openrouter' ? 'GENERAL_ONLY' : null) ??
       (sourcePolicy === 'DENIED' ? 'EGRESS_POLICY_DENIED' : null);
     return {
       id: model.id,
+      paused: state?.paused ?? false,
+      costMode: state?.costMode ?? null,
       provider: model.provider,
       label: model.label,
       providerLabel: model.providerLabel,
@@ -516,7 +620,7 @@ export type AiContext = z.infer<typeof aiContextSchema>;
 const requestSchema = z.object({
   mode: z.enum(['GENERAL', 'PROJECT']).default('PROJECT'),
   version: z.literal(1),
-  provider: z.enum(['google_gemini', 'mistral', 'kira']),
+  provider: z.enum(['google_gemini', 'mistral', 'kira', 'openrouter']),
   model: z.string(),
   revision: z.string(),
   configDigest: z.string(),

@@ -33,6 +33,14 @@ export const aiSessionKey = (
     context?.fileAssetId ?? null,
     context?.fileVersion ?? null,
   ]);
+type DocumentConnection = {
+  category: string;
+  enabled: boolean;
+  credentialConfigured: boolean;
+  credentialState: string;
+  status: string;
+};
+
 const contextParams = (context?: AiContext) =>
   Object.fromEntries(
     Object.entries(context ?? {}).map(([key, value]) => [key, String(value)]),
@@ -54,6 +62,8 @@ type ModelChoice = {
   host: string;
   available: boolean;
   generalAvailable?: boolean;
+  paused?: boolean;
+  costMode?: string | null;
   health?: {
     status: string;
     code: string | null;
@@ -91,6 +101,7 @@ type Answer = {
   provider?: string | null;
   providerLabel?: string | null;
   returnedModel?: string | null;
+  cost?: { status: string; value: number | null; source: string | null };
   errorCode?: string | null;
   createdAt?: string;
   usage?: { input_tokens: number; output_tokens: number } | null;
@@ -220,6 +231,12 @@ export const aiStatusLabel = (
     CANCELLED: 'Đã hủy',
     FAILED: 'Không thể xử lý yêu cầu',
     FAILED_UNKNOWN: 'Yêu cầu bị gián đoạn. Không tự gọi lại provider.',
+    PROVIDER_PAUSED: 'Nhà cung cấp đang tạm dừng; lịch sử vẫn được giữ.',
+    GENERAL_ONLY: 'Chỉ dùng Hỏi thông thường; không gửi nguồn dự án.',
+    FREE_CATALOGUE_UNVERIFIED:
+      'Chưa xác minh catalogue model miễn phí; chưa gửi câu hỏi.',
+    FREE_ONLY_COST_VIOLATION:
+      'Phát hiện chi phí ngoài 0; đã dừng các lượt tiếp theo.',
     NOT_CONFIGURED: 'Chưa cấu hình API AI hoặc hạn mức',
     NO_SOURCES: 'Chưa có nguồn đã đọc được trong phạm vi của bạn',
     NEEDS_REPORT: 'Câu hỏi tổng hợp cần báo cáo nghiệp vụ đủ dữ liệu',
@@ -275,7 +292,9 @@ export function AiAnswer({
       {answer.model && (
         <p className="chat-metadata">
           {answer.modelLabel ?? answer.model} ·{' '}
-          {answer.providerLabel ?? answer.provider}
+          {answer.provider === 'openrouter'
+            ? `Qua OpenRouter · model thực tế: ${answer.returnedModel ?? 'chưa xác định'}`
+            : (answer.providerLabel ?? answer.provider)}
           {answer.createdAt
             ? ` · ${new Date(answer.createdAt).toLocaleString('vi-VN')}`
             : ''}
@@ -284,7 +303,10 @@ export function AiAnswer({
       {answer.status === 'COMPLETED' && answer.usage && (
         <p className="chat-metadata">
           Token đầu vào: {answer.usage.input_tokens} · đầu ra:{' '}
-          {answer.usage.output_tokens}. Chi phí tiền chưa xác định.
+          {answer.usage.output_tokens}.{' '}
+          {answer.cost?.status === 'KNOWN'
+            ? `Chi phí: ${answer.cost.value} USD (${answer.cost.source}).`
+            : 'Chi phí tiền chưa xác định.'}
         </p>
       )}
       {answer.status === 'COMPLETED' && (
@@ -410,6 +432,9 @@ export function ProjectAi({
   const [reasoning, setReasoning] = useState('default');
   const [pilotConfirmed, setPilotConfirmed] = useState(false);
   const [settings, setSettings] = useState<ModelChoice[]>();
+  const [connections, setConnections] = useState<{
+    llama_cloud?: DocumentConnection;
+  }>({});
   const activationKeys = useRef(new Map<string, string>());
   const [activation, setActivation] = useState<{
     requestId: string;
@@ -425,6 +450,7 @@ export function ProjectAi({
   }>();
   const [sourceIds, setSourceIds] = useState<string[]>([]);
   const modelInitialized = useRef(false);
+  const modelConversation = useRef('');
   const modelStorageKey = `galaxy-ai-model:${actorId}:${projectId}`;
   const chosenModel = choices.find((m) => m.id === model);
   const [list, setList] = useState<Conversation[]>([]);
@@ -588,6 +614,16 @@ export function ProjectAi({
     [onRevoked, setSource, setQuestion, setRetryPin, projectId],
   );
   const select = (id: string) => {
+    if (!id && mode === 'GENERAL') {
+      const router = models.find(
+        (item) => item.id === 'openrouter/free' && item.generalAvailable,
+      );
+      if (router) {
+        setModel(router.id);
+        setReasoning('default');
+      }
+    }
+    modelConversation.current = '';
     scrollPosition.current = { top: 0, nearEnd: true };
     setNewMessages(false);
     drafts.current.set(selectedRef.current, question);
@@ -713,7 +749,24 @@ export function ProjectAi({
         );
         setSelected(id);
         setHistory(detail);
-        if (detail?.answers.length) setMode(detail.mode ?? 'PROJECT');
+        if (detail?.answers.length) {
+          setMode(detail.mode ?? 'PROJECT');
+          if (modelConversation.current !== id) {
+            modelConversation.current = id;
+            const original = detail.answers.at(-1)?.model;
+            if (original) {
+              setModel(original);
+              const choice = result.models?.find(
+                (item) => item.id === original,
+              );
+              setReasoning(
+                choice?.capabilities.reasoningModes.includes('high')
+                  ? 'high'
+                  : 'default',
+              );
+            }
+          }
+        }
         setLoadError('');
         if (selectedSource === sourceKey.current) setSource(currentSource);
         if (selectedScope === indexScope.current && currentIndex)
@@ -1070,6 +1123,16 @@ export function ProjectAi({
                   const draft = question;
                   select('');
                   setMode(next);
+                  if (next === 'GENERAL') {
+                    const router = models.find(
+                      (item) =>
+                        item.id === 'openrouter/free' && item.generalAvailable,
+                    );
+                    if (router) {
+                      setModel(router.id);
+                      setReasoning('default');
+                    }
+                  }
                   setQuestion(draft);
                   setError(
                     'Đã mở ngữ cảnh sạch cho chế độ mới; hội thoại cũ vẫn trong lịch sử.',
@@ -1172,8 +1235,14 @@ export function ProjectAi({
                 onToggle={(event) => {
                   if (!event.currentTarget.open) setSettings(undefined);
                   else
-                    void call<{ models: ModelChoice[] }>('/settings')
-                      .then((result) => setSettings(result.models))
+                    void call<{
+                      models: ModelChoice[];
+                      connections?: { llama_cloud?: DocumentConnection };
+                    }>('/settings')
+                      .then((result) => {
+                        setSettings(result.models);
+                        setConnections(result.connections ?? {});
+                      })
                       .catch((cause) => {
                         setSettings(undefined);
                         setError(
@@ -1191,6 +1260,15 @@ export function ProjectAi({
                   Chỉ hồ sơ và phiên bản nguồn giả/công khai được quản trị duyệt
                   mới được gửi.
                 </p>
+                {connections.llama_cloud && (
+                  <p>
+                    LlamaCloud · kết nối tài liệu/tri thức ·{' '}
+                    {connections.llama_cloud.credentialConfigured
+                      ? 'Đã cấu hình khóa'
+                      : 'Chưa cấu hình khóa'}{' '}
+                    · Chưa kiểm chứng kết nối; chưa xử lý tài liệu.
+                  </p>
+                )}
                 {settings?.map((item) => (
                   <div
                     key={item.id}

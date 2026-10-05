@@ -2,7 +2,13 @@
 
 // Chỉ loader backend/CLI dùng định dạng KEY=JSON_STRING; không source bằng shell.
 const fs = require('node:fs');
-const names = ['GEMINI_API_KEY', 'MISTRAL_API_KEY', 'KIRA_API_KEY'];
+const names = [
+  'GEMINI_API_KEY',
+  'MISTRAL_API_KEY',
+  'KIRA_API_KEY',
+  'OPENROUTER_API_KEY',
+  'LLAMA_CLOUD_API_KEY',
+];
 function readCredentials(source) {
   if (
     !source ||

@@ -266,3 +266,32 @@ it('preserves the answer status label when its detailed error code has no label'
   expect(html).toContain(aiStatusLabel('NO_SOURCES'));
   expect(html).not.toContain('Trạng thái chưa xác định');
 });
+
+it('labels requested OpenRouter separately from actual returned model and sourced zero cost', () => {
+  const html = renderToStaticMarkup(
+    createElement(AiAnswer, {
+      answer: {
+        id: 'router-a',
+        status: 'COMPLETED',
+        mode: 'GENERAL',
+        model: 'openrouter/free',
+        modelLabel: 'OpenRouter — Tự chọn model miễn phí',
+        provider: 'openrouter',
+        returnedModel: 'supplier/actual:free',
+        question: 'Dịch câu.',
+        answer: 'Bản dịch.',
+        sources: [],
+        usage: { input_tokens: 12, output_tokens: 6 },
+        cost: { status: 'KNOWN', value: 0, source: 'usage.cost' },
+      },
+      onSource: () => {},
+      onCancel: () => {},
+      onRun: () => {},
+    }),
+  );
+  expect(html).toContain('Qua OpenRouter');
+  expect(html).toContain('supplier/actual:free');
+  expect(html).toContain('usage.cost');
+  expect(html).not.toContain('Chi phí tiền chưa xác định');
+  expect(aiStatusLabel('PROVIDER_PAUSED')).toContain('tạm dừng');
+});

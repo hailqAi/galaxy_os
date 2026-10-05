@@ -201,7 +201,12 @@ export class ChatAiQuestionDto extends ChatAiContextDto {
   @IsUUID('4', { each: true })
   sourceIds?: string[];
   @IsOptional()
-  @IsIn(['gemini-3.8-flash', 'mistral-medium-3-5', 'kira-3.5-pro'])
+  @IsIn([
+    'gemini-3.8-flash',
+    'mistral-medium-3-5',
+    'kira-3.5-pro',
+    'openrouter/free',
+  ])
   model?: string;
   @IsOptional()
   @IsIn(['default', 'none', 'low', 'medium', 'high'])
@@ -214,7 +219,12 @@ export class ChatAiQuestionDto extends ChatAiContextDto {
 }
 
 export class ChatAiEgressDto {
-  @IsIn(['gemini-3.8-flash', 'mistral-medium-3-5', 'kira-3.5-pro'])
+  @IsIn([
+    'gemini-3.8-flash',
+    'mistral-medium-3-5',
+    'kira-3.5-pro',
+    'openrouter/free',
+  ])
   model!: string;
   @IsIn(['INPUT', 'SOURCE', 'PROJECT']) kind!: 'INPUT' | 'SOURCE' | 'PROJECT';
   @IsIn(['APPROVE', 'REVOKE']) action!: 'APPROVE' | 'REVOKE';
@@ -225,7 +235,12 @@ export class ChatAiEgressDto {
 }
 
 export class ChatAiActivationDto {
-  @IsIn(['gemini-3.8-flash', 'mistral-medium-3-5', 'kira-3.5-pro'])
+  @IsIn([
+    'gemini-3.8-flash',
+    'mistral-medium-3-5',
+    'kira-3.5-pro',
+    'openrouter/free',
+  ])
   model!: string;
   @IsIn(['text', 'image', 'pdf']) capability!: 'text' | 'image' | 'pdf';
   @IsUUID('4') clientKey!: string;
