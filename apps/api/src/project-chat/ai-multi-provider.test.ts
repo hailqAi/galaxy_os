@@ -287,7 +287,10 @@ it('rejects unknown citations and late cancellation even if transport ignores ab
       sources,
       new AbortController().signal,
     ),
-  ).rejects.toThrow('ADAPTER_RESPONSE_ERROR');
+  ).rejects.toMatchObject({
+    code: 'ADAPTER_RESPONSE_ERROR',
+    adapterStage: 'CITATION',
+  });
   const controller = new AbortController();
   vi.stubGlobal(
     'fetch',
@@ -354,4 +357,36 @@ it('phân biệt lỗi DNS/TLS với timeout chưa rõ kết quả', async () =>
       new AbortController().signal,
     ),
   ).rejects.toThrow('NETWORK_OR_TLS');
+});
+
+it('đọc một JSON code fence hoàn chỉnh của Kira nhưng vẫn chặn văn xuôi và citation giả', async () => {
+  for (const [text, valid] of [
+    [`\`\`\`json\n${final}\n\`\`\``, true],
+    [`Giải thích\n\`\`\`json\n${final}\n\`\`\``, false],
+    [`\`\`\`json\n${final.replace('S1', 'FAKE')}\n\`\`\``, false],
+  ] as const) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              model: 'kira-3.5-pro',
+              choices: [{ finish_reason: 'stop', message: { content: text } }],
+            }),
+          ),
+      ),
+    );
+    const result = answerFromProvider(
+      config('kira-3.5-pro'),
+      'Câu hỏi tiếp theo?',
+      sources,
+      new AbortController().signal,
+      { history: [{ question: 'GH-42?', answer: '900mm' }] },
+    );
+    if (valid)
+      await expect(result).resolves.toMatchObject({ citations: ['S1'] });
+    else await expect(result).rejects.toThrow('ADAPTER_RESPONSE_ERROR');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  }
 });

@@ -144,6 +144,14 @@ test('LIVE: text, RAG hai phiên bản, citation Chrome và đổi model có đi
       },
       'authority',
     );
+    await call(
+      `/project-chat/rooms/${fixture.roomId}/grants`,
+      {
+        userId: fixture.users.manager!.id,
+        actions: ['READ', 'SEND', 'UPLOAD', 'DOWNLOAD'],
+      },
+      'manager',
+    );
     const selection = await upload(
       fixture.roomId,
       'xac-nhan-Rev03.txt',
@@ -162,6 +170,14 @@ test('LIVE: text, RAG hai phiên bản, citation Chrome và đổi model có đi
     const privateRoom = await call(
       `/project-chat/projects/${fixture.projectId}/rooms`,
       { title: 'Nguồn riêng fixture', group: 'SUPPLY', audience: 'INTERNAL' },
+      'manager',
+    );
+    await call(
+      `/project-chat/rooms/${privateRoom.id}/grants`,
+      {
+        userId: fixture.users.manager!.id,
+        actions: ['READ', 'SEND', 'UPLOAD', 'DOWNLOAD'],
+      },
       'manager',
     );
     await upload(
@@ -234,7 +250,7 @@ test('LIVE: text, RAG hai phiên bản, citation Chrome và đổi model có đi
     ]);
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto(
-      `/projects/${fixture.projectId}/work?ai=${rag.conversationId}`,
+      `/projects/${fixture.projectId}/ai?ai=${rag.conversationId}`,
     );
     const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
     await expect(panel.getByText(/SYN-OAK-314/).first()).toBeVisible();

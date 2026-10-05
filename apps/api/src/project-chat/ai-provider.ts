@@ -521,8 +521,10 @@ async function answerFromSelectedProvider(
     reader.releaseLock();
   }
   combined.throwIfAborted();
+  let adapterStage = 'ENVELOPE_JSON';
   try {
     const raw: unknown = JSON.parse(Buffer.concat(buffers).toString('utf8'));
+    adapterStage = 'ENVELOPE_SCHEMA';
     let text: string;
     let returnedModel: string | null;
     let usage: {
@@ -614,6 +616,14 @@ async function answerFromSelectedProvider(
           }
         : null;
     }
+    adapterStage = text.trim().startsWith('```')
+      ? 'ANSWER_JSON_FENCED'
+      : 'ANSWER_JSON';
+    const fenced = /^```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```$/i.exec(
+      text.trim(),
+    );
+    const parsed: unknown = JSON.parse(fenced?.[1] ?? text);
+    adapterStage = 'ANSWER_SCHEMA';
     const answer = answerSchema
       .extend({
         citations: z
@@ -621,12 +631,17 @@ async function answerFromSelectedProvider(
           .min(sources.length ? 1 : 0)
           .max(12),
       })
-      .parse(JSON.parse(text));
+      .parse(parsed);
     if (
       new Set(answer.citations).size !== answer.citations.length ||
       answer.citations.some((h) => !sources.some((s) => s.handle === h))
     )
-      throw new AiError('ADAPTER_RESPONSE_ERROR', response.status);
+      throw new AiError(
+        'ADAPTER_RESPONSE_ERROR',
+        response.status,
+        {},
+        'CITATION',
+      );
     combined.throwIfAborted();
     return {
       ...answer,
@@ -637,6 +652,11 @@ async function answerFromSelectedProvider(
     };
   } catch (error) {
     if (error instanceof AiError) throw error;
-    throw new AiError('ADAPTER_RESPONSE_ERROR', response.status);
+    throw new AiError(
+      'ADAPTER_RESPONSE_ERROR',
+      response.status,
+      {},
+      adapterStage,
+    );
   }
 }

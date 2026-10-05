@@ -659,6 +659,7 @@ export class ProjectAiService {
                     'PROVIDER_FORBIDDEN',
                     'NETWORK_OR_TLS',
                     'PROVIDER_TIMEOUT_UNKNOWN',
+                    'ADAPTER_RESPONSE_ERROR',
                   ],
                 },
               },
@@ -2356,6 +2357,7 @@ export class ProjectAiService {
         stage: diagnostic.outbound_attempted
           ? 'DELIVERY_OR_PROVIDER'
           : 'POLICY',
+        adapter_stage: error instanceof AiError ? error.adapterStage : null,
         policy_reason: this.denied(error)
           ? 'ACCESS_REVOKED'
           : error instanceof AiError

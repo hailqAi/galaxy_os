@@ -56,6 +56,7 @@ export class AiError extends Error {
     readonly code: string,
     readonly httpStatus: number | null = null,
     readonly upstream: { code?: string; retryAfterMs?: number } = {},
+    readonly adapterStage: string | null = null,
   ) {
     super(code);
   }
