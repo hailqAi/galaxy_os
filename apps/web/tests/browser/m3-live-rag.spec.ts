@@ -73,7 +73,8 @@ test('LIVE: text, RAG hai phiên bản, citation Chrome và đổi model có đi
     );
     return file.id as string;
   }
-  const general = 'Giải thích phép cộng 2 + 2. Không dùng hồ sơ dự án.';
+  const general =
+    'Tính 2 + 2 và viết kết quả bằng chữ số. Không dùng hồ sơ dự án.';
   const question =
     'FX-RAG-42: mã hoàn thiện đã chốt trong Xác nhận Rev03 là gì, PI Rev02 có mã nào khác?';
   const followup = 'FX-RAG-42: cần đối chiếu gì giữa hai nguồn vừa trả lời?';
