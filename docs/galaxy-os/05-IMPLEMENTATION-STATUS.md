@@ -1,5 +1,10 @@
 # Trạng thái triển khai và điểm tiếp tục
 
+## Env OpenRouter/LlamaCloud — chờ input an toàn 06/10
+
+Đã đối soát nguồn đang dùng: canonical env giữ ba khóa cũ LOADED, hai khóa mới MISSING_LOCAL_SECRET; JSON giữ metadata/policy/evidence, không secret. CLI `setup-missing` đã kiểm nhập ẩn, backup/atomic/CAS và giữ khóa cũ; OpenRouter trước, LlamaCloud bỏ qua được. CLI CODE_SHA=TESTED_SHA `6ffd63614cdec64af11b1958588888db28aeb861`, CLI25/API32 và Astra/Ponytail review PASS.
+**WAITING_FOR_SECURE_INPUT; hai lượt chat OpenRouter chưa chạy.** Runtime giữ `local-fd0f306f0c40`/`dae8e08`, chưa đưa CLI mới vào artifact và không phát hành chẩn đoán chỉ vì thiếu key. Không gọi vendor hoặc đổi env thật; Gemini/Mistral paused, Kira quota giữ, LlamaCloud chưa xử lý tài liệu. [Handoff và một lệnh nhập ẩn](handoffs/2026-10-05-openrouter-general.md).
+
 ## OpenRouter GENERAL — đã phát hành, live chờ credential 05/10
 
 Release `local-fd0f306f0c40`, CODE_SHA=TESTED_SHA `dae8e081810490f53c13ad5010495a280ad9e4f9`; API/Web READY. OpenRouter native adapter FREE_ONLY chỉ `openrouter/free`, GENERAL0source, không paid fallback; IAM/policy giữ nguyên. Credential OpenRouter/LlamaCloud chưa có: **hai lượt OpenRouter UI chưa đạt**, không có returned model/cost live.

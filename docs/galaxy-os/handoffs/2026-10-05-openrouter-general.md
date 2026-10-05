@@ -2,6 +2,18 @@
 
 **Hai lượt chat thật chưa đạt: thiếu credential OpenRouter.** Adapter, guard và UI đã triển khai/phát hành; không lấy dropdown hoặc catalogue làm PASS live.
 
+## Bổ sung env ngày 06/10 — WAITING_FOR_SECURE_INPUT
+
+Đối soát giới hạn canonical env/JSON, private env API/Web đang chạy và tên override của process API: ba khóa cũ PRESENT/LOADED; OpenRouter và LlamaCloud MISSING_LOCAL_SECRET, không có nguồn local hợp lệ để tự chuyển. Không đọc clipboard/history/chat hoặc tìm rộng trên ổ đĩa. Canonical env owner1000/mode0600; JSON có 0 secret, giữ theo quyết định **JSON_RETAINED_METADATA_ONLY** vì registry/activation còn dùng flags, FREE_ONLY, policy, revision và evidence.
+
+CLI CODE_SHA=TESTED_SHA `6ffd63614cdec64af11b1958588888db28aeb861`: chỉ sửa `configure-ai.py` và kiểm thử. `setup-missing` mặc định canonical, OpenRouter lưu/kích hoạt trước LlamaCloud tùy chọn; không hỏi/ghi lại khóa đã có. Backup private `ai-credential-backups` ngoài Git tracking, atomic0600, khóa cập nhật/CAS, candidate được resolver hiện hữu kiểm trước ghi. `activate-existing --provider openrouter` dành cho khóa đã đổi trực tiếp trong env: không nhập lại, giữ policy/evidence và đổi revision để evidence cũ hết hiệu lực. `--file` của CLI cũ vẫn là đường metadata JSON, không phải nơi ghi secret.
+
+Fresh CLI25/25 và API OpenRouter/service/registry32/32 PASS; Astra high correctness/secret review và Ponytail PASS. Bao gồm kích thước env, Unicode, xung đột cập nhật, ký tự đặc biệt, input ẩn/empty/cancel, bảo toàn ba khóa/evidence/policy và rerun idempotent. Không thay adapter/UI/IAM/schema. Root checkout không có helper này; worktree và artifact API đang chạy dùng cùng resolver 5 biến, cùng canonical path; không tạo helper/store thứ hai ở root.
+
+Chrome cùng session: settings200, ai.invoke, ba credential cũ LOADED; OpenRouter PROVIDER_ENTRY_MISSING, LlamaCloud CREDENTIAL_PENDING. Gemini/Mistral vẫn paused, Kira QUOTA_EXHAUSTED. Chưa gọi `/key` hoặc inference/OpenRouter, không gọi ba vendor cũ hay dịch vụ LlamaCloud. GENERAL hai lượt, returned model/cost và reload lịch sử OpenRouter vẫn NOT_RUN. Source count0 mới là contract, chưa có evidence lượt live.
+
+Runtime vẫn `local-fd0f306f0c40` / code `dae8e081810490f53c13ad5010495a280ad9e4f9`; không phát hành/restart bản chẩn đoán chỉ để lặp thiếu key. Loader đọc lại canonical config theo request. CLI mới chạy ở worktree đã kiểm, chưa đưa vào artifact live; release theo pipeline và nghiệm thu main tiếp tục khi có input an toàn. Evidence giới hạn trong `/home/galaxy_os/.runtime/env-activation-20261006/`.
+
 ## Kết quả hiện hành
 
 | Trường                            | Bằng chứng/trạng thái                                                                                                                                                                                       |
@@ -31,13 +43,13 @@
 `localhost:3000` → Chọn dự án để hỏi AI → trang làm việc dự án hiện có → Mở Hỏi AI dự án → Hỏi thông thường → Phiên AI mới → Model AI: **OpenRouter — Tự chọn model miễn phí**.
 Hiện model bị khóa vì credential chưa có. Popup/typography/P04 và hội thoại hiện hữu giữ nguyên; không tạo Project/demo/database khác.
 
-Lệnh đã được kiểm bằng PTY với giá trị giả, không echo input. Chạy ở terminal local tương tác; xác nhận `openrouter.ai`, nhập replacement key ẩn. Không dán key vào chat/argv/pipe/history.
+Lệnh đã được kiểm bằng PTY với giá trị giả, không echo input. Chạy một lần ở terminal local tương tác: nhập OpenRouter trước; LlamaCloud có thể Enter để bỏ qua. CLI hiển thị host, canonical env và vai trò metadata JSON. Không dán key vào chat/argv/pipe/history.
 
 ```bash
-python3 -B /home/galaxy_os/.worktrees/m2-a-20260928/scripts/configure-ai.py key --provider openrouter --file /home/galaxy_os/.runtime/ai-providers.json
+python3 -B /home/galaxy_os/.worktrees/m2-a-20260928/scripts/configure-ai.py setup-missing
 ```
 
-CLI giữ key cũ atomic0600/owner1000, metadata-only JSON; entry mới vẫn disabled. API đọc canonical env ở lượt kế tiếp, không cần restart cho thay file này. Sau khi nhập, bật OpenRouter bằng CLI enable hiện hữu rồi dùng đường UI thường: checkbox công khai/tổng hợp và Phê duyệt nội dung nhập đúng từng câu qua cơ chế INPUT có audit, sau đó Hỏi AI. Không approve Project/source hoặc đổi classification dữ liệu thật.
+CLI giữ key cũ atomic0600/owner1000, metadata-only JSON và kích hoạt OpenRouter FREE_ONLY sau khi lưu; chưa coi credential là live verified. API đọc canonical env ở lượt kế tiếp, không cần restart cho thay file này. Sau khi xác nhận API main đã nạp đúng revision, kiểm `/key` rồi dùng đường UI thường: checkbox công khai/tổng hợp và Phê duyệt nội dung nhập đúng từng câu qua cơ chế INPUT có audit, sau đó Hỏi AI. Không approve Project/source hoặc đổi classification dữ liệu thật.
 
 Câu1: “Dịch sang tiếng Việt: The delivery is scheduled for Monday.”
 Câu2: “Viết lại bản dịch vừa rồi thành một câu nhắn lịch sự cho khách hàng.”
