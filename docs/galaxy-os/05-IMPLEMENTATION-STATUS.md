@@ -1,5 +1,26 @@
 # Trạng thái triển khai và điểm tiếp tục
 
+## OpenRouter GENERAL — đã phát hành, live chờ credential 05/10
+
+Release `local-fd0f306f0c40`, CODE_SHA=TESTED_SHA `dae8e081810490f53c13ad5010495a280ad9e4f9`; API/Web READY. OpenRouter native adapter FREE_ONLY chỉ `openrouter/free`, GENERAL0source, không paid fallback; IAM/policy giữ nguyên. Credential OpenRouter/LlamaCloud chưa có: **hai lượt OpenRouter UI chưa đạt**, không có returned model/cost live.
+Gemini/Mistral paused đúng backend/UI; Kira giữ quota, không gọi lại ba provider cũ. LlamaCloud metadata DOCUMENT_KNOWLEDGE đã đăng ký, CREDENTIAL_PENDING/CONNECTIVITY_NOT_VERIFIED, không xử lý/index/RAG cloud.
+Focused API62/Web13/CLI15, types/lint/build/format và Astra/Ponytail review PASS; Chrome giữ session/lịch sử GENERAL cũ, đúng release,0POST khi reload. Schema/storage/Edge/keeper giữ, không migration hoặc phần ngoài phạm vi.
+[Handoff hiện hành](handoffs/2026-10-05-openrouter-general.md) ghi lệnh nhập key ẩn đã kiểm, evidence và bước nghiệm thu hai lượt còn chờ. Các phần bên dưới là lịch sử, không phải release/provider-state hiện hành.
+
+## Chat API main — nghiệm thu GENERAL 05/10, chưa đạt đủ hai lượt
+
+Release giữ `local-a33d8a12318c`; API/Web cùng artifact/code `3a00f4e`, READY.
+Không sửa product code/key/schema hoặc phát hành mới. Chrome phiên hiện có:
+Kira402/insufficient_quota; Gemini câu1 live200 đã lưu, câu2503×3/68s;
+Mistral429/code1300 không Retry-After, RATE_LIMITED_UNKNOWN. GENERAL0source,
+Project source DENIED; chỉ INPUT đúng câu mẫu được duyệt bằng UI theo owner.
+Mở lại/reload giữ answer/lịch sử, không POST trùng;46test mock mục tiêuPASS.
+**API_CHAT_MAIN: CHƯA DÙNG ĐƯỢC theo nghiệm thu hai lượt thành công**;
+không dùng PASS vendor lịch sử bên dưới thay kết quả mới.
+[Handoff hiện hành](handoffs/2026-10-05-api-chat-main.md) ghi request/model/status/
+answer/evidence và owner action quota Kira, Limits/Usage Mistral,503 Gemini.
+Không tiếp tục RAG/PDF/Figma hoặc các phần khác.
+
 ## AI env/chat/RAG — phát hành local 05/10/2026, có giới hạn vendor
 
 Release `local-a33d8a12318c`, CODE_SHA=TESTED_SHA `3a00f4ed9274fa5d7fb9c47dc3ea2ef3e4eb43c7`;
