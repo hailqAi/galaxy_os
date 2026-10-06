@@ -25,6 +25,7 @@ test.beforeAll(async () => {
         name: 'Đọc UI fixture',
         permissions: {
           create: [
+            'ai.invoke',
             'dashboard.read',
             'project.read',
             'project.create',
@@ -252,7 +253,7 @@ test('P05/P06: cùng ID, drawer, preview/version thật và binary thiếu có t
   });
 });
 
-test('P04/AI01: chat lưu thật, panel thu gọn giữ nháp và dùng cùng lịch sử AI', async ({
+test('P04/AI01: chat người–người giữ lịch sử, AI soạn riêng không tự đăng vào room', async ({
   page,
 }, info) => {
   const cookie = fixture.users.sender!.cookie,
@@ -290,18 +291,28 @@ test('P04/AI01: chat lưu thật, panel thu gọn giữ nháp và dùng cùng l�
       .locator('.chat-message')
       .getByText('Tin fixture cho bản PDF — giữ lịch sử', { exact: true }),
   ).toBeVisible();
-  const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
-  await panel
+  await expect(page.locator('form.ai-composer')).toHaveCount(0);
+  await page
+    .getByRole('button', { name: '✦ Nhờ AI soạn', exact: true })
+    .click();
+  const popup = page.getByRole('dialog', { name: /Galaxy AI/ });
+  await popup
     .getByLabel('Câu hỏi AI', { exact: true })
     .fill('Nháp riêng chưa gửi');
-  await panel.getByRole('button', { name: 'Thu gọn panel AI' }).click();
-  await expect(
-    panel.getByLabel('Câu hỏi AI', { exact: true }),
-  ).not.toBeVisible();
-  await panel.getByRole('button', { name: 'Mở panel AI' }).click();
-  await expect(panel.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue(
+  await popup.getByRole('button', { name: 'Thu nhỏ AI', exact: true }).click();
+  await expect(popup).not.toBeVisible();
+  await page
+    .getByRole('button', { name: '✦ Nhờ AI soạn', exact: true })
+    .click();
+  await expect(popup.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue(
     'Nháp riêng chưa gửi',
   );
+  await expect(
+    page
+      .locator('.chat-message')
+      .getByText('Nháp riêng chưa gửi', { exact: true }),
+  ).toHaveCount(0);
+  await popup.getByRole('button', { name: 'Đóng AI', exact: true }).click();
   await page.screenshot({
     path: info.outputPath('p04-desktop.png'),
     fullPage: true,
@@ -327,11 +338,15 @@ test('P04/AI01: chat lưu thật, panel thu gọn giữ nháp và dùng cùng l�
   });
   await page.goto(`/projects/${fixture.projectId}/ai`);
   await expect(
-    page.getByRole('heading', { name: 'Galaxy AI — Tra cứu toàn dự án' }),
+    page.getByRole('heading', { name: 'Galaxy AI', exact: true }),
   ).toBeVisible();
-  await expect(page.getByLabel('Phạm vi AI', { exact: true })).toHaveValue(
-    'ALL',
-  );
+  await page
+    .getByRole('button', { name: 'Chọn cuộc trao đổi hoặc dự án', exact: true })
+    .click();
+  await expect(
+    page.getByRole('complementary', { name: 'Chọn dự án cho AI' }),
+  ).toBeVisible();
+  await expect(page.getByLabel('Phạm vi AI', { exact: true })).toHaveCount(0);
 });
 
 test('S01: dữ liệu thật, quyền tài chính và bố cục desktop/mobile', async ({
@@ -523,12 +538,10 @@ test('T2 popup giữ nháp qua presentation và header không điều hướng',
   await popup
     .getByLabel('Câu hỏi AI', { exact: true })
     .fill('Nháp RAM riêng toàn dự án');
-  const unavailable = popup
-    .locator('details')
-    .filter({ hasText: 'Model chưa sẵn sàng' });
-  await unavailable.locator('summary').click();
-  await unavailable.locator('summary').press('Escape');
-  await expect(unavailable).not.toHaveAttribute('open', '');
+  const suggestions = popup.locator('details.ai-suggestions');
+  await suggestions.locator('summary').click();
+  await suggestions.locator('summary').press('Escape');
+  await expect(suggestions).not.toHaveAttribute('open', '');
   await expect(popup).toBeVisible();
   await input.press('Escape');
   await expect(popup).not.toBeVisible();
@@ -562,8 +575,13 @@ test('T2 popup giữ nháp qua presentation và header không điều hướng',
       ),
     );
     const route = page.url();
+    if (tab === 'Làm việc')
+      await page.locator('.p04-project-navigation > summary').click();
     await page
-      .getByRole('button', { name: 'Hỏi Galaxy AI', exact: true })
+      .getByRole('button', {
+        name: 'Hỏi Galaxy AI',
+        exact: true,
+      })
       .click();
     await expect(popup.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue(
       'Nháp RAM riêng toàn dự án',

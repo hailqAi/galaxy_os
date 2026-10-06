@@ -130,6 +130,9 @@ test('nút native file, binary riêng, chờ đọc một lần và chat mới t
   await page.goto(`/projects/${projectId}/work?group=COMMERCIAL`);
   const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
   await expect(panel).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Mở Hỏi AI dự án', exact: true }),
+  ).not.toBeVisible();
   await expect(panel.getByText('Chế độ hỏi', { exact: true })).toHaveCount(0);
   await expect(
     panel.getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ }),

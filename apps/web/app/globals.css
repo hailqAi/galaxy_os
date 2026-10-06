@@ -2000,6 +2000,15 @@ td {
 .ai-mobile-back {
   display: none;
 }
+body:has(.p04-workspace .ai-workspace-panel) .ai-launcher-wrap,
+body:has(.p04-direct-workspace) .ai-launcher-wrap {
+  display: none;
+}
+@media (min-width: 640px) {
+  .p04-workspace .p04-columns .room-sidebar {
+    max-height: calc(100dvh - 108px);
+  }
+}
 @media (max-width: 639px) {
   .portal-shell:has(.p04-workspace .ai-workspace-panel) .mobile-topbar,
   .portal-shell:has(.p04-workspace .ai-workspace-panel) .portal-header,
@@ -2008,9 +2017,7 @@ td {
   .p04-direct-workspace .ai-project-list,
   .p04-workspace:has(.ai-workspace-panel) > .p04-project-navigation,
   .p04-workspace:has(.ai-workspace-panel) > details,
-  .p04-workspace:has(.ai-workspace-panel) .p04-columns .room-sidebar,
-  body:has(.p04-workspace .ai-workspace-panel) .ai-launcher-wrap,
-  body:has(.p04-direct-workspace) .ai-launcher-wrap {
+  .p04-workspace:has(.ai-workspace-panel) .p04-columns .room-sidebar {
     display: none;
   }
   .ai-workspace-panel,

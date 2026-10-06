@@ -105,6 +105,10 @@ async function configureProjectPolicy() {
     { mode: 0o600 },
   );
 }
+test.beforeEach(async ({ page }) => {
+  await page.bringToFront();
+});
+
 test.afterAll(async () => {
   await db.$disconnect();
 });
@@ -133,6 +137,16 @@ async function login(page: Page) {
   await page
     .getByRole('button', { name: '＋ Tạo cuộc trao đổi mới', exact: true })
     .click();
+}
+
+async function openProjectPopup(page: Page) {
+  const navigation = page.locator('.p04-project-navigation');
+  if (!(await navigation.evaluate((node) => (node as HTMLDetailsElement).open)))
+    await navigation.locator(':scope > summary').click();
+  await page
+    .getByRole('button', { name: 'Hỏi Galaxy AI', exact: true })
+    .click();
+  await navigation.locator(':scope > summary').click();
 }
 
 test('composer không còn control pilot hoặc cấu hình nhà cung cấp', async ({
@@ -300,9 +314,7 @@ test('private AI uses old sources, persists history and clears revoked derived c
   await panel
     .getByRole('button', { name: '＋ Chat AI mới', exact: true })
     .click();
-  await page
-    .getByRole('button', { name: 'Mở Hỏi AI dự án', exact: true })
-    .click();
+  await openProjectPopup(page);
   // Popup toàn dự án giữ pipeline chung, không có selector mode hoặc scope.
   const projectPopup = page.getByRole('dialog', { name: /Galaxy AI/ });
   await projectPopup
@@ -384,6 +396,7 @@ test('slow denied polling removes old-account answers and drafts', async ({
         nodes.map((node) => (node as HTMLTextAreaElement).value),
       ),
   ).not.toContain('Bản nháp bí mật của tài khoản cũ');
+  await page.unrouteAll({ behavior: 'wait' });
 });
 
 test('switching between AI-enabled actors discards the old private conversation URL', async ({
@@ -665,6 +678,15 @@ for (const lateStatus of [200, 403]) {
       actions: ['INVOKE'],
       roomCeiling: [],
     });
+    // Independent of the earlier revocation journey, including filtered runs.
+    await post(
+      `/rooms/${fixture.roomId}/grants`,
+      {
+        userId: fixture.users.sender!.id,
+        actions: ['READ', 'SEND', 'UPLOAD', 'DOWNLOAD'],
+      },
+      'manager',
+    );
     await post(
       `/rooms/${fixture.roomId}/messages`,
       {
@@ -675,9 +697,7 @@ for (const lateStatus of [200, 403]) {
     );
     await configureProjectPolicy();
     await login(page);
-    await page
-      .getByRole('button', { name: 'Mở Hỏi AI dự án', exact: true })
-      .click();
+    await openProjectPopup(page);
     const popup = page.getByRole('dialog', { name: /Galaxy AI/ });
     let release!: () => void;
     const held = new Promise<void>((resolve) => {
@@ -703,9 +723,7 @@ for (const lateStatus of [200, 403]) {
         .getByRole('link', { name: '← Các dự án được cấp', exact: true })
         .click();
       await page.getByRole('link', { name: b.name, exact: true }).click();
-      await page
-        .getByRole('button', { name: 'Mở Hỏi AI dự án', exact: true })
-        .click();
+      await openProjectPopup(page);
       await expect(popup.getByText(b.name, { exact: true })).toBeVisible();
       const input = popup.getByLabel('Câu hỏi AI', { exact: true });
       await input.fill('Nháp riêng Project B');
@@ -729,9 +747,7 @@ for (const lateStatus of [200, 403]) {
           .getByRole('link', { name: '← Các dự án được cấp', exact: true })
           .click();
         await page.getByRole('link', { name: a.name, exact: true }).click();
-        await page
-          .getByRole('button', { name: 'Mở Hỏi AI dự án', exact: true })
-          .click();
+        await openProjectPopup(page);
         await expect(
           popup.getByRole('heading', { name: question, exact: true }),
         ).toBeVisible();

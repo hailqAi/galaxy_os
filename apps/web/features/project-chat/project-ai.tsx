@@ -1506,13 +1506,6 @@ export function ProjectAi({
         {verified && (workspace || presentation === 'sidebar') && rail}
         {presentation !== 'sidebar' && (
           <div className="ai-session-content" hidden={!verified}>
-            {!workspace && modelControls}
-            {!workspace && (
-              <details className="ai-compact-history">
-                <summary>Nguồn và lịch sử</summary>
-                {rail}
-              </details>
-            )}
             {presentation === 'workspace' && !selected && !started ? (
               <div className="ai-workspace-empty">
                 <span className="ai-empty-symbol" aria-hidden="true">
@@ -1546,6 +1539,13 @@ export function ProjectAi({
                     if (nearEnd) setNewMessages(false);
                   }}
                 >
+                  {!workspace && modelControls}
+                  {!workspace && (
+                    <details className="ai-compact-history">
+                      <summary>Nguồn và lịch sử</summary>
+                      {rail}
+                    </details>
+                  )}
                   {error && <p role="alert">{error}</p>}
                   {loadError && <p role="alert">{loadError}</p>}
                   {context && (
