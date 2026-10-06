@@ -1,4 +1,4 @@
-# Năm PDF và công cụ Project-only — bàn giao đang triển khai
+# Năm PDF và công cụ Project-only — code đã kiểm, main chưa phát hành
 
 Chỉ đạo chủ dự án ngày06/10: T0→T6 INLINE, một người ghi source, review độc lập; cho phép checkpoint/commit local theo scope. Giữ unified chat, không mode/approve/synthetic, không tự bật paid/web/media hoặc sửa env.
 
@@ -56,8 +56,50 @@ Năm mock contract đạt (`/tmp/five-pdf-t5-green4.log`): gate chặn trước 
 
 Nguồn: [Responses function calling](https://developers.openai.com/api/docs/guides/function-calling), [stateless reasoning](https://developers.openai.com/api/docs/guides/migrate-to-responses), [image API](https://developers.openai.com/api/docs/guides/image-generation), [speech to text](https://developers.openai.com/api/docs/guides/speech-to-text), [text to speech](https://developers.openai.com/api/docs/guides/text-to-speech), [data controls](https://developers.openai.com/api/docs/guides/your-data). Không kiểm access tài khoản/chi phí bằng gọi inference trả phí.
 
-## Phần tiếp tục, chưa làm xong
+## T6 — kiểm thử cuối và cutover chưa hoàn tất
 
-T5 paid lifecycle/live còn điều kiện cấu hình và ngân sách như trên; T6 full regression, review và local release/main live. T2 code/fixture như trên; composer vendor/main và PDF hỗn hợp còn chờ nghiệm thu/đọc trang theo công cụ. Web/OpenAI/Tavily/image/audio paid không có cấu hình/ngân sách được bật; live tương ứng NEEDS_PROVIDER_CONFIGURATION_OR_BUDGET, không chặn các task local.
+Code T0–T6 đã commit local, CODE_SHA=TESTED_SHA `0738358ed153195a8b68927945875e703eb3ae41`, TESTED_TREE `f51d35d735efd236ce751f18fdb332f5d7e76892`. Full regression mới đạt API1370/Web567/Edge5/document1; lint/typecheck/format/build và59test scripts đạt. Chrome artifact r2 đạt các hành trình file/artifact, private/revoke/late response và popup viewport; có đối chiếu đủ năm PDF. Không gọi pixel-perfect hoặc keyboard thiết bị thật PASS.
 
-Không sửa credential, database/storage/session/Edge/keeper, không bật public hoặc paid. Không coi fixture/mock hoặc screenshot là vendor/main PASS.
+**Chưa phát hành bản mới lên main.** Candidate `local-a9b073642935` đã build và đối soát production source; main vẫn `local-a0429faf5733`, localhost/LAN `.80:3000` health tốt. Cutover đầu lỗi template unit từ checkout cũ, rollback thành công. Sau lượt `systemd-analyze --user verify`249, socket private đổi inode; nghi liên quan dựa trên timestamp/inode, chưa tái hiện cô lập; user manager còn chạy nhưng không kết nối điều khiển được. Automatic approval review đã từ chối phục hồi D-Bus tạm vì phạm vi user manager vượt hai service app; đang chờ phê duyệt riêng, chưa thực hiện phục hồi. Không bypass, restart manager hay mở app tạm.
+
+DOCX/PNG/XLSX/scan và xuất DOCX/PDF/XLSX đạt code/local/Chrome fixture; vendor/main mới NOT_RUN do cutover chưa xong. Tavily chưa cấu hình/ngân sách; OpenAI image/audio/Responses chỉ wire codec disabled, lifecycle paid chưa nối. Business tool giới hạn kế hoạch Stage2 và quyền trường, không đọc toàn ERP. Giữ env, schema86, storage/session/Edge và public đóng.
+
+### Bằng chứng và định danh
+
+- CODE_SHA / TESTED_SHA: `0738358ed153195a8b68927945875e703eb3ae41`; TESTED_TREE: `f51d35d735efd236ce751f18fdb332f5d7e76892`.
+- Candidate artifact: `.runtime/releases/five-pdfs-project-tools-20261006-r2`, release `local-a9b073642935`, WebBuildId `ZV6DRq7egAZon3Xrl6JKg`. Source snapshot SHA256 `a9b073642935261ebb3604c29789aa29b1d7e583bcef48a191edeab8e3df7142` không phải Git SHA.
+- `code-equivalence-r2.json`:831trackedpaths byte-equal. Hai khác biệt chỉ next-env.d.ts do Next build và browser harness mới chạy từ worktree; production source khớp commit. Snapshot base44d9911/dirty giữ đúng, không sửa thành clean giả.
+- Full `pnpm test` lần cuối exit0: API1370/Web567/Edge5/document1, `/tmp/five-pdf-t6-full-tests2.log`. Lần trước có4timeout5000ms; chẩn đoán riêng rồi full lại khi build/browser ngừng, không nâng timeout chuẩn. Python có một deprecation warning của Starlette/AnyIO.
+- Lint/typecheck/format/build PASS; scripts59PASS (`/tmp/five-pdf-t6-scripts2.log`). API/Web/Edge build artifact r2 PASS (`/tmp/five-pdf-t6-artifact-build2.log`).
+- Chrome r2: popup1/1 browser27; browser29 đạt13, ba lỗi harness sau sửa đạt browser30/31. Tổng các hành trình liên quan đều có lượt PASS mới, không giả một lượt16/16. File composer8cases (unified/native picker +DOCX/XLSX/PNG/scan +3artifact download), cùng lifecycle/ACL/private/history/revoke/late200/403. Log `/tmp/five-pdf-browser{27,29,30,31}.log`.
+- Root cause popup chiều cao thấp: model controls/history nằm ngoài vùng scroll chiếm phần composer; chuyển đúng hai node vào scroll body chỉ trên popup. RED683×384 sendbottom424; GREEN send/textarea đúng vùng trên6viewport, font16/26 và target44px. Không đổi layout workspace năm PDF.
+- Reviewer Astra đã rà policy/ACL/web egress/cost/file/lineage/UX/Ponytail theo từng task. Cutover review phát hiện ownership/rollback/drain đã sửa. Finding đổi runtimeRoot sang canonical đã rút lại sau đọc root entry: **phải giữ old runtimeRoot worktree**, root entry hiện hữu sẽ chuyển tới đó. Không đổi root/controller ngoài phạm vi.
+
+### Sự cố phát hành và bước tiếp tục
+
+Cutover đầu đọc template `/home/galaxy_os/infra` cũ còn `<REPOSITORY_PATH>`, systemd từ chối; script phục hồi units/manifest cũ và readiness đạt. Backup private `rollback-r2` giữ nguyên. Không migration, không sửa credential/policy/Edge. Lần preflight sau dừng trước mutation vì user bus không truy cập được. User manager470 còn chạy và nghe inode cũ; socket private có timestamp đúng lượt verify, đường dẫn trỏ inode mới không listen. API643395/Web643396 cũ vẫn health tốt trên localhost và Chrome LAN; evidence `main-before-release-block.json`. Đây là sự cố bước release, không phải vendor hoặc app regression.
+
+Đã hỏi chủ dự án riêng về phục hồi user manager sau automatic approval rejection. Không tạo unit D-Bus tạm, không thử workaround sau rejection. Kế hoạch reviewer đã rà: ghi PID/READY/hash baseline; tạo cặp socket/service runtime tạm (socket0600, daemon có sẵn); reconnect và xác minh bus owner đúng manager470; gọi Manager.Reexecute, kiểm PID API/Web/Edge không đổi; qua private socket đã hồi phục dừng đúng cặp tạm, xóa đúng file/hash tự tạo rồi reload/kiểm READY. Không restart user hoặc kill app. Kế hoạch này chưa thực thi, còn chờ phê duyệt. Mọi `systemd-analyze --user verify` tiếp theo phải dùng XDG_RUNTIME_DIR riêng, không đụng socket runtime hiện hành. Sau phục hồi: staging lấy template artifact, giữ old runtimeRoot/WorkingDirectory, preflight/ownership/drain/rollback rồi nghiệm thu main. Không đánh dấu T6 complete trước các bước này.
+
+### Capability matrix tại thời điểm bàn giao
+
+| Capability                           | Code/local/mock                                                | Chrome fixture r2                     | Vendor/main mới                          |
+| ------------------------------------ | -------------------------------------------------------------- | ------------------------------------- | ---------------------------------------- |
+| Năm PDF/state                        | Đã triển khai, đối chiếu5ảnh                                   | Đạt desktop/mobile/reflow             | NOT_RUN release mới                      |
+| Project-only/new chat/private/revoke | Đạt DB cô lập, kể cả nguồn artifact/financial                  | Đạt chuyển Project/actor, late200/403 | NOT_RUN mới                              |
+| TXT/MD/PDF text                      | Đạt                                                            | Đạt binary/citation/followup          | Bản cũ PDF live đã đạt; bản mới NOT_RUN  |
+| DOCX                                 | Paragraph/heading/table, image locator                         | Đạt composer/download                 | NOT_RUN                                  |
+| PNG/JPG                              | Binary vision mapping                                          | PNG composer đạt                      | PNG bản cũ API đạt; composer mới NOT_RUN |
+| PDF scan                             | Render tối đa3trang đầu, tool page≤10                          | Đạt composer/locator                  | NOT_RUN                                  |
+| XLSX                                 | Formula/cached/sheet/cell, không recalc                        | Đạt composer                          | NOT_RUN                                  |
+| Search web                           | Tavily adapter/credit/query guard mock                         | Không giả tìm web                     | NEEDS_PROVIDER_CONFIGURATION_OR_BUDGET   |
+| Public URL fetch                     | SSRF/DNS/redirect/MIME/bounds tests đạt                        | UI trạng thái/citation có contract    | NOT_RUN main                             |
+| Calculate/business                   | Decimal; chỉ Stage2 kế hoạch theo quyền trường                 | Contract/fixture                      | NOT_RUN main                             |
+| DOCX/PDF/XLSX output/revision        | Binary thật/local render/readback, lineage/revoke              | 3file card/download đạt               | NOT_RUN                                  |
+| OpenAI Responses/image/audio         | 5mock wire codec, production disabled; paid lifecycle chưa nối | Không nút giả/mic tự ghi              | NEEDS_PROVIDER_CONFIGURATION_OR_BUDGET   |
+
+### Giới hạn chưa khép
+
+Chưa main Chrome/vendor trên release mới, chưa physical mobile keyboard/native browser zoom200/Word desktop. Search hiện chỉ subject công khai quản trị chọn, chưa query web tự do. DOCX image chỉ locator; header/footer/footnote chưa đọc. PDF hỗn hợp mặc định lớp chữ, đọc ảnh theo trang chỉ định; scan không đọc toàn corpus. XLSX output text cells bảo toàn Decimal, không formula engine. Business chưa aggregate toàn bộ nghiệp vụ. OpenAI wire codec chưa thành production lifecycle; không gọi “ChatGPT parity”.
+
+Chỉ khi chủ dự án chọn kết nối mới cần cấu hình quản trị API tương ứng và ngân sách: Tavily cho search; OpenAI cho Responses/image/audio. Không yêu cầu nhập lại OpenRouter, không thêm env/key, không trả phí tự động. Tất cả blocker tách riêng khỏi phần code/local đã đạt.

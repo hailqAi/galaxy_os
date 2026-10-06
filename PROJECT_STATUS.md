@@ -1,10 +1,14 @@
 # Project status
 
-## Năm PDF mới + công cụ Project-only — đang triển khai 06/10
+## Năm PDF mới + công cụ Project-only — code đạt, phát hành đang bị chặn
 
-Đã bảo toàn dirty baseline bằng checkpoint `1df19da106a4b563f3692c480a4cf08f0c7112ab` (base32d62a2), không reset/clean. T1 UI năm PDF đã có code và Chrome fixture9/9; lượt kiểm cuối upload/history/mobile/error1/1, unit27, lint/types/build scoped PASS. T2 đã có DOCX, scan raster và hỏi tiếp ảnh; nhóm AI111/111, Chrome cuối5/5 fixture đạt, review khôngcònblocker T2. T3 tool loop/Decimal/nguồn/XLSX/business Stage2 và web guard đã có code, regression tập trung163/163; review receipt UNKNOWN bổ sung đã đạt. T4 xuất DOCX/PDF/XLSX thật, revision và artifact lineage: API225/Web29, Chrome fixture3/3 đạt; thêm revoke quyền tài chính đạt. Main vẫn `local-a0429faf5733`; chưa phát hành UI/file/tools mới, T5 đã chuẩn bị5 wire-contract mock, media/paid gate vẫn đóng; T6 tiếp tục. Full baseline còn một test M2 vượt5000ms; không gọi full GREEN.
+Code T0–T6 đã commit local, CODE_SHA=TESTED_SHA `0738358ed153195a8b68927945875e703eb3ae41`, TESTED_TREE `f51d35d735efd236ce751f18fdb332f5d7e76892`. Full regression mới đạt API1370/Web567/Edge5/document1; lint/typecheck/format/build và59test scripts đạt. Chrome artifact r2 đạt các hành trình file/artifact, private/revoke/late response và popup viewport; có đối chiếu đủ năm PDF. Không gọi pixel-perfect hoặc keyboard thiết bị thật PASS.
 
-[Handoff đang triển khai](docs/galaxy-os/handoffs/2026-10-06-five-pdfs-project-tools.md) phân biệt Git SHA/snapshot/artifact, manifest/ngoại lệ, review và phần còn thiếu. Các mục dưới là lịch sử.
+**Chưa phát hành bản mới lên main.** Candidate `local-a9b073642935` đã build và đối soát production source; main vẫn `local-a0429faf5733`, localhost/LAN `.80:3000` health tốt. Cutover đầu lỗi template unit từ checkout cũ, rollback thành công. Sau lượt `systemd-analyze --user verify`249, socket private đổi inode; nghi liên quan dựa trên timestamp/inode, chưa tái hiện cô lập; user manager còn chạy nhưng không kết nối điều khiển được. Automatic approval review đã từ chối phục hồi D-Bus tạm vì phạm vi user manager vượt hai service app; đang chờ phê duyệt riêng, chưa thực hiện phục hồi. Không bypass, restart manager hay mở app tạm.
+
+DOCX/PNG/XLSX/scan và xuất DOCX/PDF/XLSX đạt code/local/Chrome fixture; vendor/main mới NOT_RUN do cutover chưa xong. Tavily chưa cấu hình/ngân sách; OpenAI image/audio/Responses chỉ wire codec disabled, lifecycle paid chưa nối. Business tool giới hạn kế hoạch Stage2 và quyền trường, không đọc toàn ERP. Giữ env, schema86, storage/session/Edge và public đóng.
+
+[Handoff và evidence](docs/galaxy-os/handoffs/2026-10-06-five-pdfs-project-tools.md). Các mục dưới là lịch sử.
 
 ## Chat AI thống nhất theo Project — phát hành local 06/10
 

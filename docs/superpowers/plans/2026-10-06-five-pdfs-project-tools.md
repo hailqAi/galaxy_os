@@ -90,7 +90,7 @@
 **Files:** canonical STATUS/PROJECT_STATUS/handoff/manifest; pipeline artifact/systemd sẵn có.
 **Interfaces:** Consumes tested commits/artifact; produces local release + exact CODE_SHA/TESTED_SHA/TESTED_TREE/DOCS_COMMIT_SHA.
 
-- [ ] Full lint/typecheck/test/build/format + focused browser sau cuối code; Expected PASS, từng lỗi ghi riêng.
-- [ ] Independent whole-branch correctness/ACL/egress/cost/UX/Ponytail review, xử lý RED→GREEN các blocker.
+- [x] Full lint/typecheck/test/build/format + focused browser sau cuối code; Expected PASS, từng lỗi ghi riêng.
+- [x] Independent whole-branch correctness/ACL/egress/cost/UX/Ponytail review, xử lý RED→GREEN các blocker.
 - [ ] Build artifact riêng, cutover qua pipeline hiện có; verify localhost và LAN hiện hành, main vendor/source/download, không paid fallback.
-- [ ] Commit docs đúng bằng chứng; bàn giao capability matrix, sai khác PDF, phần live/mock/NOT_RUN và blockers thật.
+- [x] Commit docs đúng bằng chứng (T6 release/main vẫn chưa hoàn tất); bàn giao capability matrix, sai khác PDF, phần live/mock/NOT_RUN và blockers thật.
