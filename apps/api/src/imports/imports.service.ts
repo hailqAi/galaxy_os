@@ -10,7 +10,10 @@ import {
 } from '@nestjs/common';
 import ExcelJS from 'exceljs';
 import { Readable } from 'node:stream';
-import { inflateRawSync } from 'node:zlib';
+import {
+  boundedOfficeParts,
+  maximumExpandedWorkbookBytes,
+} from '../files/office-archive';
 import { Prisma } from '@prisma/client';
 import { CurrentActor } from '../access-control/current-actor';
 import { PrismaService } from '../prisma.service';
@@ -91,8 +94,6 @@ const money = (value: ExcelJS.CellValue) => {
   }
 };
 
-const maximumExpandedWorkbookBytes = 32 * 1024 * 1024;
-const maximumWorkbookEntries = 2048;
 const maximumGenericImportRows = 1000;
 const maximumGenericImportColumns = MAX_IMPORT_MAPPING_ENTRIES;
 const maximumGenericHeaderLength = 100;
@@ -103,12 +104,6 @@ const maximumSerializedRowBytes = 256 * 1024;
 const maximumPersistedImportRowsBytes = maximumExpandedWorkbookBytes;
 const maximumWorkbookCells =
   (maximumGenericImportRows + 1) * maximumGenericImportColumns;
-const zipSignature = {
-  central: 0x02014b50,
-  end: 0x06054b50,
-  local: 0x04034b50,
-} as const;
-
 const columnNumber = (letters: string) =>
   [...letters.toUpperCase()].reduce(
     (value, letter) => value * 26 + letter.charCodeAt(0) - 64,
@@ -206,109 +201,16 @@ function sharedStringSizes(xmlBytes: Buffer) {
 }
 
 export function assertBoundedWorkbook(bytes: Buffer) {
-  if (bytes.length < 22)
-    throw new BadRequestException('Invalid Excel workbook');
-  let end = -1;
-  for (
-    let offset = bytes.length - 22;
-    offset >= Math.max(0, bytes.length - 65_557);
-    offset--
-  )
-    if (
-      bytes.readUInt32LE(offset) === zipSignature.end &&
-      offset + 22 + bytes.readUInt16LE(offset + 20) === bytes.length
-    ) {
-      end = offset;
-      break;
-    }
-  if (end < 0) throw new BadRequestException('Invalid Excel workbook');
-  const entries = bytes.readUInt16LE(end + 10);
-  const centralSize = bytes.readUInt32LE(end + 12);
-  const centralOffset = bytes.readUInt32LE(end + 16);
-  if (
-    bytes.readUInt16LE(end + 4) !== 0 ||
-    bytes.readUInt16LE(end + 6) !== 0 ||
-    bytes.readUInt16LE(end + 8) !== entries ||
-    !entries ||
-    entries > maximumWorkbookEntries ||
-    centralSize > 1024 * 1024 ||
-    centralOffset + centralSize !== end
-  )
-    throw new BadRequestException('Invalid Excel workbook');
-  let cursor = centralOffset;
-  let expanded = 0;
   const sharedStringBytes: number[] = [];
   const worksheets: Buffer[] = [];
-  for (let entry = 0; entry < entries; entry++) {
-    if (
-      cursor + 46 > end ||
-      bytes.readUInt32LE(cursor) !== zipSignature.central
-    )
-      throw new BadRequestException('Invalid Excel workbook');
-    const flags = bytes.readUInt16LE(cursor + 8);
-    const method = bytes.readUInt16LE(cursor + 10);
-    const compressedSize = bytes.readUInt32LE(cursor + 20);
-    const declaredSize = bytes.readUInt32LE(cursor + 24);
-    const nameLength = bytes.readUInt16LE(cursor + 28);
-    const extraLength = bytes.readUInt16LE(cursor + 30);
-    const commentLength = bytes.readUInt16LE(cursor + 32);
-    const disk = bytes.readUInt16LE(cursor + 34);
-    const localOffset = bytes.readUInt32LE(cursor + 42);
-    const entryLength = 46 + nameLength + extraLength + commentLength;
-    const name = bytes
-      .subarray(cursor + 46, cursor + 46 + nameLength)
-      .toString('utf8');
-    if (
-      cursor + entryLength > end ||
-      flags & 1 ||
-      ![0, 8].includes(method) ||
-      disk !== 0 ||
-      compressedSize === 0xffffffff ||
-      declaredSize === 0xffffffff ||
-      declaredSize > maximumExpandedWorkbookBytes ||
-      localOffset + 30 > centralOffset ||
-      bytes.readUInt32LE(localOffset) !== zipSignature.local
-    )
-      throw new BadRequestException(
-        'Workbook expanded data is invalid or too large',
-      );
-    const localNameLength = bytes.readUInt16LE(localOffset + 26);
-    const localExtraLength = bytes.readUInt16LE(localOffset + 28);
-    const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
-    if (dataOffset + compressedSize > centralOffset)
-      throw new BadRequestException('Invalid Excel workbook');
-    try {
-      const content =
-        method === 0
-          ? bytes.subarray(dataOffset, dataOffset + compressedSize)
-          : inflateRawSync(
-              bytes.subarray(dataOffset, dataOffset + compressedSize),
-              {
-                maxOutputLength: maximumExpandedWorkbookBytes - expanded,
-              },
-            );
-      expanded += content.length;
-      if (
-        content.length !== declaredSize ||
-        expanded > maximumExpandedWorkbookBytes
-      )
-        throw new Error('expanded workbook mismatch');
-      if (/^xl\/sharedStrings\.xml$/i.test(name)) {
-        sharedStringBytes.push(...sharedStringSizes(content));
-        if (sharedStringBytes.length > maximumSharedStrings)
-          throw new BadRequestException('Workbook has too many shared strings');
-      } else if (/^xl\/worksheets\/[^/]+\.xml$/i.test(name)) {
-        worksheets.push(content);
-      }
-    } catch (error) {
-      if (error instanceof BadRequestException) throw error;
-      throw new BadRequestException(
-        'Workbook expanded data is invalid or too large',
-      );
-    }
-    cursor += entryLength;
+  for (const [name, content] of boundedOfficeParts(bytes)) {
+    if (/^xl\/sharedStrings\.xml$/i.test(name)) {
+      sharedStringBytes.push(...sharedStringSizes(content));
+      if (sharedStringBytes.length > maximumSharedStrings)
+        throw new BadRequestException('Workbook has too many shared strings');
+    } else if (/^xl\/worksheets\/[^/]+\.xml$/i.test(name))
+      worksheets.push(content);
   }
-  if (cursor !== end) throw new BadRequestException('Invalid Excel workbook');
   let worksheetRows = 0;
   let worksheetCells = 0;
   for (const worksheet of worksheets) {

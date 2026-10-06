@@ -6,6 +6,7 @@ import { chunks, extractText, SourceChunk, TextSource } from './ai-source';
 import { validUploadHeader } from '../uploads/uploads.service';
 import ExcelJS from 'exceljs';
 import { assertBoundedWorkbook } from '../imports/imports.service';
+import { docxMime, docxText } from '../files/office-document';
 
 export const xlsxMime =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -24,6 +25,10 @@ export async function documentText(
 }> {
   if (createHash('sha256').update(bytes).digest('hex') !== checksum)
     throw new AiError('SOURCE_UNAVAILABLE');
+  if (mime === docxMime) {
+    if (!/\.docx$/i.test(name)) throw new AiError('UNSUPPORTED_FILE');
+    return { status: 'READY', text: docxText(bytes) };
+  }
   if (mime === xlsxMime) {
     if (
       !/\.xlsx$/i.test(name) ||
@@ -39,7 +44,7 @@ export async function documentText(
       sheet.eachRow((row) =>
         row.eachCell((cell) => {
           const formula = cell.type === ExcelJS.ValueType.Formula;
-          const line = `${sheet.name}!${cell.address}: ${cell.text}${formula ? ' [giá trị công thức lưu sẵn; không tính lại]' : ''}`;
+          const line = `${sheet.name}!${cell.address}: ${formula && cell.result === undefined ? '[chưa có giá trị lưu sẵn]' : cell.text}${formula ? ` [công thức: ${cell.formula}; giá trị lưu sẵn; không tính lại]` : ''}${cell.numFmt ? ` [định dạng: ${cell.numFmt}]` : ''}`;
           size += Buffer.byteLength(line) + 1;
           if (size > 262_144) throw new AiError('INPUT_TOO_LARGE');
           lines.push(line);
@@ -74,10 +79,13 @@ export async function documentText(
     child.stdin?.end(bytes);
   });
   if (!text.trim())
-    return { status: 'UNSUPPORTED', errorCode: 'PDF_SCAN_UNSUPPORTED' };
+    return { status: 'UNSUPPORTED', errorCode: 'PDF_SCAN_REQUIRES_VISION' };
   const indexed = text.split('\f').flatMap((page, offset) =>
     chunks({ ...source, text: page }).map((chunk) => ({
       ...chunk,
+      text:
+        '[Phạm vi: trích lớp chữ PDF; nội dung nằm trong ảnh chưa được đọc.]\n' +
+        chunk.text,
       page: offset + 1,
       handle:
         'S_' +
@@ -161,4 +169,74 @@ export async function nativeSource(
     metadata.push({ ...locator, page });
   }
   return { chunks: metadata, pages };
+}
+
+export async function scanPages(
+  source: TextSource,
+  name: string,
+  bytes: Buffer,
+  checksum: string,
+  signal?: AbortSignal,
+) {
+  const native = await nativeSource(
+    source,
+    name,
+    'application/pdf',
+    bytes,
+    checksum,
+  );
+  const count = Math.min(native.pages, 3);
+  const selected = native.chunks.slice(0, count).map((chunk) => ({
+    ...chunk,
+    text: `${name} · bản ${source.version} · trang ${chunk.page}. PDF scan: chỉ trang 1–${count}/${native.pages} được gửi ảnh để đọc; không khẳng định đã đọc các trang còn lại.`,
+  }));
+  const media: { handle: string; mime: string; bytes: Buffer }[] = [];
+  let total = 0;
+  for (const chunk of selected) {
+    signal?.throwIfAborted();
+    const image = await new Promise<Buffer>((resolve, reject) => {
+      const child = execFile(
+        join(
+          dirname(process.env.GALAXY_AI_PDFINFO ?? '/usr/bin/pdfinfo'),
+          'pdftoppm',
+        ),
+        [
+          '-f',
+          String(chunk.page),
+          '-l',
+          String(chunk.page),
+          '-singlefile',
+          '-scale-to',
+          '1600',
+          '-png',
+          '-',
+        ],
+        {
+          timeout: 5000,
+          maxBuffer: 3_000_000,
+          encoding: 'buffer',
+          signal,
+          env: {
+            PATH: process.env.PATH,
+            LANG: 'C',
+            ...(process.env.GALAXY_AI_PDF_LIBRARY_PATH
+              ? { LD_LIBRARY_PATH: process.env.GALAXY_AI_PDF_LIBRARY_PATH }
+              : {}),
+          },
+        },
+        (error, stdout) =>
+          error
+            ? reject(new AiError('PDF_RENDER_UNAVAILABLE'))
+            : resolve(stdout),
+      );
+      child.stdin?.on('error', () => {});
+      child.stdin?.end(bytes);
+    });
+    total += image.length;
+    if (total > 8_000_000) throw new AiError('INPUT_TOO_LARGE');
+    if (!validUploadHeader('.png', image))
+      throw new AiError('PDF_RENDER_UNAVAILABLE');
+    media.push({ handle: chunk.handle, mime: 'image/png', bytes: image });
+  }
+  return { pages: native.pages, chunks: selected, media };
 }

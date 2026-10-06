@@ -25,6 +25,7 @@ import { FileStorage } from './file-storage';
 import { safeFilename } from './filename';
 import { hiddenProjectFileIds } from './project-file';
 import { assertBoundedWorkbook } from '../imports/imports.service';
+import { docxMime, docxParts } from './office-document';
 import {
   assertFileCapacity,
   fileStorageReservationExpiry,
@@ -37,6 +38,7 @@ const allowed = new Map([
   ['image/jpeg', '.jpg'],
   ['application/pdf', '.pdf'],
   ['text/plain', '.txt'],
+  [docxMime, '.docx'],
   [
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     '.xlsx',
@@ -291,11 +293,15 @@ export class FilesService {
     const original = safeFilename(file.originalname);
     if (!original) throw new BadRequestException('Invalid filename');
     const xlsx = aiContext && extname(original).toLowerCase() === '.xlsx';
+    const docx = aiContext && extname(original).toLowerCase() === '.docx';
+    if (docx) docxParts(file.buffer);
     if (xlsx && (file.size > 5_000_000 || !assertBoundedWorkbook(file.buffer)))
       throw new BadRequestException('Tệp XLSX không hợp lệ hoặc quá lớn');
-    const detected = xlsx
-      ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      : this.detect(file.buffer);
+    const detected = docx
+      ? docxMime
+      : xlsx
+        ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        : this.detect(file.buffer);
     if (
       !detected ||
       (detected !== file.mimetype &&

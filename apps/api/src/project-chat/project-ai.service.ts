@@ -12,7 +12,13 @@ import { projectWhereForPermissions } from '../access-control/business-entity.po
 import { CurrentActor } from '../access-control/current-actor';
 import { ProjectChatPolicy } from '../access-control/project-chat.policy';
 import { PrismaService } from '../prisma.service';
-import { nativeSource, documentText, xlsxMime } from './ai-native-source';
+import {
+  nativeSource,
+  documentText,
+  scanPages,
+  xlsxMime,
+} from './ai-native-source';
+import { docxMime } from '../files/office-document';
 import { ProviderConfig, answerFromProvider } from './ai-provider';
 import {
   AiError,
@@ -575,6 +581,48 @@ export class ProjectAiService {
               }
             }
           }
+        // Upgrade only formats newly supported by this reader, under the same source ACL/version.
+        const legacy = await tx.chatAiSourceIndex.findMany({
+          where: {
+            AND: [
+              where,
+              {
+                status: 'UNSUPPORTED',
+                OR: [
+                  {
+                    label: { endsWith: '.docx', mode: 'insensitive' },
+                    errorCode: null,
+                  },
+                  { errorCode: 'PDF_SCAN_UNSUPPORTED' },
+                ],
+              },
+            ],
+          },
+          take: 25,
+        });
+        for (const row of legacy) {
+          try {
+            const source = await this.checkSource(tx, actor, projectId, row);
+            if (
+              source.mime !== docxMime &&
+              !(
+                source.mime === 'application/pdf' &&
+                row.errorCode === 'PDF_SCAN_UNSUPPORTED'
+              )
+            )
+              continue;
+            await tx.chatAiSourceIndex.updateMany({
+              where: {
+                id: row.id,
+                status: 'UNSUPPORTED',
+                errorCode: row.errorCode,
+              },
+              data: { status: 'QUEUED', attempts: 0, errorCode: null },
+            });
+          } catch (error) {
+            if (!this.denied(error)) throw error;
+          }
+        }
         const now = new Date();
         await tx.chatAiSourceIndex.updateMany({
           where: {
@@ -645,7 +693,7 @@ export class ProjectAiService {
           result = { status: 'READY', text: source.text };
         else if (
           source.bytes >
-          (['application/pdf', xlsxMime].includes(source.mime)
+          (['application/pdf', xlsxMime, docxMime].includes(source.mime)
             ? 8_000_000
             : 262_144)
         )
@@ -655,7 +703,7 @@ export class ProjectAiService {
           if (
             result.status === 'READY' ||
             (result.status !== 'FORBIDDEN' &&
-              ['application/pdf', xlsxMime].includes(source.mime))
+              ['application/pdf', xlsxMime, docxMime].includes(source.mime))
           ) {
             const stream = await this.storage.stream(source.storageKey!);
             const buffers: Buffer[] = [];
@@ -666,7 +714,7 @@ export class ProjectAiService {
                 size += bytes.length;
                 if (
                   size >
-                  (['application/pdf', xlsxMime].includes(source.mime)
+                  (['application/pdf', xlsxMime, docxMime].includes(source.mime)
                     ? 8_000_000
                     : 262_144)
                 )
@@ -722,7 +770,9 @@ export class ProjectAiService {
                   version: row.version,
                   text: result.text!,
                 }))
-              : [];
+              : result.errorCode === 'PDF_SCAN_REQUIRES_VISION'
+                ? (row.chunks as unknown as SourceChunk[])
+                : [];
           await tx.chatAiSourceIndex.updateMany({
             where: {
               id: row.id,
@@ -2167,13 +2217,43 @@ export class ProjectAiService {
     projectId: string,
     answer: ChatAiAnswer,
     scope: string,
+    signal: AbortSignal,
   ) {
     const pin = requestMetadata(answer.usage);
-    const result: { index: ChatAiSourceIndex; mime: string; bytes: Buffer }[] =
-      [];
-    if (!pin?.sourceIds.length) return result;
+    const result: {
+      index: ChatAiSourceIndex;
+      mime: string;
+      bytes: Buffer;
+      handle?: string;
+      selectedChunks?: SourceChunk[];
+    }[] = [];
+    if (!pin) return result;
+    const sourceIds = [...pin.sourceIds];
+    if (!sourceIds.length) {
+      const previous = await this.authorized(actor, projectId, async (tx) => {
+        const prior = await tx.chatAiAnswer.findFirst({
+          where: {
+            organizationId: actor.organizationId,
+            projectId,
+            ownerId: actor.userId,
+            conversationId: answer.conversationId,
+            status: 'COMPLETED',
+            createdAt: { lt: answer.createdAt },
+          },
+          orderBy: { createdAt: 'desc' },
+          include: { dependencies: { include: { source: true } } },
+        });
+        return (
+          prior?.dependencies
+            .filter((d) => /\.(png|jpe?g|pdf)$/i.test(d.source.label))
+            .map((d) => d.source.id) ?? []
+        );
+      });
+      sourceIds.push(...previous.slice(0, 3));
+    }
     const config = this.selectedConfig(answer)!;
-    for (const id of pin.sourceIds) {
+    for (const id of sourceIds) {
+      signal.throwIfAborted();
       const checked = await this.authorized(actor, projectId, async (tx) => {
         const index = await tx.chatAiSourceIndex.findFirst({
           where: {
@@ -2196,7 +2276,8 @@ export class ProjectAiService {
           return { index, source, textOnly: true };
         if (!config.nativeMedia) throw new AiError('UNSUPPORTED_FILE');
         if (
-          source.mime === 'application/pdf'
+          source.mime === 'application/pdf' &&
+          index.errorCode !== 'PDF_SCAN_REQUIRES_VISION'
             ? !config.pdfLiveVerified
             : !config.imageLiveVerified
         )
@@ -2233,36 +2314,66 @@ export class ProjectAiService {
         if (error instanceof AiError) throw error;
         throw new AiError('MISSING_BINARY');
       }
-      const native = await nativeSource(
-        {
-          organizationId: actor.organizationId,
-          projectId,
-          roomId: checked.index.roomId,
-          sourceId:
-            checked.index.chatFileId ??
-            checked.index.releaseId ??
-            checked.index.fileAssetId ??
-            checked.index.projectFileAssetId!,
-          version: checked.index.version,
-          text: '',
-        },
-        checked.source.name,
-        checked.source.mime,
-        bytes,
-        checked.source.checksum!,
-      );
+      const textSource = {
+        organizationId: actor.organizationId,
+        projectId,
+        roomId: checked.index.roomId,
+        sourceId:
+          checked.index.chatFileId ??
+          checked.index.releaseId ??
+          checked.index.fileAssetId ??
+          checked.index.projectFileAssetId!,
+        version: checked.index.version,
+        text: '',
+      };
+      const rendered =
+        checked.index.errorCode === 'PDF_SCAN_REQUIRES_VISION'
+          ? await scanPages(
+              textSource,
+              checked.source.name,
+              bytes,
+              checked.source.checksum!,
+              signal,
+            )
+          : undefined;
+      const native =
+        rendered ??
+        (await nativeSource(
+          textSource,
+          checked.source.name,
+          checked.source.mime,
+          bytes,
+          checked.source.checksum!,
+        ));
       const index = await this.authorized(actor, projectId, async (tx) => {
         this.selectedConfig(answer);
         await this.checkSource(tx, actor, projectId, checked.index);
         return tx.chatAiSourceIndex.update({
           where: { id: checked.index.id },
           data: {
-            chunks: native.chunks as unknown as Prisma.InputJsonValue,
+            chunks: [
+              ...native.chunks,
+              ...(
+                (checked.index.chunks ?? []) as unknown as SourceChunk[]
+              ).filter(
+                (c) => !native.chunks.some((n) => n.handle === c.handle),
+              ),
+            ] as unknown as Prisma.InputJsonValue,
             checksum: checked.source.checksum,
           },
         });
       });
-      result.push({ index, mime: checked.source.mime, bytes });
+      if (rendered)
+        result.push(
+          ...rendered.media.map((page) => ({
+            index,
+            selectedChunks: rendered.chunks,
+            ...page,
+          })),
+        );
+      else result.push({ index, mime: checked.source.mime, bytes });
+      if (result.reduce((sum, item) => sum + item.bytes.length, 0) > 8_000_000)
+        throw new AiError('INPUT_TOO_LARGE');
     }
     return result;
   }
@@ -2394,6 +2505,7 @@ export class ProjectAiService {
               projectId,
               claimed.answer,
               pin?.mode === 'UNIFIED' ? 'ALL' : claimed.scope,
+              controller.signal,
             );
       const context = await this.authorized(
         actor,
@@ -2599,7 +2711,9 @@ export class ProjectAiService {
             await this.checkSource(tx, actor, projectId, item.index);
             if (!readable.some((s) => s.id === item.index.id))
               readable.push(item.index);
-            const explicit = item.index.chunks as unknown as SourceChunk[];
+            const explicit =
+              item.selectedChunks ??
+              (item.index.chunks as unknown as SourceChunk[]);
             selected = [
               ...explicit,
               ...selected.filter(
@@ -2764,8 +2878,9 @@ export class ProjectAiService {
             media: native
               .filter((item) => item.bytes.length)
               .map((item) => ({
-                handle: (item.index.chunks as unknown as SourceChunk[])[0]!
-                  .handle,
+                handle:
+                  item.handle ??
+                  (item.index.chunks as unknown as SourceChunk[])[0]!.handle,
                 mime: item.mime,
                 bytes: item.bytes,
               })),

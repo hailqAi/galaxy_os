@@ -1,5 +1,11 @@
 import { expect } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
+import {
+  docxFixture,
+  scanPdfFixture,
+  xlsxFixture,
+} from '../../../api/test/document-fixtures';
+import { activationFixture } from '../../../api/src/project-chat/ai-activation';
 import { randomUUID } from 'node:crypto';
 import { test } from './m2-chrome-fixture';
 import {
@@ -72,6 +78,21 @@ test.beforeAll(async () => {
       providers: {
         openrouter: {
           revision: 'browser-unified-r1',
+          tests: [
+            {
+              revision: 'browser-unified-r1',
+              provider: 'openrouter',
+              requestedModel: 'openrouter/free',
+              returnedModel: 'fixture/free:free',
+              capability: 'image',
+              fixtureVersion: 'galaxy-ai-activation-v1',
+              testedAt: new Date().toISOString(),
+              requestId: randomUUID(),
+              result: 'PASS',
+              httpStatus: 200,
+              usage: null,
+            },
+          ],
           enabled: true,
           replacementConfirmed: true,
           costMode: 'FREE_ONLY',
@@ -310,3 +331,110 @@ test('nút native file, binary riêng, chờ đọc một lần và chat mới t
     fullPage: true,
   });
 });
+
+for (const kind of ['docx', 'xlsx', 'png', 'scan'] as const)
+  test(`composer ${kind}: chọn file, đọc, trả lời, mở đúng binary và hỏi tiếp`, async ({
+    page,
+  }) => {
+    const cookie = fixture.users.sender!.cookie,
+      separator = cookie.indexOf('=');
+    await page.context().addCookies([
+      {
+        name: cookie.slice(0, separator),
+        value: cookie.slice(separator + 1),
+        url: process.env.APP_PUBLIC_ORIGIN!,
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Lax',
+      },
+    ]);
+    await page.goto(`/projects/${projectId}/work?group=COMMERCIAL`);
+    await page.bringToFront();
+    const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
+    await panel
+      .getByRole('button', { name: '＋ Tạo cuộc trao đổi mới', exact: true })
+      .click();
+    const bytes =
+      kind === 'docx'
+        ? await docxFixture()
+        : kind === 'xlsx'
+          ? await xlsxFixture()
+          : kind === 'scan'
+            ? scanPdfFixture(2)
+            : activationFixture('image').media[0]!.bytes;
+    const filename = `Kiem-chung-${kind}.${kind === 'scan' ? 'pdf' : kind}`;
+    const mime =
+      kind === 'docx'
+        ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        : kind === 'xlsx'
+          ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          : kind === 'scan'
+            ? 'application/pdf'
+            : 'image/png';
+    const saved = page.waitForResponse(
+      (r) =>
+        /\/ai\/conversations\/[^/]+\/files$/.test(r.url()) &&
+        r.request().method() === 'POST',
+    );
+    await panel
+      .getByRole('button', { name: 'Đính kèm tệp', exact: true })
+      .click();
+    const picker = page.waitForEvent('filechooser');
+    await panel
+      .getByRole('button', { name: 'Tải tệp từ máy', exact: true })
+      .click();
+    const native = await picker;
+    expect(await native.element().getAttribute('accept')).toContain('.docx');
+    await native.setFiles({ name: filename, mimeType: mime, buffer: bytes });
+    const response = await saved;
+    expect(response.status()).toBe(201);
+    const file = await response.json();
+    await expect(panel.getByText(/Sẵn sàng/).first()).toBeVisible();
+    const input = panel.getByLabel('Câu hỏi AI', { exact: true });
+    await input.fill('Đọc nội dung và cho biết nguồn trong tệp.');
+    await panel.getByRole('button', { name: 'Gửi', exact: true }).click();
+    await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
+    const downloaded = await page.request.get(
+      `/api/v1/project-chat/projects/${projectId}/ai/files/${file.id}/download`,
+      { headers: { 'X-Chat-Actor': fixture.users.sender!.id } },
+    );
+    expect(downloaded.status()).toBe(200);
+    expect(await downloaded.body()).toEqual(bytes);
+    const conversation = new URL(page.url()).searchParams.get('ai');
+    const answer = await db.chatAiAnswer.findFirstOrThrow({
+      where: { conversationId: conversation!, status: 'COMPLETED' },
+      include: { dependencies: true },
+    });
+    expect(answer.dependencies.some((d) => d.sourceIndexId === file.id)).toBe(
+      true,
+    );
+    if (kind === 'docx') expect(answer.answer).toContain('DOC-842');
+    if (kind === 'xlsx') expect(answer.answer).toContain('Đối chiếu!B2: 42');
+    await input.fill('Cái đó có điểm gì cần lưu ý?');
+    await panel.getByRole('button', { name: 'Gửi', exact: true }).click();
+    await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toHaveCount(2);
+    expect(
+      await db.fileAsset.count({
+        where: {
+          attachments: {
+            some: { entityId: conversation!, entityType: 'ChatAiConversation' },
+          },
+        },
+      }),
+    ).toBe(1);
+    if (kind === 'scan') {
+      await panel
+        .getByRole('button', { name: 'Đính kèm tệp', exact: true })
+        .click();
+      await panel
+        .getByRole('button', { name: 'Chọn trong hồ sơ dự án', exact: true })
+        .click();
+      await expect(
+        panel.getByRole('checkbox', { name: `Chọn ${filename}`, exact: true }),
+      ).toBeEnabled();
+    }
+    await page.screenshot({
+      path: `/home/galaxy_os/.runtime/five-pdfs-20261006/composer-${kind}.png`,
+      fullPage: true,
+    });
+  });

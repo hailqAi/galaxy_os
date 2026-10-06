@@ -6,6 +6,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { nativeSource } from '../src/project-chat/ai-native-source';
+import { activationFixture } from '../src/project-chat/ai-activation';
 import { AI_MODELS } from '../src/project-chat/ai-registry';
 import { chunks } from '../src/project-chat/ai-source';
 import request from 'supertest';
@@ -25,6 +27,7 @@ import { providerConfig } from '../src/project-chat/ai-provider';
 import { SearchController } from '../src/search/search.controller';
 import { CurrentActor } from '../src/access-control/current-actor';
 import { FileStorage } from '../src/files/file-storage';
+import { docxFixture, scanPdfFixture } from './document-fixtures';
 
 const isolated = assertG00Isolation();
 describe.sequential(
@@ -179,8 +182,7 @@ describe.sequential(
       };
       return { projectId, code, admin, rooms, post, get, ask };
     }
-    it('unified: câu mới không room, mode hoặc approval; file riêng theo Project, binary và chat mới', async () => {
-      const scenario = await aiScenario(0);
+    function unifiedProvider(image = false) {
       const dir = mkdtempSync(join(tmpdir(), 'm3-unified-'));
       const path = join(dir, 'providers.json'),
         envPath = join(dir, 'keys.env');
@@ -194,6 +196,23 @@ describe.sequential(
           providers: {
             openrouter: {
               revision: 'unified-1',
+              tests: image
+                ? [
+                    {
+                      revision: 'unified-1',
+                      provider: 'openrouter',
+                      requestedModel: 'openrouter/free',
+                      returnedModel: 'fixture/free:free',
+                      capability: 'image',
+                      fixtureVersion: 'galaxy-ai-activation-v1',
+                      testedAt: new Date().toISOString(),
+                      requestId: randomUUID(),
+                      result: 'PASS',
+                      httpStatus: 200,
+                      usage: null,
+                    },
+                  ]
+                : [],
               enabled: true,
               replacementConfirmed: true,
               costMode: 'FREE_ONLY',
@@ -233,7 +252,9 @@ describe.sequential(
         const content = body.messages.at(-1).content;
         let sources: { handle: string; text: string }[] = [];
         try {
-          sources = JSON.parse(content).sources ?? [];
+          sources =
+            JSON.parse(Array.isArray(content) ? content[0].text : content)
+              .sources ?? [];
         } catch {
           /* Câu trực tiếp. */
         }
@@ -258,6 +279,11 @@ describe.sequential(
           }),
         );
       });
+      return { dir, payloads };
+    }
+    it('unified: câu mới không room, mode hoặc approval; file riêng theo Project, binary và chat mới', async () => {
+      const scenario = await aiScenario(0);
+      const { dir, payloads } = unifiedProvider();
       try {
         const conversation = await scenario
           .post('/conversations', {
@@ -558,6 +584,205 @@ describe.sequential(
         rmSync(dir, { recursive: true, force: true });
       }
     });
+    it('DOCX: upload riêng, index bảng, citation và retry không nhân binary', async () => {
+      const scenario = await aiScenario(0);
+      const { dir, payloads } = unifiedProvider();
+      try {
+        const conversation = await scenario
+          .post('/conversations', {
+            scope: 'ALL',
+            clientKey: randomUUID(),
+          })
+          .expect(201);
+        const foreign = await aiScenario(0);
+        const docxBytes = await docxFixture();
+        const docxKey = randomUUID();
+        const uploadDocx = () =>
+          request(app.getHttpServer())
+            .post(
+              `/api/v1/project-chat/projects/${scenario.projectId}/ai/conversations/${conversation.body.id}/files`,
+            )
+            .set('Cookie', users.owner!.cookie)
+            .set('X-Chat-Actor', users.owner!.id)
+            .field('clientKey', docxKey)
+            .attach('file', docxBytes, {
+              filename: 'Dieu-khoan.docx',
+              contentType:
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            });
+        const word = (await uploadDocx().expect(201)).body;
+        expect((await uploadDocx().expect(201)).body.id).toBe(word.id);
+        await db.chatAiSourceIndex.update({
+          where: { id: word.id },
+          data: { status: 'UNSUPPORTED', errorCode: null, attempts: 3 },
+        });
+        await scenario.post('/index', { scope: 'ALL' }).expect(201);
+        const wordQuestion = (
+          await scenario
+            .post(`/conversations/${conversation.body.id}/answers`, {
+              clientKey: randomUUID(),
+              question: 'DOC-842 ở ô nào?',
+              sourceIds: [word.id],
+            })
+            .expect(201)
+        ).body;
+        const wordAnswer = (
+          await scenario.post(`/answers/${wordQuestion.id}/run`, {}).expect(201)
+        ).body;
+        expect(wordAnswer.status).toBe('COMPLETED');
+        expect(payloads.at(-1)).toContain('[Bảng 1 · hàng 1 · ô 2] DOC-842');
+        expect(
+          wordAnswer.sources.some(
+            (s: { label: string }) => s.label === 'Dieu-khoan.docx',
+          ),
+        ).toBe(true);
+        await foreign.get(`/files/${word.id}/download`).expect(404);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+    it.each(['png', 'scan'] as const)(
+      'ảnh %s: bytes qua OpenRouter, hỏi tiếp không upload và revoke chặn lịch sử',
+      async (kind) => {
+        const scenario = await aiScenario(0);
+        const { dir, payloads } = unifiedProvider(true);
+        try {
+          const conversation = await scenario
+            .post('/conversations', { scope: 'ALL', clientKey: randomUUID() })
+            .expect(201);
+          await request(app.getHttpServer())
+            .post(
+              `/api/v1/project-chat/projects/${scenario.projectId}/ai/conversations/${conversation.body.id}/files`,
+            )
+            .set('Cookie', users.owner!.cookie)
+            .set('X-Chat-Actor', users.owner!.id)
+            .field('clientKey', randomUUID())
+            .attach('file', Buffer.from('DECOY-Z198'), {
+              filename: 'Cu.txt',
+              contentType: 'text/plain',
+            })
+            .expect(201);
+          const bytes =
+            kind === 'scan'
+              ? scanPdfFixture(4)
+              : activationFixture('image').media[0]!.bytes;
+          const file = (
+            await request(app.getHttpServer())
+              .post(
+                `/api/v1/project-chat/projects/${scenario.projectId}/ai/conversations/${conversation.body.id}/files`,
+              )
+              .set('Cookie', users.owner!.cookie)
+              .set('X-Chat-Actor', users.owner!.id)
+              .field('clientKey', randomUUID())
+              .attach('file', bytes, {
+                filename: kind === 'scan' ? 'Scan.pdf' : 'Anh.png',
+                contentType: kind === 'scan' ? 'application/pdf' : 'image/png',
+              })
+              .expect(201)
+          ).body;
+          if (kind === 'scan') {
+            const old = await db.chatAiSourceIndex.findUniqueOrThrow({
+              where: { id: file.id },
+            });
+            const previous = await nativeSource(
+              {
+                organizationId,
+                projectId: scenario.projectId,
+                roomId: null,
+                sourceId: old.fileAssetId!,
+                version: old.version,
+                text: '',
+              },
+              'Scan.pdf',
+              'application/pdf',
+              bytes,
+              createHash('sha256').update(bytes).digest('hex'),
+            );
+            await db.chatAiSourceIndex.update({
+              where: { id: file.id },
+              data: {
+                status: 'UNSUPPORTED',
+                errorCode: 'PDF_SCAN_UNSUPPORTED',
+                attempts: 3,
+                chunks: previous.chunks as never,
+              },
+            });
+          }
+          for (let turn = 0; turn < 2; turn++) {
+            const answer = (
+              await scenario
+                .post(`/conversations/${conversation.body.id}/answers`, {
+                  clientKey: randomUUID(),
+                  question: turn ? 'Cái đó ghi gì?' : 'Đọc nội dung ảnh',
+                  ...(turn ? {} : { sourceIds: [file.id] }),
+                })
+                .expect(201)
+            ).body;
+            const result = (
+              await scenario.post(`/answers/${answer.id}/run`, {}).expect(201)
+            ).body;
+            expect({ status: result.status, error: result.errorCode }).toEqual({
+              status: 'COMPLETED',
+              error: null,
+            });
+            const body = JSON.parse(payloads.at(-1)!);
+            const content = body.messages.at(-1).content;
+            const images = content.filter(
+              (part: { type: string }) => part.type === 'image_url',
+            );
+            expect(images).toHaveLength(kind === 'scan' ? 3 : 1);
+            expect(
+              images.every((part: { image_url: { url: string } }) =>
+                part.image_url.url.startsWith('data:image/png;base64,'),
+              ),
+            ).toBe(true);
+            if (kind === 'scan') {
+              expect(content[0].text).toContain('chỉ trang 1–3/4');
+              if (!turn) expect(content[0].text).not.toContain('trang 4.');
+              const indexed = await db.chatAiSourceIndex.findUniqueOrThrow({
+                where: { id: file.id },
+              });
+              expect(indexed.chunks).toHaveLength(4);
+            }
+            expect(result.sources).toHaveLength(1);
+            expect(
+              (await scenario.post(`/answers/${answer.id}/run`, {}).expect(201))
+                .body.status,
+            ).toBe('COMPLETED');
+            expect(payloads).toHaveLength(turn + 1);
+            if (kind === 'scan' && turn === 0) {
+              // Existing native-PDF history could cite pages beyond the new render window.
+              const indexed = await db.chatAiSourceIndex.findUniqueOrThrow({
+                where: { id: file.id },
+              });
+              const handles = (
+                indexed.chunks as unknown as { handle: string }[]
+              ).map((c) => c.handle);
+              await db.chatAiAnswerDependency.updateMany({
+                where: { answerId: answer.id, sourceIndexId: file.id },
+                data: { handles },
+              });
+              await db.chatAiAnswer.update({
+                where: { id: answer.id },
+                data: {
+                  citations: [handles[3]!],
+                  answer: 'Bản trước đã đọc trang 4.',
+                },
+              });
+            }
+          }
+          await db.chatProjectGrant.update({
+            where: { id: scenario.admin.id },
+            data: { revokedAt: new Date() },
+          });
+          await scenario
+            .get(`/conversations/${conversation.body.id}`)
+            .expect(404);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+    );
     beforeAll(async () => {
       const identity = await db.$queryRaw<
         { database: string; username: string }[]
@@ -2112,6 +2337,10 @@ describe.sequential(
     });
 
     it('requires independent INVOKE and INTERNAL membership and reports missing provider truthfully', async () => {
+      vi.stubEnv(
+        'GALAXY_AI_CONFIG_FILE',
+        join(tmpdir(), `missing-provider-${randomUUID()}.json`),
+      );
       const result = await get().expect(200);
       expect(result.body.provider).toBe('NOT_CONFIGURED');
       expect(result.body.conversations).toEqual([]);

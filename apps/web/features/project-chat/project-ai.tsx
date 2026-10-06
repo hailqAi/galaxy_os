@@ -188,6 +188,10 @@ export const aiStatusLabel = (
       'Cấu hình model chưa hợp lệ; quản trị cần kiểm tra tại máy chủ',
     PDF_SCAN_UNSUPPORTED:
       'PDF dạng ảnh chưa có đường đọc đã kiểm chứng. Hãy chọn PDF có text hoặc ảnh PNG/JPG.',
+    PDF_SCAN_REQUIRES_VISION:
+      'PDF dạng ảnh cần model đọc ảnh. Tối đa 3 trang đầu mỗi lượt.',
+    PDF_RENDER_UNAVAILABLE:
+      'Chưa chuyển được trang PDF thành ảnh. Thử lại hoặc chọn tệp khác.',
     PDF_TEXT_UNAVAILABLE:
       'Chưa đọc được text PDF. Thử lại hoặc kiểm tra tệp có mật khẩu.',
     PDF_VALIDATION_UNAVAILABLE:
@@ -536,6 +540,7 @@ export function ProjectAi({
       status: string;
       version?: string;
       nativeFile?: boolean;
+      errorCode?: string | null;
     }[];
   }>();
   const controller = useRef<AbortController | null>(null);
@@ -971,7 +976,10 @@ export function ProjectAi({
         const image = /^image\/(png|jpeg)$/.test(item.file.type);
         if (
           source?.status !== 'READY' &&
-          !(image && chosenModel?.capabilities.imageInput)
+          !(
+            (image || source?.errorCode === 'PDF_SCAN_REQUIRES_VISION') &&
+            chosenModel?.capabilities.imageInput
+          )
         )
           throw new Error(
             aiStatusLabel(
@@ -1459,9 +1467,8 @@ export function ProjectAi({
                       {context.roomId &&
                         context.roomId !== initialContext?.roomId &&
                         ' Phạm vi đã ghim khác room đang mở; chọn Chat AI mới để dùng room mới.'}{' '}
-                      Chỉ dùng nguồn có quyền trong chỉ mục hiện hữu; file chưa
-                      được gửi qua chat/phát hành có thể chưa có nguồn AI. Hội
-                      thoại đã lưu giữ phạm vi này.
+                      Nguồn được kiểm tra quyền theo dự án và phiên bản trước
+                      mỗi lượt gửi. Hội thoại đã lưu giữ phạm vi này.
                     </p>
                   )}
                   <details className="ai-suggestions">
@@ -1498,7 +1505,11 @@ export function ProjectAi({
                                 disabled={
                                   busy ||
                                   (item.status !== 'READY' &&
-                                    !(item.label.toLowerCase().endsWith('.pdf')
+                                    !(item.label
+                                      .toLowerCase()
+                                      .endsWith('.pdf') &&
+                                    item.errorCode !==
+                                      'PDF_SCAN_REQUIRES_VISION'
                                       ? chosenModel?.capabilities.pdfInput
                                       : chosenModel?.capabilities.imageInput))
                                 }
@@ -1512,9 +1523,14 @@ export function ProjectAi({
                                 }
                               />
                             )}
-                            {item.label}: {aiStatusLabel(item.status)}
+                            {item.label}:{' '}
+                            {item.status === 'UNSUPPORTED' && item.nativeFile
+                              ? 'Cần model đọc ảnh/tài liệu'
+                              : aiStatusLabel(item.status)}
                             {item.nativeFile
-                              ? ' · Có thể chọn gửi native khi capability đã được bật; tối đa 3 file, PDF ngắn tối đa 10 trang/file.'
+                              ? item.errorCode === 'PDF_SCAN_REQUIRES_VISION'
+                                ? ' · Đọc ảnh tối đa 3 trang đầu.'
+                                : ' · Tối đa 3 tệp mỗi lượt; chỉ đọc khi model hỗ trợ.'
                               : ''}
                           </li>
                         ))}
@@ -1605,7 +1621,7 @@ export function ProjectAi({
                     ref={fileInput}
                     type="file"
                     aria-label="Tải tệp từ máy"
-                    accept=".txt,.md,.pdf,.png,.jpg,.jpeg,.xlsx"
+                    accept=".txt,.md,.pdf,.png,.jpg,.jpeg,.docx,.xlsx"
                     multiple
                     hidden
                     onChange={(event) => {

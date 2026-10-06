@@ -45,9 +45,16 @@ globalThis.fetch = async (input, options) => {
     ),
   );
   const body = JSON.parse(String(options?.body));
-  const data = JSON.parse(
-    body.input ? body.input[0].text : body.messages.at(-1).content,
-  );
+  const content = body.input
+    ? body.input[0].text
+    : body.messages.at(-1).content;
+  const data = JSON.parse(Array.isArray(content) ? content[0].text : content);
+  if (Array.isArray(content)) {
+    const images = content.filter((part) => part.type === 'image_url');
+    assert.ok(images.length > 0 && images.length <= 9);
+    for (const image of images)
+      assert.match(image.image_url.url, /^data:image\/(png|jpeg);base64,/);
+  }
   if (!data.sources?.length)
     return Response.json({
       model: 'fixture/free:free',

@@ -18,8 +18,16 @@ Review Astra tìm và đã sửa: chọn lại phiên dùng URL làm nguồn duy
 
 Full test mới ở checkpoint: API1313/1314 (test M2 domain snapshots timeout5000ms), Web564/564, Edge5/5, document chưa chạy do pnpm fail. Test M2 riêng cùng source PASS5581ms với CLI timeout15000; không đổi chuẩn, chưa coi full regression GREEN. T6 phải chạy lại full.
 
+## T2 file/memory — code và fixture, chưa main/vendor mới
+
+DOCX dùng ZIP parser giới hạn đang có của Excel + Saxes đã cài: canonical OPC main part, XML không DTD, UTF-8 nghiêm, giới hạn giải nén32MiB/2048parts, chặn macro/embedded executable. Đọc đoạn/đề mục/bảng; giữ locator ảnh DrawingML/VML nhưng không giả đã đọc nội dung ảnh nhúng. Header/footer/footnote chưa trích, có ghi rõ phạm vi. XLSX giữ sheet/cell/công thức/cached value/định dạng; không tính lại và không đổi giá thiếu thành0.
+
+PDF text vẫn Poppler local; chunks ghi rõ chỉ đọc lớp chữ, chưa đọc nội dung ảnh trong PDF hỗn hợp. PDF hoàn toàn khôngtext render PNG1600px bằng pdftoppm, tối đa3trang đầu/5giây mỗi trang/8MB cả payload, locator/sốtrang thật; dùng capability ảnh đã kiểm chứng, không gửi PDF như MIMEảnh hoặc bật parser/OCR trả phí. Hỏi tiếp nạp lại đúng binary còn quyền từ dependency của hội thoại. Nguồn DOCX/scan đã UNSUPPORTED ở bản cũ được nâng cấp có mục tiêu; giữ source/version/locator lịch sử, không sửa audit/business approval.
+
+RED→GREEN: DOCX upload400→201, ZIP/macro/DTD/OPC/VML, XLSX thiếucached/formula, scan raster, index legacy. Full nhóm AI111/111 gồm36integration/44imports/10native/17OpenRouter/4source PASS (`/tmp/five-pdf-t2-ai-regression2.log`). Ca thiếuprovider được làm độc lập bằng config-path không tồn tại, thay vì bị configbrowser có sẵn chi phối; IAM giữ. Chrome fixture build13 composer DOCX/XLSX/PNG/scan4/4 PASS (`/tmp/five-pdf-browser17.log`), có filechooser event, private binary download byte-equal, nguồn/request, followup khôngupload; Lượt cuối Webbuild15/APIbuild4 Chrome5/5 PASS (`/tmp/five-pdf-browser18.log`), gồm unifiedjourney và picker nguồn scan đã lưu. Regression legacycitationtrang4 RED→GREEN; readable giữ đủlocator, chỉ explicitselection giới hạn3trang. Review Astra khôngcònblocker T2; APItypes/build và Webbuild PASS. Main/vendor cho bốn định dạng mới chưa chạy. Không đánh đồng renderer/mock với model đã đọc ảnh.
+
 ## Phần tiếp tục, chưa làm xong
 
-T2 file/memory; T3 tool loop/web/Decimal/business views; T4 artifact DOCX/PDF/XLSX; T5 image/audio contracts theo capability; T6 full regression, review và local release/main live. DOCX/PDFscan chưa triển khai trong T1; PNG/XLSX composer vendor mới chưa chạy. Web/OpenAI/Tavily/image/audio paid không có cấu hình/ngân sách được bật; live tương ứng NEEDS_PROVIDER_CONFIGURATION_OR_BUDGET, không chặn các task local.
+T2 file/memory; T3 tool loop/web/Decimal/business views; T4 artifact DOCX/PDF/XLSX; T5 image/audio contracts theo capability; T6 full regression, review và local release/main live. T2 code/fixture như trên; composer vendor/main và PDF hỗn hợp còn chờ nghiệm thu/đọc trang theo công cụ. Web/OpenAI/Tavily/image/audio paid không có cấu hình/ngân sách được bật; live tương ứng NEEDS_PROVIDER_CONFIGURATION_OR_BUDGET, không chặn các task local.
 
 Không sửa credential, database/storage/session/Edge/keeper, không bật public hoặc paid. Không coi fixture/mock hoặc screenshot là vendor/main PASS.

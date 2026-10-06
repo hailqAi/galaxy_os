@@ -52,10 +52,10 @@
 **Files:** `apps/api/src/project-chat/{ai-native-source,ai-source,project-ai.service}.ts`, `apps/api/src/files/project-file.ts`, tests native/integration/browser.
 **Interfaces:** Consumes authorized FileAsset/version bytes; produces bounded text/page/sheet/cell/image source context trên index/lifecycle hiện có.
 
-- [ ] RED file tests DOCX paragraphs/headings/tables/images, zip/macro/external link, PDFscan bounded pages; giữ PDFtext hiện có.
-- [ ] Implement extractor bằng dependency hiện có; images lấy bytes authorized; trạng thái partial/unsupported rõ.
-- [ ] GREEN memory A/B/newchat/private/revoke/injection/version-order; composer main ảnh/DOCX/XLSX và PDFscan riêng. Expected: nội dung và locator đúng, original download giữ bytes.
-- [ ] Commit scoped file/memory.
+- [x] RED file tests DOCX paragraphs/headings/tables/images, zip/macro/external link, PDFscan bounded pages; giữ PDFtext hiện có.
+- [x] Implement extractor bằng dependency hiện có; images lấy bytes authorized; trạng thái partial/unsupported rõ.
+- [x] GREEN memory A/B/newchat/private/revoke/injection/version-order; composer Chrome fixture ảnh/DOCX/XLSX và PDFscan riêng. Vendor/main chuyển T6 sau artifact cutover. Expected: nội dung và locator đúng, original download giữ bytes.
+- [x] Commit scoped file/memory.
 
 ### Task 3: Công cụ và web
 
