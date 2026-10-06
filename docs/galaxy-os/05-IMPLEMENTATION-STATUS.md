@@ -1,9 +1,9 @@
 # Trạng thái triển khai và điểm tiếp tục
 
-## Env OpenRouter/LlamaCloud — chờ input an toàn 06/10
+## OpenRouter GENERAL — hai lượt thật đạt, phát hành 06/10
 
-Đã đối soát nguồn đang dùng: canonical env giữ ba khóa cũ LOADED, hai khóa mới MISSING_LOCAL_SECRET; JSON giữ metadata/policy/evidence, không secret. CLI `setup-missing` đã kiểm nhập ẩn, backup/atomic/CAS và giữ khóa cũ; OpenRouter trước, LlamaCloud bỏ qua được. CLI CODE_SHA=TESTED_SHA `6ffd63614cdec64af11b1958588888db28aeb861`, CLI25/API32 và Astra/Ponytail review PASS.
-**WAITING_FOR_SECURE_INPUT; hai lượt chat OpenRouter chưa chạy.** Runtime giữ `local-fd0f306f0c40`/`dae8e08`, chưa đưa CLI mới vào artifact và không phát hành chẩn đoán chỉ vì thiếu key. Không gọi vendor hoặc đổi env thật; Gemini/Mistral paused, Kira quota giữ, LlamaCloud chưa xử lý tài liệu. [Handoff và một lệnh nhập ẩn](handoffs/2026-10-05-openrouter-general.md).
+**API_CHAT_MAIN: DÙNG ĐƯỢC.** Chrome popup/session thật,2lượt trong cùng hội thoại GENERAL, sourceCount0, vendor200×2/dispatch1mỗi lượt/0retry, usage.cost0mỗi lượt; reload sau release giữ2answer/0POSTtrùng. Requested `openrouter/free`; returned `inclusionai/ling-3.0-flash-sante:free` và `cohere/north-mini-code:free`.
+Canonical env đủ5khóa, old3 giữ nguyên, API5LOADED; JSON_METADATA_ONLY. Gemini/Mistral paused, Kira quota giữ; LlamaCloud DOCUMENT_KNOWLEDGE/configured, không gọi dịch vụ. CLI25/API32/build/Astra/Ponytail PASS;3212artifactfile không credential. Release `local-d3fd75b21ffe`, CODE_SHA=TESTED_SHA `6ffd63614cdec64af11b1958588888db28aeb861`, API/Web READY, DB/schema/session/Edge giữ. Không cần nhập lại khóa; [handoff và evidence](handoffs/2026-10-05-openrouter-general.md). Các mục bên dưới là lịch sử trước kích hoạt.
 
 ## OpenRouter GENERAL — đã phát hành, live chờ credential 05/10
 

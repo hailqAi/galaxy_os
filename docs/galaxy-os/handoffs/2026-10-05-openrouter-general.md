@@ -1,78 +1,67 @@
-# Bàn giao OpenRouter GENERAL và kết nối LlamaCloud — 05/10/2026
+# Bàn giao OpenRouter GENERAL và kết nối LlamaCloud — cập nhật 06/10/2026
 
-**Hai lượt chat thật chưa đạt: thiếu credential OpenRouter.** Adapter, guard và UI đã triển khai/phát hành; không lấy dropdown hoặc catalogue làm PASS live.
+**API_CHAT_MAIN: DÙNG ĐƯỢC. Hai lượt OpenRouter thật đã hoàn tất trong popup localhost:3000, cùng hội thoại cá nhân GENERAL; reload sau phát hành vẫn thấy đủ hai answer.**
 
-## Bổ sung env ngày 06/10 — WAITING_FOR_SECURE_INPUT
+## Kết quả đã xác minh
 
-Đối soát giới hạn canonical env/JSON, private env API/Web đang chạy và tên override của process API: ba khóa cũ PRESENT/LOADED; OpenRouter và LlamaCloud MISSING_LOCAL_SECRET, không có nguồn local hợp lệ để tự chuyển. Không đọc clipboard/history/chat hoặc tìm rộng trên ổ đĩa. Canonical env owner1000/mode0600; JSON có 0 secret, giữ theo quyết định **JSON_RETAINED_METADATA_ONLY** vì registry/activation còn dùng flags, FREE_ONLY, policy, revision và evidence.
+| Trường                            | Trạng thái/bằng chứng                                                                                                                                                            |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SECRET_FILE_CANONICAL             | `/home/galaxy_os/.runtime/ai-providers.env`, owner1000/mode0600, đủ5biến, không trùng                                                                                            |
+| OLD_3_KEYS_PRESERVED              | TRUE; đối chiếu boolean với backup trước setup, ba giá trị không đổi                                                                                                             |
+| OPENROUTER_KEY_SOURCE_AND_STATUS  | Người dùng nhập ẩn tại terminal → canonical env PRESENT → API main LOADED → `/key`200 → hai answer COMPLETED                                                                     |
+| LLAMACLOUD_KEY_SOURCE_AND_STATUS  | Người dùng nhập ẩn tại terminal → canonical env PRESENT → API main LOADED; không xác minh kết nối vendor                                                                         |
+| JSON_DECISION_AND_REASON          | JSON_RETAINED_METADATA_ONLY; 0secret, registry/activation cần flags, FREE_ONLY, policy, revision, evidence                                                                       |
+| API_EFFECTIVE_CONFIG              | API PID524234, đúng artifact/code/release, canonical JSON→env; OpenRouter revision `149a3a77-f9cb-40e7-9141-437a2b846099`; Llama revision `65938e15-aeb2-46e2-81cc-30fd0bf6603f` |
+| PROVIDER_ENABLED                  | OpenRouter enabled/FREE_ONLY/generalAvailable/providerReady/NORMAL; Gemini/Mistral paused; Kira giữ QUOTA_EXHAUSTED                                                              |
+| OPENROUTER_AUTH                   | GET `https://openrouter.ai/api/v1/key`:200,1call,424ms; metadata tại lúc kiểm used0/limit50/remaining50; đây không phải cam kết quota tương lai                                  |
+| REQUESTED_MODEL                   | `openrouter/free`; popup tự chọn mặc định khi mở GENERAL mới                                                                                                                     |
+| RETURNED_MODELS                   | Lượt1 `inclusionai/ling-3.0-flash-sante:free` / Novita; lượt2 `cohere/north-mini-code:free` / Cohere                                                                             |
+| GENERAL_TURN_1                    | COMPLETED, vendor200,1dispatch/0retry; input82/output633token;9.150s từ UI; answer đã lưu                                                                                        |
+| GENERAL_TURN_2                    | COMPLETED, vendor200,1dispatch/0retry; input78/output214token;7.046s từ UI; dùng lịch sử cùng GENERAL, answer đã lưu                                                             |
+| GENERAL_SOURCE_COUNT              | 0 ở cả2request `sourceIds:[]` và DB source dependencies0/citations0; không Project/file/RAG context                                                                              |
+| HISTORY_RELOAD                    | PASS; đóng/mở và reload, kể cả sau cutover, giữ2answer/cùngsession;0POST AI khi reload                                                                                           |
+| FREE_ONLY_COST_EVIDENCE           | Cả2response `usage.cost=0`, upstream inference/prompt/completion cost đều0; backend guard nguyên vẹn, không paid fallback/tools/plugins/BYOK                                     |
+| LLAMACLOUD_CONNECTION_TYPE        | DOCUMENT_KNOWLEDGE, credentialConfigured=true/LOADED, connection enabled=false/statusNOT_VERIFIED; không là model GENERAL                                                        |
+| LLAMACLOUD_CREDIT_CONSUMING_CALLS | NOT_RUN; không upload/parse/extract/index/session/chat RAG                                                                                                                       |
+| CODE_OR_CONFIG_CHANGED            | Chỉ CLI+tests ở code commit `6ffd636`; người dùng thêm2khóa và metadata; duyệt INPUT đúng2câu mẫu qua UI, không mở nguồn Project                                                 |
+| CODE_SHA / TESTED_SHA             | `6ffd63614cdec64af11b1958588888db28aeb861`                                                                                                                                       |
+| LOCAL_RELEASE                     | `local-d3fd75b21ffe`, API/Web READY; artifact `openrouter-env-active-20261006`; snapshot sạch từ docs HEAD `cbdddee139c41a8252cdeeb2bc5741f143be8445`                            |
+| REMAINING_BLOCKER                 | Không còn blocker cho OpenRouter GENERAL đã nghiệm thu; LlamaCloud connectivity chưa kiểm theo phạm vi cấu hình-only                                                             |
+| EXACT_USER_ACTION_IF_REQUIRED     | Không cần nhập lại khóa; mở popup và dùng OpenRouter theo đường bên dưới                                                                                                         |
 
-CLI CODE_SHA=TESTED_SHA `6ffd63614cdec64af11b1958588888db28aeb861`: chỉ sửa `configure-ai.py` và kiểm thử. `setup-missing` mặc định canonical, OpenRouter lưu/kích hoạt trước LlamaCloud tùy chọn; không hỏi/ghi lại khóa đã có. Backup private `ai-credential-backups` ngoài Git tracking, atomic0600, khóa cập nhật/CAS, candidate được resolver hiện hữu kiểm trước ghi. `activate-existing --provider openrouter` dành cho khóa đã đổi trực tiếp trong env: không nhập lại, giữ policy/evidence và đổi revision để evidence cũ hết hiệu lực. `--file` của CLI cũ vẫn là đường metadata JSON, không phải nơi ghi secret.
+## Hành trình và answer thật
 
-Fresh CLI25/25 và API OpenRouter/service/registry32/32 PASS; Astra high correctness/secret review và Ponytail PASS. Bao gồm kích thước env, Unicode, xung đột cập nhật, ký tự đặc biệt, input ẩn/empty/cancel, bảo toàn ba khóa/evidence/policy và rerun idempotent. Không thay adapter/UI/IAM/schema. Root checkout không có helper này; worktree và artifact API đang chạy dùng cùng resolver 5 biến, cùng canonical path; không tạo helper/store thứ hai ở root.
+`http://localhost:3000/` → vào trang dự án hiện có → **Mở Hỏi AI dự án** → **Hỏi thông thường** → **Phiên AI mới** → **OpenRouter — Tự chọn model miễn phí**. Nhập câu hỏi; với nội dung thử công khai/tổng hợp, chọn checkbox và **Phê duyệt nội dung nhập** theo cơ chế hiện có, rồi **Hỏi AI**. Giữ IAM, ai.invoke, ownership và policy; không áp phê duyệt này cho hồ sơ thật hoặc9Project.
 
-Chrome cùng session: settings200, ai.invoke, ba credential cũ LOADED; OpenRouter PROVIDER_ENTRY_MISSING, LlamaCloud CREDENTIAL_PENDING. Gemini/Mistral vẫn paused, Kira QUOTA_EXHAUSTED. Chưa gọi `/key` hoặc inference/OpenRouter, không gọi ba vendor cũ hay dịch vụ LlamaCloud. GENERAL hai lượt, returned model/cost và reload lịch sử OpenRouter vẫn NOT_RUN. Source count0 mới là contract, chưa có evidence lượt live.
+Chrome cùng actor/session, hội thoại `2bee9972-e5f0-4f6c-9b74-594bf0038308`. Không tạo Project/room/file/demo hoặc tài khoản khác. GENERAL gắn đường UI dự án nhưng không lấy hồ sơ dự án.
 
-Runtime vẫn `local-fd0f306f0c40` / code `dae8e081810490f53c13ad5010495a280ad9e4f9`; không phát hành/restart bản chẩn đoán chỉ để lặp thiếu key. Loader đọc lại canonical config theo request. CLI mới chạy ở worktree đã kiểm, chưa đưa vào artifact live; release theo pipeline và nghiệm thu main tiếp tục khi có input an toàn. Evidence giới hạn trong `/home/galaxy_os/.runtime/env-activation-20261006/`.
+1. “Dịch sang tiếng Việt: The delivery is scheduled for Monday.” → **“Việc giao hàng được lên lịch vào thứ Hai.”**
+   Answer/request ID `7aa8cc67-2dd8-4f14-8745-8513c724ed66`; gateway `gen-1791256869-tSgOiqo8odS9xtwzaHlY`; API run request `6144d2ae-162a-4bca-9212-c667e68c4ab6`; vendor diagnostic1543ms.
+2. “Viết lại bản dịch vừa rồi thành một câu nhắn lịch sự cho khách hàng.” → **“Chúng tôi xin thông báo rằng đơn hàng của bạn dự kiến sẽ được giao vào thứ Hai tới. Nếu bạn có bất kỳ yêu cầu đặc biệt nào hoặc cần hỗ trợ thêm, vui lòng liên hệ với chúng tôi.”**
+   Answer/request ID `c2b1eadf-afbd-45d1-8937-c87841bf52ad`; gateway `gen-1791256895-1AgZ6Oh0sUXzwZjwNSDd`; API run request `ed1878d9-01c0-4ae6-867e-d1b1354ddf4f`; vendor diagnostic660ms.
 
-## Kết quả hiện hành
+Hai clientKey riêng, mỗi lượt một POST tạo answer và một POST run; không dùng retry câu1 làm câu2. Router trả hai model khác nhau; label UI/DB giữ đúng tên thực tế. Answer final không rỗng, không reasoning-only. Kiểm cost câu1 trước khi gửi câu2.
 
-| Trường                            | Bằng chứng/trạng thái                                                                                                                                                                                       |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OPENROUTER_ADAPTER                | DEPLOYED; native fetch vào endpoint cố định `https://openrouter.ai/api/v1/chat/completions`, text GENERAL, không redirect/fallback                                                                          |
-| OPENROUTER_CREDENTIAL_LOADED      | NO; canonical env không có `OPENROUTER_API_KEY`, metadata entry chưa được tạo bằng nhập khóa ẩn                                                                                                             |
-| FREE_ONLY_ENFORCEMENT             | Backend chỉ nhận `openrouter/free` + FREE_ONLY; catalogue text/pricing kiểm có TTL60s/cap4MiB; `max_price` prompt/completion/request0; `data_collection:deny`; không tools/plugins/media/BYOK/paid fallback |
-| REQUESTED_MODEL                   | `openrouter/free` là cấu hình mục tiêu; chưa có request inference live                                                                                                                                      |
-| RETURNED_MODELS                   | NOT_RUN; không suy ra upstream/model thực tế                                                                                                                                                                |
-| GENERAL_TURN_1                    | NOT_RUN — CREDENTIAL_PENDING                                                                                                                                                                                |
-| GENERAL_TURN_2                    | NOT_RUN — CREDENTIAL_PENDING                                                                                                                                                                                |
-| USAGE_COST_EVIDENCE               | NOT_AVAILABLE: chưa inference; không tự ghi cost0. Cost total thiếu được giữ UNKNOWN; cost details nullable được bảo toàn                                                                                   |
-| GENERAL_SOURCE_COUNT              | 0 theo contract/test; chưa có lượt OpenRouter live để ghi count runtime                                                                                                                                     |
-| HISTORY_RELOAD                    | OpenRouter NOT_VERIFIED; lịch sử GENERAL Gemini cũ đọc lại được sau reload và pause                                                                                                                         |
-| GEMINI_MISTRAL_PAUSED             | YES; config/API/UI paused, option disabled có nhãn tạm dừng; không đổi revision/credential/history                                                                                                          |
-| KIRA_QUOTA_STATE                  | Giữ QUOTA_EXHAUSTED402/insufficient_quota từ evidence trước; không gọi lại/fallback/nạp tiền                                                                                                                |
-| LLAMACLOUD_CONNECTION_TYPE        | DOCUMENT_KNOWLEDGE trong `connections.llama_cloud`, không thuộc AI_MODELS/dropdown GENERAL                                                                                                                  |
-| LLAMACLOUD_CONFIG_STATUS          | Metadata REGISTERED; CREDENTIAL_PENDING/CONNECTIVITY_NOT_VERIFIED; canonical env chưa có `LLAMA_CLOUD_API_KEY`                                                                                              |
-| LLAMACLOUD_CREDIT_CONSUMING_CALLS | NOT_RUN; không Parse/Extract/Index/Chat session/upload/read index                                                                                                                                           |
-| CODE_SHA / TESTED_SHA             | `dae8e081810490f53c13ad5010495a280ad9e4f9`                                                                                                                                                                  |
-| DOCS_COMMIT_SHA                   | Commit chứa handoff này; SHA thực được ghi trong private `final.json` và báo cáo sau commit                                                                                                                 |
-| DEPLOYED_LOCAL_RELEASE            | `local-fd0f306f0c40`, API/Web READY cùng artifact `openrouter-general-final-20261005`                                                                                                                       |
-| REMAINING_BLOCKERS                | Nhập OpenRouter replacement credential tại terminal; sau đó enable đúng config, metadata `/key`, hai lượt UI, kiểm cost từng lượt và reload. LlamaCloud credential chỉ chặn kiểm kết nối tương ứng          |
+## CLI, verification và release
 
-## Đường dùng và bước tiếp tục
-
-`localhost:3000` → Chọn dự án để hỏi AI → trang làm việc dự án hiện có → Mở Hỏi AI dự án → Hỏi thông thường → Phiên AI mới → Model AI: **OpenRouter — Tự chọn model miễn phí**.
-Hiện model bị khóa vì credential chưa có. Popup/typography/P04 và hội thoại hiện hữu giữ nguyên; không tạo Project/demo/database khác.
-
-Lệnh đã được kiểm bằng PTY với giá trị giả, không echo input. Chạy một lần ở terminal local tương tác: nhập OpenRouter trước; LlamaCloud có thể Enter để bỏ qua. CLI hiển thị host, canonical env và vai trò metadata JSON. Không dán key vào chat/argv/pipe/history.
+Lệnh nhập thiếu đã được kiểm PTY với khóa giả; người dùng đã chạy và nhập đủ2khóa, **không cần chạy lại để sử dụng chat**:
 
 ```bash
 python3 -B /home/galaxy_os/.worktrees/m2-a-20260928/scripts/configure-ai.py setup-missing
 ```
 
-CLI giữ key cũ atomic0600/owner1000, metadata-only JSON và kích hoạt OpenRouter FREE_ONLY sau khi lưu; chưa coi credential là live verified. API đọc canonical env ở lượt kế tiếp, không cần restart cho thay file này. Sau khi xác nhận API main đã nạp đúng revision, kiểm `/key` rồi dùng đường UI thường: checkbox công khai/tổng hợp và Phê duyệt nội dung nhập đúng từng câu qua cơ chế INPUT có audit, sau đó Hỏi AI. Không approve Project/source hoặc đổi classification dữ liệu thật.
+`--file` của CLI cũ là metadata JSON. `setup-missing` tự dùng canonical JSON/env, không theo shell override; OpenRouter lưu/kích hoạt trước LlamaCloud tùy chọn. Backup private `ai-credential-backups` ngoài Git tracking; atomic0600/flock/CAS; candidate dùng chung JS resolver, kiểm giới hạn32768/Unicode trước ghi. Rerun không hỏi/ghi lại khóa đã có. Nếu chủ động đổi trực tiếp khóa env sau này, `activate-existing --provider openrouter` đổi revision để evidence cũ hết hiệu lực, giữ policy/evidence; không nhập lại khóa. Root checkout không có helper; worktree/artifact đang dùng cùng resolver5biến, không tạo store thứ hai.
 
-Câu1: “Dịch sang tiếng Việt: The delivery is scheduled for Monday.”
-Câu2: “Viết lại bản dịch vừa rồi thành một câu nhắn lịch sự cho khách hàng.”
+- Fresh CLI25/25 và API OpenRouter/service/registry32/32 PASS; Astra high correctness/secret và Ponytail review PASS. Mock/fixture cho negative tests; runtime không mock/hard-code.
+- Frozen artifact API/Web/Edge build PASS theo pipeline; Edge chỉ build, không restart. Không sửa adapter/UI/auth/mode/policy code sau khi hai lượt live đã đạt. App chat source giữa artifact nghiệm thu ban đầu và bản cuối không đổi; bản cuối đưa CLI đã review vào artifact.
+- Cutover API/Web bằng units hiện hữu; session/DB/storage/canonical env+JSON giữ nguyên byte trong activation, schema84 không đổi, Edge PID308598 giữ, public domain CLOSED. Reload cuối giữ cùng actor, model/haianswer; không gửi thêm inference chỉ để lặp PASS.
+- Scan3212file API/Web build với cả5credential: không giá trị secret, không env thật trong artifact. Các log runtime/build/cutover được kiểm boolean không chứa credential. Không key trong Git/argv/unit/client; JSON0secret.
+- Không gọi mới Gemini/Mistral/Kira; không LlamaCloud credit call. Không fullM2/PDF/OCR/RAG/clock campaign; không schema/migration/Figma/layout/typography/LAN/domain changes. Commit local, không push/merge.
 
-Trước câu2 kiểm response thật không rỗng, usage/cost và gateway request ID; positive cost/detailed cost chặn outbound tiếp cùng revision, kể cả retry/cancel. Không quay paid hoặc gọi provider đã pause. Save requested/returned model, provider khi vendor trả, usage/cost/status/retry/time trong usage hiện hữu; không schema mới. Mỗi lượt clientKey riêng; reload/reopen không tự gửi lại.
+## Evidence và nguồn
 
-Khi cần nhập LlamaCloud sau này, CLI key hỗ trợ provider `llama_cloud`, cùng canonical env và input ẩn/host xác nhận. Chưa có endpoint read-only được lựa chọn/kiểm trực tiếp trong lượt này. Sử dụng Chat/RAG trên cloud về sau cần index, nguồn/phạm vi được phép, quota và quyền/session tương ứng; chưa triển khai.
+Private `/home/galaxy_os/.runtime/env-activation-20261006/`: `preservation.json`, `source-audit.json`, `runtime-metadata.json`, `metadata.json`, `account-metadata.json`, `openrouter-free-turn-1.json`, `openrouter-free-turn-2.json`, `persisted-evidence.json`, `reopen.json`, `restore.json`, `log-secret-check.json`, test/build logs. `release/`: secret-boundary/cutover-result và staged units; env/backup không vào Git. DOCS_COMMIT_SHA là commit chứa cập nhật này, ghi SHA thực vào private `final.json` sau commit.
 
-## Xác minh mới và giới hạn
-
-- API affected62/62, Web affected13/13, Python credentialCLI15/15 PASS; types/lint/format/diff check PASS. Web package lint có một warning `app/account/profile/page.tsx:154` đã tồn tại.
-- Astra high review cost/secret/host/IAM/mode/policy PASS; Ponytail diff/correctness PASS. Đã sửa regressions cost details thiếu total/null, 200error có cost, durable stop trước retry, cost/cancel race; giữ trạng thái CANCELLED và bằng chứng phí.
-- Chrome cùng user/session: me200 + ai.invoke; API/Web health200 đúng release; Gemini/Mistral disabled với nhãn tạm dừng; lịch sử GENERAL Gemini cũ vẫn có bản dịch; reload không có POST AI. Dynamic OpenRouter history/default/manual model switch và hai lượt live chưa được nghiệm thu vì thiếu credential.
-- Frozen artifact build API/Web/Edge PASS theo pipeline hiện hữu; Edge chỉ build dependency pipeline, không restart/đổi chức năng. Hai code commits local `cc1efe8` và `dae8e08`; không push/merge.
-- 14 product files snapshot khớp byte với CODE_SHA; pending docs snapshot được đánh dấu dirty thật. Artifact scan3212files: không có giá trị credential trong Web/API build; env/keys ngoài artifact/unit. Metadata process xác nhận đúng cwd/code/release và config canonical, không key ở Web/process env.
-- Cutover chỉ API/Web/manifest; schema84/checksum inventory và DB/storage/session env giữ nguyên, Edge PID308598 giữ; public domain vẫn đóng. Không migration/reset/source permission/memory architecture changes.
-- Không gọi thử Gemini/Mistral/Kira; không LlamaCloud credit call. OpenRouter chỉ public GET/models200 không Authorization, catalogue checked `2026-10-05T06:55:56.117015+00:00`:763948bytes, ID `openrouter/free`, input/output text, prompt/completion pricing0. Đây là lớp catalogue, chưa phải cost/live evidence.
-- Không chạy full M2/RAG/citation/PDF/OCR/clock; focused regression theo phạm vi owner. Negative tests dùng mock/fixture; runtime không mock/hard-code.
-
-## Evidence và nguồn chính thức
-
-Private `/home/galaxy_os/.runtime/openrouter-20261005/`: catalogue.json, verification.json, pause-registration.json, metadata.json, logs RED/GREEN. Thư mục `final/`: cutover-result.json, secret-boundary.json, chrome-readiness.json, process-metadata.json và final.json sau docs commit. Tất cả không chứa key/Authorization; không đưa private env/backup/profile Chrome vào Git.
-
-Thiết kế/plan: `docs/superpowers/specs/2026-10-05-openrouter-general-design.md`, `docs/superpowers/plans/2026-10-05-openrouter-general.md`. Evidence vendor cũ: [bàn giao trước](2026-10-05-api-chat-main.md), không thay thế nghiệm thu OpenRouter.
+Lịch sử triển khai05/10 ở Git và `/home/galaxy_os/.runtime/openrouter-20261005/`; [evidence vendor cũ](2026-10-05-api-chat-main.md). Báo cáo MISSING trước khi người dùng nhập đã được thay bằng evidence LOADED/auth/chat thật ở trên. LlamaCloud Chat/RAG trên cloud sau này cần index, nguồn/phạm vi, quota và quyền/session tương ứng; chưa triển khai.
 
 Nguồn chính thức đã đọc: [Quickstart](https://openrouter.ai/docs/quickstart), [Free router](https://openrouter.ai/docs/guides/routing/routers/free-router), [Provider selection/max_price](https://openrouter.ai/docs/guides/routing/provider-selection), [Limits/key metadata](https://openrouter.ai/docs/api_reference/limits), [Usage accounting](https://openrouter.ai/docs/cookbook/administration/usage-accounting), [LlamaCloud Chat trên index/session](https://developers.llamaindex.ai/llamaparse/cloud-index-v2/chat/), [LlamaCloud pricing](https://www.llamaindex.ai/pricing). Router không phải model cố định; “free” không phải bằng chứng privacy/actual cost hoặc quota vô hạn.
