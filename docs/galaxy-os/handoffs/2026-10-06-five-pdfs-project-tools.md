@@ -36,8 +36,20 @@ Regression nhóm T3 ban đầu160/160 đạt; bổ sung3ca receipt null/[]/JSON 
 
 Contract kỹ thuật đã kiểm: [OpenRouter tools](https://openrouter.ai/docs/guides/features/tool-calling), [Tavily Search](https://docs.tavily.com/documentation/api-reference/endpoint/search). Chọn native public fetch thay Tavily Extract vì đã đủ đọc trang và không phát sinh dịch vụ trả phí thứ hai.
 
+## T4 xuất tài liệu — code/local/Chrome fixture
+
+DOCX dùng JSZip hiện có, OPC/DrawingML chuẩn; XLSX dùng ExcelJS hiện có; PDF bổ sung PDFKit0.20.2 local với font Be Vietnam Pro đã được duyệt trong repo. Không dịch vụ chuyển đổi bên ngoài. Đọc lại PDF bằng Poppler xác nhận tiếng Việt, bảng và trang; DOCX đọc bằng extractor/OPC thật, XLSX mở lại workbook thật. Chưa mở Word desktop để nghiệm thu rendering Word.
+
+Tool create_document/revise_draft tạo FileAsset và source index riêng qua upload/storage hiện có. Attachment gắn conversation và answer gốc; AI_DRAFT, version/checksum, request/tool key, owner/Project, predecessor và diff. Revision tạo asset mới, bản cũ còn nguyên. Download/source/newchat kiểm lại origin answer và mọi dependency/field permission; generic file route chặn cả khi file còn có attachment Project. Lineage path tối đa16, memo thành công chỉ trong transaction; không cache quyền toàn cục. Index không claim artifact khi origin đang chạy; request thất bại/hủy không xuất nguồn như đã hoàn tất.
+
+Giới hạn mỗi request3file, mỗi tài liệu24KB cấu trúc/400ô/3ảnh/20trang PDF, binary8MB; PNG kiểm pixel và giải nén có giới hạn. XLSX đầu ra lưu ô dạng text để giữ Decimal chính xác và chặn formula injection; không giả đã tạo công thức hoặc tính lại Excel. Diff đối chiếu dòng có giữ số lần lặp, giới hạn JSON8KB/100dòng mỗi phía và báo rút gọn; không khẳng định đối chiếu đầy đủ layout/ảnh/nghĩa vụ.
+
+Fresh regression API225/225 và Web29/29 (`/tmp/five-pdf-t4-regression13.log`), thêm ca XLSX kế thừa quyền tài chính rồi revoke download PASS (`/tmp/five-pdf-artifact-finance-livefixture.log`). Chrome fixture3/3 (`/tmp/five-pdf-browser19.log`): composer→tool→binary→card→click download, checksum đúng. Review Astra không còn blocker static; lỗi index race/diff escape RED→GREEN, DAG memo có regression. API/Web build2, typecheck và scoped lint PASS. Full regression/main/vendor chờ T6, không lấy mock thay evidence live.
+
+[PDFKit](https://pdfkit.org/docs/getting_started.html), [DrawingML của Microsoft](https://learn.microsoft.com/en-us/office/open-xml/word/how-to-insert-a-picture-into-a-word-processing-document) là nguồn contract engine. Thẻ file dùng style chip sẵn có, bổ sung state chức năng được brief yêu cầu; không đổi bố cục năm PDF.
+
 ## Phần tiếp tục, chưa làm xong
 
-T4 artifact DOCX/PDF/XLSX; T5 image/audio contracts theo capability; T6 full regression, review và local release/main live. T2 code/fixture như trên; composer vendor/main và PDF hỗn hợp còn chờ nghiệm thu/đọc trang theo công cụ. Web/OpenAI/Tavily/image/audio paid không có cấu hình/ngân sách được bật; live tương ứng NEEDS_PROVIDER_CONFIGURATION_OR_BUDGET, không chặn các task local.
+T5 OpenAI Responses/image/audio contracts theo capability; T6 full regression, review và local release/main live. T2 code/fixture như trên; composer vendor/main và PDF hỗn hợp còn chờ nghiệm thu/đọc trang theo công cụ. Web/OpenAI/Tavily/image/audio paid không có cấu hình/ngân sách được bật; live tương ứng NEEDS_PROVIDER_CONFIGURATION_OR_BUDGET, không chặn các task local.
 
 Không sửa credential, database/storage/session/Edge/keeper, không bật public hoặc paid. Không coi fixture/mock hoặc screenshot là vendor/main PASS.

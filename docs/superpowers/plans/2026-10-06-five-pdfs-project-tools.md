@@ -72,9 +72,9 @@
 **Files:** reuse file/export services sau inventory, `ai-tools.ts`, `project-ai.service.ts`, UI answer file card và tests.
 **Interfaces:** Consumes authorized input source versions/request owner; produces private FileAsset/version DOCX/PDF/XLSX, provenance và download có recheck.
 
-- [ ] RED real export/render/download/revision test: số đối soát Decimal, formula injection, revoke, idempotent retry, original signed version không đổi.
-- [ ] Reuse export engines; nháp/revision không phê duyệt, ghi source/request/audience bằng mechanism thật.
-- [ ] GREEN open/render tiếng Việt/bảng/ảnh/pagebreak, API/browser download đúng bytes. Commit scoped.
+- [x] RED real export/render/download/revision test: số đối soát Decimal, formula injection, revoke, idempotent retry, original signed version không đổi.
+- [x] Reuse export engines; nháp/revision không phê duyệt, ghi source/request/audience bằng mechanism thật.
+- [x] GREEN PDF render/extract tiếng Việt, DOCX OPC/extractor và XLSX workbook/bảng/ảnh/pagebreak, API/browser download đúng bytes. Word desktop chưa nghiệm thu. Commit scoped.
 
 ### Task 5: Image/audio capability
 

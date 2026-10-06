@@ -22,6 +22,12 @@ import {
 } from './ai-native-source';
 import { docxMime } from '../files/office-document';
 import {
+  documentInput,
+  renderDocument,
+  documentPlainText,
+  documentDiff,
+} from './ai-document';
+import {
   calculate,
   decimalTotal,
   savedToolPermissions,
@@ -282,6 +288,8 @@ export class ProjectAiService {
     actor: CurrentActor,
     projectId: string,
     index: ChatAiSourceIndex,
+    lineage = new Set<string>(),
+    verifiedOrigins = new Set<string>(),
   ) {
     if (
       index.organizationId !== actor.organizationId ||
@@ -344,6 +352,55 @@ export class ProjectAiService {
       });
       if (!file || index.version !== `${file.version}:${file.checksum}`)
         throw new NotFoundException();
+      const origins = await tx.entityAttachment.findMany({
+        where: { fileAssetId: file.id, entityType: 'ChatAiAnswer' },
+      });
+      if (origins.length || index.provenance === 'AI_DRAFT') {
+        if (
+          origins.length !== 1 ||
+          lineage.size >= 16 ||
+          lineage.has(origins[0]!.entityId)
+        )
+          throw new NotFoundException();
+        const originId = origins[0]!.entityId;
+        if (!verifiedOrigins.has(originId)) {
+          lineage.add(originId);
+          try {
+            const grant = await this.access.authority(
+              tx,
+              actor,
+              projectId,
+              'INVOKE',
+            );
+            const origin = await this.ownedAnswer(
+              tx,
+              actor,
+              projectId,
+              originId,
+              grant.id,
+            );
+            if (
+              origin.conversationId !== index.conversationId ||
+              origin.status !== 'COMPLETED' ||
+              (
+                await this.view(
+                  tx,
+                  actor,
+                  projectId,
+                  origin,
+                  grant.id,
+                  lineage,
+                  verifiedOrigins,
+                )
+              ).status !== 'COMPLETED'
+            )
+              throw new NotFoundException();
+            verifiedOrigins.add(originId);
+          } finally {
+            lineage.delete(originId);
+          }
+        }
+      }
       return {
         text: null,
         storageKey: file.storageKey,
@@ -679,7 +736,43 @@ export class ProjectAiService {
           orderBy: { createdAt: 'asc' },
           take: 25,
         });
+        const claimed: typeof rows = [];
         for (const row of rows) {
+          if (row.provenance === 'AI_DRAFT') {
+            const origin = row.fileAssetId
+              ? await tx.entityAttachment.findFirst({
+                  where: {
+                    fileAssetId: row.fileAssetId,
+                    entityType: 'ChatAiAnswer',
+                  },
+                })
+              : null;
+            const answer = origin
+              ? await tx.chatAiAnswer.findFirst({
+                  where: {
+                    id: origin.entityId,
+                    organizationId: actor.organizationId,
+                    projectId,
+                    ownerId: actor.userId,
+                  },
+                })
+              : null;
+            if (answer?.status !== 'COMPLETED') {
+              if (
+                !answer ||
+                !['QUEUED', 'INDEXING', 'RUNNING'].includes(answer.status)
+              )
+                await tx.chatAiSourceIndex.update({
+                  where: { id: row.id },
+                  data: {
+                    status: 'FORBIDDEN',
+                    errorCode: 'ORIGIN_NOT_COMPLETED',
+                  },
+                });
+              continue;
+            }
+          }
+          claimed.push(row);
           row.leaseToken = randomUUID();
           await tx.chatAiSourceIndex.update({
             where: { id: row.id },
@@ -691,7 +784,7 @@ export class ProjectAiService {
             },
           });
         }
-        return { rows, grantId, discovered };
+        return { rows: claimed, grantId, discovered };
       },
     );
     for (const row of jobs.rows) {
@@ -1944,6 +2037,8 @@ export class ProjectAiService {
     projectId: string,
     answer: ChatAiAnswer,
     grantId: string,
+    lineage = new Set<string>(),
+    verifiedOrigins = new Set<string>(),
   ) {
     const hidden = {
       id: answer.id,
@@ -1965,7 +2060,14 @@ export class ProjectAiService {
     });
     try {
       for (const dependency of dependencies)
-        await this.checkSource(tx, actor, projectId, dependency.source);
+        await this.checkSource(
+          tx,
+          actor,
+          projectId,
+          dependency.source,
+          lineage,
+          verifiedOrigins,
+        );
     } catch (error) {
       if (this.denied(error)) return hidden;
       throw error;
@@ -2152,6 +2254,13 @@ export class ProjectAiService {
             : answer.usage
           : null,
       sources,
+      artifacts:
+        answer.status === 'COMPLETED' &&
+        answer.usage &&
+        typeof answer.usage === 'object' &&
+        !Array.isArray(answer.usage)
+          ? (answer.usage.artifacts ?? [])
+          : [],
       createdAt: answer.createdAt,
     };
   }
@@ -3225,6 +3334,11 @@ export class ProjectAiService {
               where: { id },
               data: {
                 usage: {
+                  ...(answer.usage &&
+                  typeof answer.usage === 'object' &&
+                  !Array.isArray(answer.usage)
+                    ? answer.usage
+                    : {}),
                   request: pin!,
                   toolSources,
                   toolPermissions,
@@ -3250,10 +3364,262 @@ export class ProjectAiService {
           toolActivity =
             name === 'search_web' || name === 'fetch_public_page'
               ? 'Đang tra cứu nguồn công khai'
-              : name === 'calculate' || name === 'analyze_table'
-                ? 'Đang tính và đối chiếu dữ liệu'
-                : 'Đang tìm và đọc nguồn dự án';
+              : name === 'create_document' || name === 'revise_draft'
+                ? 'Đang tạo bản nháp tài liệu'
+                : name === 'calculate' || name === 'analyze_table'
+                  ? 'Đang tính và đối chiếu dữ liệu'
+                  : 'Đang tìm và đọc nguồn dự án';
           await persistToolSources();
+          if (name === 'create_document' || name === 'revise_draft') {
+            const args = toolInputs[name].parse(input);
+            const document = documentInput.parse({
+              format: args.format,
+              title: args.title,
+              blocks: args.blocks,
+            });
+            const output = (artifact: Prisma.JsonValue): ToolOutput => ({
+              content: JSON.stringify({
+                artifact,
+                provenance: 'AI_DRAFT',
+                notice:
+                  'Bản nháp riêng tư, chưa phê duyệt/phát hành. Số XLSX là chuỗi chính xác, không công thức.',
+              }),
+              sources: [],
+            });
+            const existing = await this.db.chatAiAnswer.findUniqueOrThrow({
+              where: { id },
+            });
+            const metadata = existing.usage as Prisma.JsonObject;
+            const priorArtifacts = Array.isArray(metadata.artifacts)
+              ? metadata.artifacts
+              : [];
+            const replay = priorArtifacts.find(
+              (item) =>
+                item &&
+                typeof item === 'object' &&
+                !Array.isArray(item) &&
+                item.toolKey === key,
+            );
+            if (replay) return output(replay);
+            if (priorArtifacts.length >= 3) throw new AiError('DOCUMENT_LIMIT');
+            const read = async (sourceId: string) => {
+              await this.sourceTool(
+                actor,
+                projectId,
+                claimed.answer,
+                claimed.grantId,
+                'read_project_source',
+                { sourceId, representation: 'text', startLine: 1, page: null },
+                config as ConfiguredModel,
+                signal,
+              );
+              return this.authorized(actor, projectId, async (tx) => {
+                const index = await tx.chatAiSourceIndex.findFirst({
+                  where: {
+                    id: sourceId,
+                    organizationId: actor.organizationId,
+                    projectId,
+                  },
+                });
+                if (!index) throw new NotFoundException();
+                return {
+                  index,
+                  source: await this.checkSource(tx, actor, projectId, index),
+                };
+              });
+            };
+            const predecessor =
+              name === 'revise_draft'
+                ? await read(toolInputs.revise_draft.parse(input).sourceId)
+                : null;
+            if (
+              predecessor &&
+              !predecessor.index.fileAssetId &&
+              !predecessor.index.projectFileAssetId &&
+              !predecessor.index.chatFileId &&
+              !predecessor.index.releaseId
+            )
+              throw new AiError('DOCUMENT_SOURCE_REQUIRED');
+            const imageIds = [
+              ...new Set(
+                document.blocks.flatMap((block) =>
+                  block.kind === 'image' ? [block.sourceId] : [],
+                ),
+              ),
+            ];
+            if (imageIds.length > 3) throw new AiError('DOCUMENT_LIMIT');
+            const images = [];
+            for (const sourceId of imageIds) {
+              const checked = await read(sourceId),
+                source = checked.source;
+              if (
+                !source.storageKey ||
+                !source.checksum ||
+                (source.mime !== 'image/png' && source.mime !== 'image/jpeg')
+              )
+                throw new AiError('DOCUMENT_IMAGE_UNAVAILABLE');
+              images.push({
+                sourceId,
+                mime: source.mime as 'image/png' | 'image/jpeg',
+                bytes: await this.readBinary(
+                  source.storageKey,
+                  source.checksum,
+                  signal,
+                ),
+              });
+            }
+            await beforeAttempt();
+            signal.throwIfAborted();
+            const rendered = await renderDocument(document, images);
+            signal.throwIfAborted();
+            const diff = predecessor
+              ? documentDiff(
+                  predecessor.index.text,
+                  documentPlainText(document),
+                )
+              : null;
+            const hash = createHash('sha256')
+              .update(id + key)
+              .digest('hex')
+              .slice(0, 32);
+            const clientKey = [
+              hash.slice(0, 8),
+              hash.slice(8, 12),
+              hash.slice(12, 16),
+              hash.slice(16, 20),
+              hash.slice(20),
+            ].join('-');
+            const filename =
+              document.title.replace(/[\\/:*?"<>|]/g, '_') +
+              '.' +
+              document.format;
+            let artifact: Prisma.JsonObject | null = null;
+            const saved = await this.files.upload(
+              actor,
+              {
+                entityType: 'ChatAiConversation',
+                entityId: claimed.answer.conversationId,
+                category: 'AI_DRAFT',
+                confidentiality: 'INTERNAL',
+              },
+              {
+                buffer: rendered.bytes,
+                size: rendered.bytes.length,
+                mimetype: rendered.mime,
+                originalname: filename,
+              } as Express.Multer.File,
+              clientKey,
+              {
+                answerId: id,
+                version: predecessor
+                  ? Number(predecessor.index.version.split(':')[0]) + 1
+                  : 1,
+                verify: async (tx) => {
+                  signal.throwIfAborted();
+                  const current = await this.ownedAnswer(
+                    tx,
+                    actor,
+                    projectId,
+                    id,
+                    claimed.grantId,
+                  );
+                  const grant = await this.access.authority(
+                    tx,
+                    actor,
+                    projectId,
+                    'INVOKE',
+                  );
+                  if (
+                    grant.id !== claimed.grantId ||
+                    (
+                      await this.view(
+                        tx,
+                        actor,
+                        projectId,
+                        current,
+                        grant.id,
+                        new Set([id]),
+                      )
+                    ).status !== 'RUNNING'
+                  )
+                    throw new NotFoundException();
+                },
+                record: async (tx, file) => {
+                  signal.throwIfAborted();
+                  const current = await tx.chatAiAnswer.findUniqueOrThrow({
+                      where: { id },
+                    }),
+                    usage = current.usage as Prisma.JsonObject;
+                  artifact = {
+                    toolKey: key,
+                    sourceId: file.id,
+                    fileAssetId: file.fileAssetId,
+                    version: file.version,
+                    filename: file.label,
+                    sizeBytes: file.sizeBytes,
+                    format: document.format,
+                    provenance: 'AI_DRAFT',
+                    downloadUrl: `/api/v1/project-chat/projects/${projectId}/ai/files/${file.id}/download`,
+                    predecessor: predecessor
+                      ? {
+                          sourceId: predecessor.index.id,
+                          version: predecessor.index.version,
+                        }
+                      : null,
+                    diff,
+                  };
+                  await tx.chatAiAnswer.update({
+                    where: { id },
+                    data: {
+                      usage: {
+                        ...usage,
+                        artifacts: [
+                          ...(Array.isArray(usage.artifacts)
+                            ? usage.artifacts
+                            : []),
+                          artifact,
+                        ],
+                      } as Prisma.InputJsonObject,
+                    },
+                  });
+                  await tx.auditLog.create({
+                    data: {
+                      organizationId: actor.organizationId,
+                      actorUserId: actor.userId,
+                      action: 'AI_DRAFT_CREATED',
+                      entityType: 'ChatAiAnswer',
+                      entityId: id,
+                      metadata: {
+                        projectId,
+                        fileAssetId: file.fileAssetId,
+                        sourceId: file.id,
+                        version: file.version,
+                        toolKey: key,
+                      },
+                    },
+                  });
+                },
+              },
+            );
+            if (!artifact) {
+              const current = await this.db.chatAiAnswer.findUniqueOrThrow({
+                  where: { id },
+                }),
+                usage = current.usage as Prisma.JsonObject;
+              artifact =
+                ((Array.isArray(usage.artifacts) ? usage.artifacts : []).find(
+                  (item) =>
+                    item &&
+                    typeof item === 'object' &&
+                    !Array.isArray(item) &&
+                    item.sourceId === saved.id,
+                ) as Prisma.JsonObject) ?? null;
+            }
+            if (!artifact) throw new AiError('DOCUMENT_UNAVAILABLE');
+            await beforeAttempt();
+            signal.throwIfAborted();
+            return output(artifact);
+          }
           if (name === 'search_web' || name === 'fetch_public_page') {
             let values: { text: string; web: NonNullable<ToolSource['web']> }[];
             if (name === 'search_web') {
@@ -3597,6 +3963,8 @@ export class ProjectAiService {
                       'read_project_records',
                       'calculate',
                       'analyze_table',
+                      'create_document',
+                      'revise_draft',
                       ...(web ? ['search_web' as const] : []),
                       ...(web || publicUrls.size
                         ? ['fetch_public_page' as const]
@@ -3682,6 +4050,11 @@ export class ProjectAiService {
               citations: result.citations,
               usage: pin
                 ? {
+                    ...(answer.usage &&
+                    typeof answer.usage === 'object' &&
+                    !Array.isArray(answer.usage)
+                      ? { artifacts: answer.usage.artifacts ?? [] }
+                      : {}),
                     request: pin,
                     toolSources,
                     toolPermissions,

@@ -438,3 +438,65 @@ for (const kind of ['docx', 'xlsx', 'png', 'scan'] as const)
       fullPage: true,
     });
   });
+
+for (const format of ['docx', 'pdf', 'xlsx'] as const)
+  test(`artifact ${format}: composer tạo file thật và card tải đúng version`, async ({
+    page,
+  }) => {
+    const cookie = fixture.users.sender!.cookie,
+      separator = cookie.indexOf('=');
+    await page.context().addCookies([
+      {
+        name: cookie.slice(0, separator),
+        value: cookie.slice(separator + 1),
+        url: process.env.APP_PUBLIC_ORIGIN!,
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Lax',
+      },
+    ]);
+    await page.goto(`/projects/${projectId}/work?group=COMMERCIAL`);
+    await page.bringToFront();
+    const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
+    await panel
+      .getByRole('button', { name: '＋ Tạo cuộc trao đổi mới', exact: true })
+      .click();
+    await panel
+      .getByLabel('Câu hỏi AI', { exact: true })
+      .fill(`Xuất kiểm chứng ${format}`);
+    await panel.getByRole('button', { name: 'Gửi', exact: true }).click();
+    const card = panel.getByRole('link', {
+      name: new RegExp(`Bản nháp kiểm chứng ${format}`),
+    });
+    await expect(card).toBeVisible({ timeout: 20000 });
+    const href = (await card.getAttribute('href'))!;
+    const downloaded = await page.request.get(href);
+    expect(downloaded.status()).toBe(200);
+    const bytes = await downloaded.body();
+    expect(bytes.length).toBeGreaterThan(800);
+    expect(bytes.subarray(0, 2).toString()).toBe(
+      format === 'pdf' ? '%P' : 'PK',
+    );
+    const conversationId = new URL(page.url()).searchParams.get('ai')!;
+    const answer = await db.chatAiAnswer.findFirstOrThrow({
+      where: { conversationId, status: 'COMPLETED' },
+    });
+    const artifact = (answer.usage as { artifacts: { fileAssetId: string }[] })
+      .artifacts[0]!;
+    const file = await db.fileAsset.findUniqueOrThrow({
+      where: { id: artifact.fileAssetId },
+    });
+    const { createHash } = await import('node:crypto');
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(
+      file.checksum,
+    );
+    const request = page
+      .context()
+      .waitForEvent('request', (r) => r.url().endsWith(href));
+    await card.click();
+    await request;
+    await page.screenshot({
+      path: `/home/galaxy_os/.runtime/five-pdfs-20261006/artifact-${format}.png`,
+      fullPage: true,
+    });
+  });

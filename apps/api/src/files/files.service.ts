@@ -264,6 +264,21 @@ export class FilesService {
         },
     file?: Express.Multer.File,
     chatKey?: string,
+    generated?: {
+      answerId: string;
+      version: number;
+      verify: (tx: Prisma.TransactionClient) => Promise<void>;
+      record: (
+        tx: Prisma.TransactionClient,
+        file: {
+          id: string;
+          fileAssetId: string;
+          version: string;
+          label: string;
+          sizeBytes: number;
+        },
+      ) => Promise<void>;
+    },
   ) {
     this.assertSupportedConfidentiality(input.confidentiality);
     if (!file || !file.size || file.size > maximumBytes)
@@ -290,6 +305,10 @@ export class FilesService {
             input.entityId,
             'file.upload',
           );
+    if (generated) {
+      if (!aiContext) throw new NotFoundException();
+      await generated.verify(this.prisma);
+    }
     const original = safeFilename(file.originalname);
     if (!original) throw new BadRequestException('Invalid filename');
     const xlsx = aiContext && extname(original).toLowerCase() === '.xlsx';
@@ -471,6 +490,7 @@ export class FilesService {
           currentContext.customerId !== context.customerId
         )
           throw new NotFoundException('Entity not found');
+        if (generated) await generated.verify(tx);
         await this.storage.publishPending(storageKey, reservationId);
         const asset = await tx.fileAsset.create({
           data: {
@@ -482,6 +502,7 @@ export class FilesService {
             storageKey,
             checksum,
             category: input.category,
+            ...(generated ? { version: generated.version } : {}),
             confidentiality: input.confidentiality,
             uploadedById: actor.userId,
           },
@@ -508,9 +529,27 @@ export class FilesService {
               fileAssetId: asset.id,
               version: `${asset.version}:${checksum}`,
               label: original,
-              provenance: 'UNCONFIRMED',
+              provenance: generated ? 'AI_DRAFT' : 'UNCONFIRMED',
             },
           });
+          if (generated) {
+            await tx.entityAttachment.create({
+              data: {
+                fileAssetId: asset.id,
+                entityType: 'ChatAiAnswer',
+                entityId: generated.answerId,
+                projectId: aiCurrent.projectId,
+                createdBy: actor.userId,
+              },
+            });
+            await generated.record(tx, {
+              id: linked.id,
+              fileAssetId: asset.id,
+              version: linked.version,
+              label: original,
+              sizeBytes: file.size,
+            });
+          }
           await tx.activity.create({
             data: {
               organizationId: actor.organizationId,
@@ -835,7 +874,7 @@ export class FilesService {
     requiredPermissions: string | readonly string[],
   ): Prisma.EntityAttachmentWhereInput {
     return {
-      NOT: { entityType: 'ChatAiConversation' },
+      NOT: { entityType: { in: ['ChatAiConversation', 'ChatAiAnswer'] } },
       OR: [
         {
           projectId: { not: null },
@@ -1076,7 +1115,11 @@ export class FilesService {
     return {
       NOT: {
         attachments: {
-          some: { entityType: { in: ['ChatRoom', 'ChatAiConversation'] } },
+          some: {
+            entityType: {
+              in: ['ChatRoom', 'ChatAiConversation', 'ChatAiAnswer'],
+            },
+          },
         },
       },
       OR: [

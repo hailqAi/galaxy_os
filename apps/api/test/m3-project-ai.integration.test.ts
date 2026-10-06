@@ -417,7 +417,11 @@ describe.sequential(
       }
     });
 
-    function toolVendor(name: string, args: object) {
+    function toolVendor(
+      name: string,
+      args: object,
+      afterTool?: () => Promise<void>,
+    ) {
       const prior = globalThis.fetch;
       const payloads: string[] = [];
       vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
@@ -427,6 +431,7 @@ describe.sequential(
         const result = body.messages.find(
           (message: { role: string }) => message.role === 'tool',
         );
+        if (result && afterTool) await afterTool();
         return Response.json({
           id: 'round-' + payloads.length,
           model: 'fixture/free:free',
@@ -438,8 +443,26 @@ describe.sequential(
                 ? {
                     content: JSON.stringify({
                       answer: 'Kết quả từ công cụ được phép.',
-                      citations: JSON.parse(result.content)
-                        .sources.slice(0, 1)
+                      citations: (JSON.parse(result.content).sources.length
+                        ? JSON.parse(result.content).sources
+                        : body.messages.flatMap(
+                            (message: { role: string; content: unknown }) => {
+                              if (
+                                message.role !== 'user' ||
+                                typeof message.content !== 'string'
+                              )
+                                return [];
+                              try {
+                                return (
+                                  JSON.parse(message.content).sources ?? []
+                                );
+                              } catch {
+                                return [];
+                              }
+                            },
+                          )
+                      )
+                        .slice(0, 1)
                         .map((source: { handle: string }) => source.handle),
                       uncertainty: 'Chưa xác nhận nghiệp vụ.',
                     }),
@@ -460,6 +483,190 @@ describe.sequential(
       });
       return payloads;
     }
+    it.each(['docx', 'pdf', 'xlsx'] as const)(
+      'artifact %s thật: private/newchat/revision/idempotency và revoke lineage',
+      async (format) => {
+        const a = await aiScenario(1),
+          { dir } = unifiedProvider();
+        try {
+          const args = {
+            format,
+            title: 'Bản nháp kiểm chứng',
+            blocks: [
+              {
+                kind: 'paragraph',
+                text: 'Nghĩa vụ thử 7392, chưa được duyệt.',
+              },
+            ],
+          };
+          toolVendor('create_document', args, async () => {
+            for (let i = 0; i < 3; i++)
+              await a.post('/index', { scope: 'ALL' }).expect(201);
+            const generated = await db.chatAiSourceIndex.findFirstOrThrow({
+              where: { projectId: a.projectId, provenance: 'AI_DRAFT' },
+            });
+            expect(generated.attempts).toBe(0);
+          });
+          const first = await a.ask();
+          const result = (
+            await a.post(`/answers/${first.id}/run`, {}).expect(201)
+          ).body;
+          expect({
+            status: result.status,
+            errorCode: result.errorCode,
+          }).toEqual({
+            status: 'COMPLETED',
+            errorCode: null,
+          });
+          expect(result.artifacts).toHaveLength(1);
+          const artifact = result.artifacts[0];
+          const file = await db.fileAsset.findUniqueOrThrow({
+            where: { id: artifact.fileAssetId },
+          });
+          expect(file.category).toBe('AI_DRAFT');
+          const downloaded = await a
+            .get(`/files/${artifact.sourceId}/download`)
+            .buffer(true)
+            .parse((response, done) => {
+              const parts: Buffer[] = [];
+              response.on('data', (part: Buffer) => parts.push(part));
+              response.on('end', () => done(null, Buffer.concat(parts)));
+              response.on('error', done);
+            })
+            .expect(200);
+          expect(
+            createHash('sha256').update(downloaded.body).digest('hex'),
+          ).toBe(file.checksum);
+          const other = await aiScenario(0);
+          await other.get(`/files/${artifact.sourceId}/download`).expect(404);
+          await request(app.getHttpServer())
+            .get(
+              `/api/v1/project-chat/projects/${a.projectId}/ai/files/${artifact.sourceId}/download`,
+            )
+            .set('Cookie', users.reader!.cookie)
+            .set('X-Chat-Actor', users.reader!.id)
+            .expect(404);
+          await db.entityAttachment.create({
+            data: {
+              fileAssetId: file.id,
+              entityType: 'Project',
+              entityId: a.projectId,
+              projectId: a.projectId,
+              createdBy: users.owner!.id,
+            },
+          });
+
+          await request(app.getHttpServer())
+            .get(`/api/v1/files/${file.id}/download`)
+            .set('Cookie', users.owner!.cookie)
+            .expect(404);
+          expect(
+            (await a.post(`/answers/${first.id}/run`, {}).expect(201)).body
+              .artifacts,
+          ).toEqual(result.artifacts);
+          await a.post('/index', { scope: 'ALL' }).expect(201);
+          expect(
+            (await a.get('/index?scope=ALL').expect(200)).body.sources.some(
+              (source: { id: string }) => source.id === artifact.sourceId,
+            ),
+          ).toBe(true);
+          toolVendor('revise_draft', {
+            ...args,
+            sourceId: artifact.sourceId,
+            blocks: [
+              { kind: 'paragraph', text: 'Nghĩa vụ thử 8403, vẫn là nháp.' },
+            ],
+          });
+          const second = await a.ask();
+          const revised = (
+            await a.post(`/answers/${second.id}/run`, {}).expect(201)
+          ).body;
+          expect({
+            status: revised.status,
+            errorCode: revised.errorCode,
+          }).toEqual({ status: 'COMPLETED', errorCode: null });
+          expect(revised.artifacts[0].fileAssetId).not.toBe(file.id);
+          expect(revised.artifacts[0].predecessor.sourceId).toBe(
+            artifact.sourceId,
+          );
+          expect(revised.artifacts[0].diff.added.join('')).toContain('8403');
+          expect(
+            (await db.fileAsset.findUniqueOrThrow({ where: { id: file.id } }))
+              .checksum,
+          ).toBe(file.checksum);
+          if (format === 'docx') {
+            toolVendor('revise_draft', {
+              ...args,
+              sourceId: revised.artifacts[0].sourceId,
+            });
+            const third = await a.ask();
+            const latest = (
+              await a.post(`/answers/${third.id}/run`, {}).expect(201)
+            ).body;
+            expect(latest.status).toBe('COMPLETED');
+            await db.chatAiAnswerDependency.upsert({
+              where: {
+                answerId_sourceIndexId: {
+                  answerId: third.id,
+                  sourceIndexId: artifact.sourceId,
+                },
+              },
+              create: {
+                organizationId,
+                projectId: a.projectId,
+                answerId: third.id,
+                sourceIndexId: artifact.sourceId,
+                handles: (
+                  (
+                    await db.chatAiSourceIndex.findUniqueOrThrow({
+                      where: { id: artifact.sourceId },
+                    })
+                  ).chunks as { handle: string }[]
+                )
+                  .slice(0, 1)
+                  .map((chunk) => chunk.handle),
+              },
+              update: {},
+            });
+            const spy = vi.spyOn(
+              app.get(ProjectAiService) as unknown as {
+                view: (...args: unknown[]) => Promise<unknown>;
+              },
+              'view',
+            );
+            await a
+              .get(`/files/${latest.artifacts[0].sourceId}/download`)
+              .expect(200);
+            expect(
+              spy.mock.calls.filter(
+                (call) => (call[3] as { id: string }).id === first.id,
+              ),
+            ).toHaveLength(1);
+            spy.mockRestore();
+          }
+          await db.chatRoomGrant.update({
+            where: { id: a.rooms[0]!.grant.id },
+            data: { revokedAt: new Date() },
+          });
+          await a.get(`/files/${artifact.sourceId}/download`).expect(404);
+          await a
+            .get(`/files/${revised.artifacts[0].sourceId}/download`)
+            .expect(404);
+        } finally {
+          await db.chatAiAnswer.updateMany({
+            where: {
+              organizationId,
+              projectId: a.projectId,
+              status: { in: ['FAILED', 'ACCESS_REVOKED'] },
+            },
+            data: { leaseUntil: null },
+          });
+          rmSync(dir, { recursive: true });
+        }
+      },
+      20000, // Full workflow: three vendor rounds, revision, downloads and concurrent index requests.
+    );
+
     it('công cụ nguồn chặn sourceId Project khác, giữ receipt khi từ chối và revoke nguồn đã đọc', async () => {
       const a = await aiScenario(1),
         b = await aiScenario(1),
@@ -609,10 +816,35 @@ describe.sequential(
           missingBudgetCount: 1,
           totalAllocatedBudget: null,
         });
+        toolVendor('create_document', {
+          format: 'xlsx',
+          title: 'Ngân sách nháp',
+          blocks: [
+            {
+              kind: 'table',
+              rows: [['Tổng đã biết', '1999999999999999999.98']],
+            },
+          ],
+        });
+        const exportRequest = (
+          await a
+            .post(`/conversations/${allowed.conversationId}/answers`, {
+              clientKey: randomUUID(),
+              question: 'Xuất bảng vừa tính thành bản nháp.',
+            })
+            .expect(201)
+        ).body;
+        const exported = (
+          await a.post(`/answers/${exportRequest.id}/run`, {}).expect(201)
+        ).body;
+        expect(exported.status).toBe('COMPLETED');
+        const privateSource = exported.artifacts[0].sourceId;
+        await a.get(`/files/${privateSource}/download`).expect(200);
         await db.userRole.update({
           where: { id: assignmentId },
           data: { status: 'archived' },
         });
+        await a.get(`/files/${privateSource}/download`).expect(404);
         expect(
           (await a.get(`/conversations/${allowed.conversationId}`).expect(200))
             .body.answers[0].status,

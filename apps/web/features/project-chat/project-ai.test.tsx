@@ -399,3 +399,41 @@ it('hiện hoạt động công cụ thật đang chạy, không giả phần tr
   expect(html).toContain('Đang tra cứu nguồn công khai');
   expect(html).not.toContain('50%');
 });
+
+it('file bản nháp là thẻ tải thật, chỉ hiện ở answer hoàn tất', () => {
+  const props = {
+    answer: {
+      id: 'a',
+      status: 'COMPLETED',
+      question: 'Xuất bảng',
+      answer: 'Đã tạo bản nháp.',
+      sources: [],
+      artifacts: [
+        {
+          sourceId: 's',
+          fileAssetId: 'f',
+          version: '1:hash',
+          filename: 'Bảng kiểm chứng.xlsx',
+          format: 'xlsx',
+          sizeBytes: 1234,
+          downloadUrl: '/api/v1/project-chat/projects/p/ai/files/s/download',
+          diff: { added: ['Mới'], removed: ['Cũ'], coverage: 'Văn bản' },
+        },
+      ],
+    },
+    onSource: () => {},
+    onRun: () => {},
+    onCancel: () => {},
+  };
+  const html = renderToStaticMarkup(createElement(AiAnswer, props));
+  expect(html).toContain('Bảng kiểm chứng.xlsx');
+  expect(html).toContain('Chưa phê duyệt');
+  expect(html).toContain(props.answer.artifacts[0]!.downloadUrl);
+  const hidden = renderToStaticMarkup(
+    createElement(AiAnswer, {
+      ...props,
+      answer: { ...props.answer, status: 'ACCESS_REVOKED' },
+    }),
+  );
+  expect(hidden).not.toContain('Bảng kiểm chứng.xlsx');
+});

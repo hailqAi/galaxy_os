@@ -1,11 +1,14 @@
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
+import { documentInput } from './ai-document';
 import { AiError } from './ai-registry';
 
 export const ToolDecimal = Prisma.Decimal.clone({ precision: 80 });
 const decimal = z.string().regex(/^-?(?:0|[1-9]\d{0,29})(?:\.\d{1,12})?$/);
 export const toolInputs = {
+  create_document: documentInput,
+  revise_draft: documentInput.extend({ sourceId: z.string().uuid() }).strict(),
   search_project_sources: z
     .object({
       query: z.string().max(200),
@@ -63,6 +66,10 @@ export const toolPolicy = (name: ToolName) => ({
         : 'PROJECT_AI_INVOKE',
 });
 const descriptions: Record<ToolName, string> = {
+  create_document:
+    'Tạo file DOCX/PDF/XLSX riêng tư thật, bản nháp chưa phê duyệt. Văn bản/bảng/ảnh dùng sourceId được phép; số XLSX lưu chuỗi chính xác, không công thức. Không dùng để phát hành hoặc thay nghĩa vụ đã ký.',
+  revise_draft:
+    'Tạo phiên bản nháp mới từ sourceId được phép, nội dung thay thế đầy đủ và diff; giữ nguyên binary/bản ký cũ, không phê duyệt hoặc phát hành.',
   search_project_sources:
     'Tìm nguồn được phép trong dự án hiện hành, kể cả file riêng đã lưu từ chat trước. Query rỗng liệt kê metadata giới hạn; không khẳng định là toàn bộ hồ sơ.',
   read_project_source:

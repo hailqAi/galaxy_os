@@ -90,6 +90,21 @@ type ModelChoice = {
   };
 };
 type Answer = {
+  artifacts?: {
+    sourceId: string;
+    fileAssetId: string;
+    version: string;
+    filename: string;
+    format: string;
+    sizeBytes: number;
+    downloadUrl: string;
+    diff?: {
+      added: string[];
+      removed: string[];
+      coverage: string;
+      truncated?: boolean;
+    } | null;
+  }[];
   mode?: 'GENERAL' | 'PROJECT' | 'UNIFIED';
   model?: string | null;
   modelLabel?: string | null;
@@ -251,6 +266,10 @@ export const aiStatusLabel = (
       'Lượt này đã đạt giới hạn công cụ; hãy chia yêu cầu nhỏ hơn.',
     TOOL_CONTEXT_LIMIT:
       'Phạm vi đọc vượt giới hạn lượt này; hãy chọn phần cụ thể hơn.',
+    DOCUMENT_LIMIT:
+      'Tài liệu vượt giới hạn tạo trong một lượt. Hãy chia nhỏ nội dung.',
+    DOCUMENT_IMAGE_UNAVAILABLE: 'Chưa đọc được ảnh được chọn cho tài liệu.',
+    DOCUMENT_IMAGE_LIMIT: 'Ảnh quá lớn để đưa vào tài liệu.',
     TOOL_TIMEOUT: 'Công cụ mất quá nhiều thời gian; lượt này đã dừng.',
     WEB_COST_VIOLATION: 'Đường tra web đã dừng do mức sử dụng bất thường.',
     WEB_COST_UNVERIFIED:
@@ -348,6 +367,50 @@ export function AiAnswer({
             {answer.uncertainty && (
               <p className="whitespace-pre-wrap">{answer.uncertainty}</p>
             )}
+            <ul className="ai-file-chips">
+              {answer.artifacts
+                ?.filter((file) =>
+                  /^\/api\/v1\/project-chat\/projects\/[^/]+\/ai\/files\/[^/]+\/download$/.test(
+                    file.downloadUrl,
+                  ),
+                )
+                .map((file) => (
+                  <li key={file.fileAssetId}>
+                    <a
+                      href={file.downloadUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {file.filename} · {Math.ceil(file.sizeBytes / 1024)} KB
+                    </a>
+                    <p className="chat-metadata">
+                      Bản nháp AI · Chưa phê duyệt · Phiên bản{' '}
+                      {file.version.split(':')[0]}
+                    </p>
+                    {file.diff && (
+                      <details>
+                        <summary>Thay đổi bản nháp</summary>
+                        <p>
+                          {file.diff.coverage}
+                          {file.diff.truncated
+                            ? ' Bản đối chiếu đã rút gọn.'
+                            : ''}
+                        </p>
+                        {file.diff.removed.map((line, i) => (
+                          <p key={'r' + i}>
+                            <del>{line}</del>
+                          </p>
+                        ))}
+                        {file.diff.added.map((line, i) => (
+                          <p key={'a' + i}>
+                            <ins>{line}</ins>
+                          </p>
+                        ))}
+                      </details>
+                    )}
+                  </li>
+                ))}
+            </ul>
             {onDraft && answer.answer && (
               <button onClick={() => onDraft(answer.answer!)}>
                 Dùng làm nháp phản hồi
