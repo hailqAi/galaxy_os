@@ -6,6 +6,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import * as nativeTools from '../src/project-chat/ai-native-source';
 import { nativeSource } from '../src/project-chat/ai-native-source';
 import { activationFixture } from '../src/project-chat/ai-activation';
 import { AI_MODELS } from '../src/project-chat/ai-registry';
@@ -22,6 +23,7 @@ import {
 } from 'vitest';
 import { assertG00Isolation } from '../scripts/g00-isolated-environment.mjs';
 import { AppModule } from '../src/app.module';
+import * as webTools from '../src/project-chat/ai-web';
 import { ProjectAiService } from '../src/project-chat/project-ai.service';
 import { providerConfig } from '../src/project-chat/ai-provider';
 import { SearchController } from '../src/search/search.controller';
@@ -242,6 +244,7 @@ describe.sequential(
                     input_modalities: ['text', 'image'],
                     output_modalities: ['text'],
                   },
+                  supported_parameters: ['tools'],
                   pricing: { prompt: '0', completion: '0', request: '0' },
                 },
               ],
@@ -271,7 +274,13 @@ describe.sequential(
                         citations: [sources[0]!.handle],
                         uncertainty: 'Nguồn chưa xác nhận.',
                       })
-                    : 'Chúc bạn một ngày vui.',
+                    : body.tools
+                      ? JSON.stringify({
+                          answer: 'Chúc bạn một ngày vui.',
+                          citations: [],
+                          uncertainty: '',
+                        })
+                      : 'Chúc bạn một ngày vui.',
                 },
               },
             ],
@@ -281,6 +290,570 @@ describe.sequential(
       });
       return { dir, payloads };
     }
+    it('công cụ Decimal lưu nguồn riêng, identity từng vòng và lịch sử đúng Project', async () => {
+      const scenario = await aiScenario(0);
+      const { dir } = unifiedProvider();
+      const catalogueFetch = globalThis.fetch;
+      let calls = 0;
+      vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+        if (url.endsWith('/models')) {
+          const response = await catalogueFetch(url, init);
+          const data = await response.json();
+          data.data[0].supported_parameters = ['tools'];
+          return Response.json(data);
+        }
+        calls++;
+        const body = JSON.parse(String(init.body));
+        expect(
+          body.tools.map(
+            (t: { function: { name: string } }) => t.function.name,
+          ),
+        ).toContain('calculate');
+        const result = body.messages.find(
+          (m: { role: string }) => m.role === 'tool',
+        );
+        return Response.json({
+          id: 'tool-round-' + calls,
+          model: 'fixture/free:free',
+          usage: { prompt_tokens: 20, completion_tokens: 10, cost: 0 },
+          choices: [
+            {
+              finish_reason: result ? 'stop' : 'tool_calls',
+              message: result
+                ? {
+                    content: JSON.stringify({
+                      answer: 'Kết quả là 0.3.',
+                      citations: [JSON.parse(result.content).sources[0].handle],
+                      uncertainty: 'Theo toán hạng được cung cấp.',
+                    }),
+                  }
+                : {
+                    content: null,
+                    tool_calls: [
+                      {
+                        id: 'decimal',
+                        type: 'function',
+                        function: {
+                          name: 'calculate',
+                          arguments: JSON.stringify({
+                            operation: 'add',
+                            operands: ['0.1', '0.2'],
+                            decimalPlaces: null,
+                          }),
+                        },
+                      },
+                    ],
+                  },
+            },
+          ],
+        });
+      });
+      try {
+        const conversation = await scenario
+          .post('/conversations', { scope: 'ALL', clientKey: randomUUID() })
+          .expect(201);
+        const answer = await scenario
+          .post(`/conversations/${conversation.body.id}/answers`, {
+            clientKey: randomUUID(),
+            question: 'Tính chính xác 0.1 cộng 0.2 bằng công cụ.',
+          })
+          .expect(201);
+        const result = await scenario
+          .post(`/answers/${answer.body.id}/run`, {})
+          .expect(201);
+        expect(result.body).toMatchObject({
+          status: 'COMPLETED',
+          answer: 'Kết quả là 0.3.',
+        });
+        expect(calls).toBe(2);
+        const source = await scenario
+          .get(
+            `/answers/${answer.body.id}/sources/${result.body.sources[0].handle}`,
+          )
+          .expect(200);
+        expect(source.body).toMatchObject({
+          projectId: scenario.projectId,
+          kind: 'TOOL',
+          provenance: 'AI_DRAFT',
+        });
+        expect(source.body.text).toContain('0.3');
+        expect(
+          (
+            await db.chatAiAnswer.findUniqueOrThrow({
+              where: { id: answer.body.id },
+            })
+          ).usage,
+        ).toMatchObject({
+          providerCalls: [
+            { gatewayRequestId: 'tool-round-1' },
+            { gatewayRequestId: 'tool-round-2' },
+          ],
+        });
+        await scenario.post(`/answers/${answer.body.id}/run`, {}).expect(201);
+        expect(calls).toBe(2);
+        for (let turn = 0; turn < 2; turn++) {
+          const next = await scenario
+            .post(`/conversations/${conversation.body.id}/answers`, {
+              clientKey: randomUUID(),
+              question: 'Tính lại bằng công cụ lượt ' + turn,
+            })
+            .expect(201);
+          expect(
+            (
+              await scenario
+                .post(`/answers/${next.body.id}/run`, {})
+                .expect(201)
+            ).body.status,
+          ).toBe('COMPLETED');
+          const saved = await db.chatAiAnswer.findUniqueOrThrow({
+            where: { id: next.body.id },
+          });
+          expect(
+            (saved.usage as { toolSources: unknown[] }).toolSources,
+          ).toHaveLength(1);
+        }
+      } finally {
+        rmSync(dir, { recursive: true });
+      }
+    });
+
+    function toolVendor(name: string, args: object) {
+      const prior = globalThis.fetch;
+      const payloads: string[] = [];
+      vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+        if (url.endsWith('/models')) return prior(url, init);
+        const body = JSON.parse(String(init.body));
+        payloads.push(JSON.stringify(body));
+        const result = body.messages.find(
+          (message: { role: string }) => message.role === 'tool',
+        );
+        return Response.json({
+          id: 'round-' + payloads.length,
+          model: 'fixture/free:free',
+          usage: { prompt_tokens: 20, completion_tokens: 10, cost: 0 },
+          choices: [
+            {
+              finish_reason: result ? 'stop' : 'tool_calls',
+              message: result
+                ? {
+                    content: JSON.stringify({
+                      answer: 'Kết quả từ công cụ được phép.',
+                      citations: JSON.parse(result.content)
+                        .sources.slice(0, 1)
+                        .map((source: { handle: string }) => source.handle),
+                      uncertainty: 'Chưa xác nhận nghiệp vụ.',
+                    }),
+                  }
+                : {
+                    content: null,
+                    tool_calls: [
+                      {
+                        id: 'tool-call',
+                        type: 'function',
+                        function: { name, arguments: JSON.stringify(args) },
+                      },
+                    ],
+                  },
+            },
+          ],
+        });
+      });
+      return payloads;
+    }
+    it('công cụ nguồn chặn sourceId Project khác, giữ receipt khi từ chối và revoke nguồn đã đọc', async () => {
+      const a = await aiScenario(1),
+        b = await aiScenario(1),
+        { dir } = unifiedProvider();
+      try {
+        await a.post('/index', { scope: 'ALL' }).expect(201);
+        await b.post('/index', { scope: 'ALL' }).expect(201);
+        const sourceA = await db.chatAiSourceIndex.findFirstOrThrow({
+            where: { projectId: a.projectId },
+          }),
+          sourceB = await db.chatAiSourceIndex.findFirstOrThrow({
+            where: { projectId: b.projectId },
+          });
+        let payloads = toolVendor('read_project_source', {
+          sourceId: sourceB.id,
+          representation: 'text',
+          startLine: 1,
+          page: null,
+        });
+        const blocked = await a.ask();
+        expect(
+          (await a.post(`/answers/${blocked.id}/run`, {}).expect(201)).body
+            .status,
+        ).toBe('ACCESS_REVOKED');
+        expect(payloads).toHaveLength(1);
+        expect(payloads.join('')).not.toContain(b.code);
+        await db.chatAiAnswer.update({
+          where: { id: blocked.id },
+          data: { leaseUntil: null },
+        });
+        expect(
+          (
+            await db.chatAiAnswer.findUniqueOrThrow({
+              where: { id: blocked.id },
+            })
+          ).usage,
+        ).toMatchObject({ providerCalls: [{ gatewayRequestId: 'round-1' }] });
+        payloads = toolVendor('read_project_source', {
+          sourceId: sourceA.id,
+          representation: 'text',
+          startLine: 1,
+          page: null,
+        });
+        const allowed = await a.ask();
+        expect(
+          (await a.post(`/answers/${allowed.id}/run`, {}).expect(201)).body
+            .status,
+        ).toBe('COMPLETED');
+        expect(payloads).toHaveLength(2);
+        await db.chatRoomGrant.update({
+          where: { id: a.rooms[0]!.grant.id },
+          data: { revokedAt: new Date() },
+        });
+        expect(
+          (await a.get(`/conversations/${allowed.conversationId}`).expect(200))
+            .body.answers[0].status,
+        ).toBe('ACCESS_REVOKED');
+      } finally {
+        rmSync(dir, { recursive: true });
+      }
+    });
+    it('công cụ nghiệp vụ đọc đủ kế hoạch đúng Project, giữ Decimal và revoke quyền tài chính trong history', async () => {
+      const a = await aiScenario(0),
+        { dir } = unifiedProvider();
+      let assignmentId: string | undefined;
+      try {
+        const args = { view: 'stage_two_plan', includeFinancial: true };
+        toolVendor('read_project_records', args);
+        const denied = await a.ask();
+        expect(
+          (await a.post(`/answers/${denied.id}/run`, {}).expect(201)).body
+            .status,
+        ).toBe('ACCESS_REVOKED');
+        await db.chatAiAnswer.update({
+          where: { id: denied.id },
+          data: { leaseUntil: null },
+        });
+        const role = await db.role.create({
+          data: {
+            organizationId,
+            code: randomUUID(),
+            name: 'Tool finance fixture',
+            maximumScope: 'ORGANIZATION',
+            permissions: {
+              create: ['task.read', 'estimate.read'].map((code) => ({
+                permission: { connect: { code } },
+              })),
+            },
+          },
+        });
+        assignmentId = (
+          await db.userRole.create({
+            data: {
+              organizationId,
+              userId: users.owner!.id,
+              roleId: role.id,
+              scopeType: 'ORGANIZATION',
+            },
+          })
+        ).id;
+        for (const amount of [
+          '999999999999999999.99',
+          '999999999999999999.99',
+          null,
+        ])
+          await db.task.create({
+            data: {
+              organizationId,
+              projectId: a.projectId,
+              title: 'Cùng tên vật tư',
+              relatedEntityType: 'PROJECT_STAGE_TWO_BASELINE',
+              baselineVersion: 1,
+              allocatedBudget: amount,
+              createdBy: users.owner!.id,
+              updatedBy: users.owner!.id,
+            },
+          });
+        await db.task.create({
+          data: {
+            organizationId,
+            projectId: otherProjectId,
+            title: 'KHONG_DUOC_TRON_PROJECT',
+            relatedEntityType: 'PROJECT_STAGE_TWO_BASELINE',
+            baselineVersion: 1,
+            allocatedBudget: '111',
+            createdBy: users.owner!.id,
+            updatedBy: users.owner!.id,
+          },
+        });
+        const payloads = toolVendor('read_project_records', args),
+          allowed = await a.ask();
+        const result = await a
+          .post(`/answers/${allowed.id}/run`, {})
+          .expect(201);
+        expect(result.body.status).toBe('COMPLETED');
+        expect(payloads.join('')).not.toContain('KHONG_DUOC_TRON_PROJECT');
+        const source = (
+          await a
+            .get(
+              `/answers/${allowed.id}/sources/${result.body.sources[0].handle}`,
+            )
+            .expect(200)
+        ).body;
+        expect(JSON.parse(source.text)).toMatchObject({
+          count: 3,
+          knownAllocatedBudget: '1999999999999999999.98',
+          missingBudgetCount: 1,
+          totalAllocatedBudget: null,
+        });
+        await db.userRole.update({
+          where: { id: assignmentId },
+          data: { status: 'archived' },
+        });
+        expect(
+          (await a.get(`/conversations/${allowed.conversationId}`).expect(200))
+            .body.answers[0].status,
+        ).toBe('ACCESS_REVOKED');
+        await a
+          .get(
+            `/answers/${allowed.id}/sources/${result.body.sources[0].handle}`,
+          )
+          .expect(404);
+      } finally {
+        if (assignmentId)
+          await db.userRole.update({
+            where: { id: assignmentId },
+            data: { status: 'archived' },
+          });
+        rmSync(dir, { recursive: true });
+      }
+    });
+    it('web mock thật qua adapter: query công khai, nguồn snippet và credit reservation bền vững', async () => {
+      const a = await aiScenario(0),
+        { dir } = unifiedProvider();
+      const path = join(dir, 'providers.json');
+      const config = JSON.parse(readFileSync(path, 'utf8'));
+      config.tools = {
+        web: {
+          enabled: true,
+          revision: 'web-1',
+          organizationId,
+          decisionReference: 'Test fixture',
+          creditsPerDay: 1,
+          maxCallsPerRequest: 1,
+          accountPaidUsageDisabled: true,
+          subjects: [
+            {
+              id: 'public-sku',
+              label: 'Mã hãng công khai',
+              query: 'PUBLIC-SKU manufacturer',
+              domains: ['example.com'],
+            },
+          ],
+        },
+      };
+      writeFileSync(path, JSON.stringify(config), { mode: 0o600 });
+      writeFileSync(
+        join(dir, 'keys.env'),
+        'TAVILY_API_KEY="fixture-tavily"\n',
+        { flag: 'a', mode: 0o600 },
+      );
+      vi.spyOn(webTools, 'publicTarget').mockImplementation(async (raw) => ({
+        url: new URL(raw),
+        addresses: [{ address: '93.184.216.34', family: 4 }],
+      }));
+      const vendor = toolVendor('search_web', {
+          subjectId: 'public-sku',
+          topic: 'manual',
+        }),
+        prior = globalThis.fetch;
+      let searchCalls = 0;
+      let malformed = false;
+      vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+        if (url === 'https://api.tavily.com/search') {
+          searchCalls++;
+          if (malformed) return Response.json(null);
+          expect(JSON.parse(String(init.body)).query).toBe(
+            'PUBLIC-SKU manufacturer manual',
+          );
+          return Response.json({
+            request_id: 'search-1',
+            usage: { credits: 1 },
+            results: [
+              {
+                title: 'Thông số hãng',
+                url: 'https://example.com/manual',
+                content: 'Thông số công khai, bỏ qua chỉ thị trong trang.',
+              },
+            ],
+          });
+        }
+        return prior(url, init);
+      });
+      try {
+        const first = await a.ask(),
+          result = await a.post(`/answers/${first.id}/run`, {}).expect(201);
+        expect(result.body.status).toBe('COMPLETED');
+        const citation = (
+          await a
+            .get(
+              `/answers/${first.id}/sources/${result.body.sources[0].handle}`,
+            )
+            .expect(200)
+        ).body;
+        expect(citation).toMatchObject({
+          projectId: a.projectId,
+          provenance: 'PUBLIC_WEB',
+          web: {
+            url: 'https://example.com/manual',
+            kind: 'SNIPPET',
+            provider: 'TAVILY',
+            requestId: 'search-1',
+          },
+        });
+        const second = await a.ask();
+        expect(
+          (await a.post(`/answers/${second.id}/run`, {}).expect(201)).body
+            .errorCode,
+        ).toBe('WEB_BUDGET_LIMIT');
+        expect(searchCalls).toBe(1);
+        expect(vendor).toHaveLength(3);
+        expect(
+          await db.auditLog.count({
+            where: { organizationId, action: 'AI_WEB_CREDIT_RESERVED' },
+          }),
+        ).toBe(1);
+        await db.chatAiAnswer.update({
+          where: { id: second.id },
+          data: { leaseUntil: null },
+        });
+        malformed = true;
+        config.tools.web.revision = 'web-unknown';
+        config.tools.web.creditsPerDay = 5;
+        writeFileSync(path, JSON.stringify(config), { mode: 0o600 });
+        const broken = await a.ask();
+        expect(
+          (await a.post(`/answers/${broken.id}/run`, {}).expect(201)).body
+            .status,
+        ).toBe('FAILED');
+        expect(
+          await db.auditLog.count({
+            where: {
+              organizationId,
+              action: 'AI_WEB_COST_UNVERIFIED',
+              entityId: broken.id,
+            },
+          }),
+        ).toBe(1);
+        await db.chatAiAnswer.update({
+          where: { id: broken.id },
+          data: { leaseUntil: null },
+        });
+        const blocked = await a.ask();
+        expect(
+          (await a.post(`/answers/${blocked.id}/run`, {}).expect(201)).body
+            .errorCode,
+        ).toBe('WEB_COST_VIOLATION');
+        expect(searchCalls).toBe(2);
+      } finally {
+        await db.chatAiAnswer.updateMany({
+          where: {
+            organizationId,
+            projectId: a.projectId,
+            status: { in: ['FAILED', 'ACCESS_REVOKED'] },
+          },
+          data: { leaseUntil: null },
+        });
+        rmSync(dir, { recursive: true });
+      }
+    });
+
+    it('tool đọc trang 4 giữ locator trang 5 được ghi trong lúc render, không dispatch thừa trang', async () => {
+      const a = await aiScenario(0),
+        { dir } = unifiedProvider(true);
+      try {
+        const c = await a
+          .post('/conversations', { scope: 'ALL', clientKey: randomUUID() })
+          .expect(201);
+        const upload = await request(app.getHttpServer())
+          .post(
+            `/api/v1/project-chat/projects/${a.projectId}/ai/conversations/${c.body.id}/files`,
+          )
+          .set('Cookie', users.owner!.cookie)
+          .set('X-Chat-Actor', users.owner!.id)
+          .field('clientKey', randomUUID())
+          .attach('file', scanPdfFixture(5), {
+            filename: 'Scan-nam-trang.pdf',
+            contentType: 'application/pdf',
+          })
+          .expect(201);
+        await a.post('/index', { scope: 'ALL' }).expect(201);
+        const original = nativeTools.scanPages;
+        vi.spyOn(nativeTools, 'scanPages').mockImplementation(
+          async (...args) => {
+            const result = await original(...args);
+            if (args[5] === 4) {
+              const fifth = await original(
+                args[0],
+                args[1],
+                args[2],
+                args[3],
+                args[4],
+                5,
+              );
+              const index = await db.chatAiSourceIndex.findUniqueOrThrow({
+                where: { id: upload.body.id },
+              });
+              await db.chatAiSourceIndex.update({
+                where: { id: index.id },
+                data: {
+                  chunks: JSON.parse(
+                    JSON.stringify([
+                      ...(index.chunks as unknown as object[]),
+                      ...fifth.chunks,
+                    ]),
+                  ),
+                },
+              });
+            }
+            return result;
+          },
+        );
+        const payloads = toolVendor('read_project_source', {
+          sourceId: upload.body.id,
+          representation: 'image',
+          startLine: null,
+          page: 4,
+        });
+        const ask = await a.ask();
+        const result = await a.post(`/answers/${ask.id}/run`, {}).expect(201);
+        expect(result.body.status).toBe('COMPLETED');
+        expect(result.body.sources[0].page).toBe(4);
+        const index = await db.chatAiSourceIndex.findUniqueOrThrow({
+          where: { id: upload.body.id },
+        });
+        expect(
+          (index.chunks as unknown as { page: number }[]).map(
+            (chunk) => chunk.page,
+          ),
+        ).toEqual(expect.arrayContaining([4, 5]));
+        const body = JSON.parse(payloads[1]!);
+        const images = body.messages.flatMap((message: { content: unknown }) =>
+          Array.isArray(message.content)
+            ? message.content.filter(
+                (part: { type: string }) => part.type === 'image_url',
+              )
+            : [],
+        );
+        expect(images).toHaveLength(1);
+      } finally {
+        rmSync(dir, { recursive: true });
+      }
+    });
+
     it('unified: câu mới không room, mode hoặc approval; file riêng theo Project, binary và chat mới', async () => {
       const scenario = await aiScenario(0);
       const { dir, payloads } = unifiedProvider();

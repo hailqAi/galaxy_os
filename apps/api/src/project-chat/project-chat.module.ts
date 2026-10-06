@@ -1,3 +1,4 @@
+import { ProjectsModule } from '../projects/projects.module';
 import { ProjectAiService } from './project-ai.service';
 import { Module } from '@nestjs/common';
 import { AccessControlModule } from '../access-control/access-control.module';
@@ -8,7 +9,7 @@ import { ProjectChatService } from './project-chat.service';
 import { TasksModule } from '../tasks/tasks.module';
 
 @Module({
-  imports: [AccessControlModule, FilesModule, TasksModule],
+  imports: [AccessControlModule, FilesModule, TasksModule, ProjectsModule],
   controllers: [ProjectChatController],
   providers: [PrismaService, ProjectChatService, ProjectAiService],
 })

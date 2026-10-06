@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, ChatAiSourceIndex, ChatAiAnswer } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
+import { addAbortSignal } from 'node:stream';
 import { projectWhereForPermissions } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
 import { ProjectChatPolicy } from '../access-control/project-chat.policy';
@@ -15,11 +16,29 @@ import { PrismaService } from '../prisma.service';
 import {
   nativeSource,
   documentText,
+  analyzeTable,
   scanPages,
   xlsxMime,
 } from './ai-native-source';
 import { docxMime } from '../files/office-document';
-import { ProviderConfig, answerFromProvider } from './ai-provider';
+import {
+  calculate,
+  decimalTotal,
+  savedToolPermissions,
+  toolInputs,
+  toolDefinitions,
+  savedToolSources,
+  type ToolName,
+  type ToolOutput,
+  type ToolSource,
+} from './ai-tools';
+import { fetchPublicPage, publicTarget, webSearch } from './ai-web';
+import { ProjectStageTwoService } from '../projects/project-stage-two.service';
+import {
+  ProviderConfig,
+  answerFromProvider,
+  type ProviderCall,
+} from './ai-provider';
 import {
   AiError,
   activationEvidence,
@@ -73,6 +92,8 @@ export class ProjectAiService {
     @Inject(FileStorage) private readonly storage: FileStorage,
     @Inject(ProjectChatPolicy) private readonly access: ProjectChatPolicy,
     @Inject(FilesService) private readonly files: FilesService,
+    @Inject(ProjectStageTwoService)
+    private readonly stageTwo: ProjectStageTwoService,
   ) {}
 
   private async authorized<T>(
@@ -1838,6 +1859,12 @@ export class ProjectAiService {
               : null;
           pin = {
             version: 1,
+            ...(unified && config.provider === 'openrouter'
+              ? {
+                  toolRevision: 'project-tools-v1' as const,
+                  toolConfigDigest: config.fileDigest,
+                }
+              : {}),
             mode,
             provider: config.provider,
             model: config.model,
@@ -1943,6 +1970,23 @@ export class ProjectAiService {
       if (this.denied(error)) return hidden;
       throw error;
     }
+    const toolSources = savedToolSources(answer.usage);
+    const toolPermissions = savedToolPermissions(answer.usage);
+    if (toolPermissions.length) {
+      const fresh = await this.access.freshActor(tx, actor);
+      if (
+        !(await tx.project.findFirst({
+          where: {
+            AND: [
+              { id: projectId },
+              projectWhereForPermissions(fresh, toolPermissions),
+            ],
+          },
+          select: { id: true },
+        }))
+      )
+        return hidden;
+    }
     const pin = requestMetadata(answer.usage);
     if (pin) {
       if (pin.context) {
@@ -2023,6 +2067,17 @@ export class ProjectAiService {
       }
     }
     const sources = answer.citations.map((handle) => {
+      const tool = toolSources.find((source) => source.handle === handle);
+      if (tool)
+        return {
+          handle,
+          label: tool.label,
+          version: tool.version,
+          provenance: tool.provenance,
+          startLine: 1,
+          endLine: tool.text.split('\n').length,
+          page: null,
+        };
       const dependency = dependencies.find((d) => d.handles.includes(handle));
       const chunk = (
         dependency?.source.chunks as unknown as SourceChunk[] | undefined
@@ -2049,6 +2104,14 @@ export class ProjectAiService {
           ? answer.errorCode!
           : answer.status,
       question: answer.question,
+      toolActivity:
+        answer.status === 'RUNNING' &&
+        answer.usage &&
+        typeof answer.usage === 'object' &&
+        !Array.isArray(answer.usage) &&
+        typeof answer.usage.toolActivity === 'string'
+          ? answer.usage.toolActivity
+          : null,
       answer: answer.answer,
       uncertainty: answer.uncertainty,
       errorCode: answer.errorCode,
@@ -2138,6 +2201,28 @@ export class ProjectAiService {
       const visible = await this.view(tx, actor, projectId, answer, grantId);
       if (visible.status !== 'COMPLETED' || !answer.citations.includes(handle))
         throw new NotFoundException();
+      const tool = savedToolSources(answer.usage).find(
+        (source) => source.handle === handle,
+      );
+      if (tool)
+        return {
+          handle,
+          projectId,
+          roomId: null,
+          sourceId: answer.id,
+          kind: 'TOOL',
+          version: tool.version,
+          provenance: tool.provenance,
+          label: tool.label,
+          text: tool.text,
+          startLine: 1,
+          endLine: tool.text.split('\n').length,
+          startColumn: 1,
+          page: null,
+          sequence: null,
+          downloadUrl: null,
+          ...(tool.web ? { web: tool.web } : {}),
+        };
       const dependency = await tx.chatAiAnswerDependency.findFirst({
         where: {
           answerId: id,
@@ -2212,12 +2297,43 @@ export class ProjectAiService {
     return result;
   }
 
+  private async readBinary(
+    storageKey: string,
+    checksum: string,
+    signal?: AbortSignal,
+  ) {
+    try {
+      const rawStream = await this.storage.stream(storageKey);
+      const stream = signal ? addAbortSignal(signal, rawStream) : rawStream,
+        parts: Buffer[] = [];
+      let size = 0;
+      try {
+        for await (const part of stream) {
+          const value = Buffer.from(part);
+          size += value.length;
+          if (size > 8_000_000) throw new AiError('INPUT_TOO_LARGE');
+          parts.push(value);
+        }
+      } finally {
+        stream.destroy();
+      }
+      const bytes = Buffer.concat(parts);
+      if (createHash('sha256').update(bytes).digest('hex') !== checksum)
+        throw new AiError('SOURCE_UNAVAILABLE');
+      return bytes;
+    } catch (error) {
+      if (error instanceof AiError) throw error;
+      throw new AiError('MISSING_BINARY');
+    }
+  }
+
   private async mediaContext(
     actor: CurrentActor,
     projectId: string,
     answer: ChatAiAnswer,
     scope: string,
     signal: AbortSignal,
+    renderPage?: number,
   ) {
     const pin = requestMetadata(answer.usage);
     const result: {
@@ -2272,12 +2388,17 @@ export class ProjectAiService {
           [index],
         );
         const source = await this.checkSource(tx, actor, projectId, index);
-        if (index.status === 'READY' && !source.mime.startsWith('image/'))
+        if (
+          renderPage === undefined &&
+          index.status === 'READY' &&
+          !source.mime.startsWith('image/')
+        )
           return { index, source, textOnly: true };
         if (!config.nativeMedia) throw new AiError('UNSUPPORTED_FILE');
         if (
           source.mime === 'application/pdf' &&
-          index.errorCode !== 'PDF_SCAN_REQUIRES_VISION'
+          index.errorCode !== 'PDF_SCAN_REQUIRES_VISION' &&
+          renderPage === undefined
             ? !config.pdfLiveVerified
             : !config.imageLiveVerified
         )
@@ -2294,26 +2415,11 @@ export class ProjectAiService {
         });
         continue;
       }
-      let bytes: Buffer;
-      try {
-        const stream = await this.storage.stream(checked.source.storageKey!);
-        const parts: Buffer[] = [];
-        let size = 0;
-        try {
-          for await (const part of stream) {
-            const value = Buffer.from(part);
-            size += value.length;
-            if (size > 8_000_000) throw new AiError('INPUT_TOO_LARGE');
-            parts.push(value);
-          }
-        } finally {
-          stream.destroy();
-        }
-        bytes = Buffer.concat(parts);
-      } catch (error) {
-        if (error instanceof AiError) throw error;
-        throw new AiError('MISSING_BINARY');
-      }
+      const bytes = await this.readBinary(
+        checked.source.storageKey!,
+        checked.source.checksum!,
+        signal,
+      );
       const textSource = {
         organizationId: actor.organizationId,
         projectId,
@@ -2327,13 +2433,16 @@ export class ProjectAiService {
         text: '',
       };
       const rendered =
-        checked.index.errorCode === 'PDF_SCAN_REQUIRES_VISION'
+        checked.source.mime === 'application/pdf' &&
+        (checked.index.errorCode === 'PDF_SCAN_REQUIRES_VISION' ||
+          renderPage !== undefined)
           ? await scanPages(
               textSource,
               checked.source.name,
               bytes,
               checked.source.checksum!,
               signal,
+              renderPage,
             )
           : undefined;
       const native =
@@ -2347,15 +2456,18 @@ export class ProjectAiService {
         ));
       const index = await this.authorized(actor, projectId, async (tx) => {
         this.selectedConfig(answer);
-        await this.checkSource(tx, actor, projectId, checked.index);
+        const freshIndex = await tx.chatAiSourceIndex.findUniqueOrThrow({
+          where: { id: checked.index.id },
+        });
+        if (freshIndex.version !== checked.index.version)
+          throw new AiError('SOURCE_UNAVAILABLE');
+        await this.checkSource(tx, actor, projectId, freshIndex);
         return tx.chatAiSourceIndex.update({
           where: { id: checked.index.id },
           data: {
             chunks: [
               ...native.chunks,
-              ...(
-                (checked.index.chunks ?? []) as unknown as SourceChunk[]
-              ).filter(
+              ...((freshIndex.chunks ?? []) as unknown as SourceChunk[]).filter(
                 (c) => !native.chunks.some((n) => n.handle === c.handle),
               ),
             ] as unknown as Prisma.InputJsonValue,
@@ -2376,6 +2488,206 @@ export class ProjectAiService {
         throw new AiError('INPUT_TOO_LARGE');
     }
     return result;
+  }
+
+  private async sourceTool(
+    actor: CurrentActor,
+    projectId: string,
+    answer: ChatAiAnswer,
+    grantId: string,
+    name: 'search_project_sources' | 'read_project_source',
+    input: unknown,
+    config: ConfiguredModel,
+    signal: AbortSignal,
+  ): Promise<ToolOutput> {
+    const pin = requestMetadata(answer.usage)!;
+    const search =
+      name === 'search_project_sources'
+        ? toolInputs.search_project_sources.parse(input)
+        : null;
+    const read =
+      name === 'read_project_source'
+        ? toolInputs.read_project_source.parse(input)
+        : null;
+    const media =
+      read?.representation === 'image'
+        ? await this.mediaContext(
+            actor,
+            projectId,
+            {
+              ...answer,
+              usage: { request: { ...pin, sourceIds: [read.sourceId] } },
+            },
+            'ALL',
+            signal,
+            read.page ?? 1,
+          )
+        : [];
+    if (
+      read?.representation === 'image' &&
+      !media.some((item) => item.bytes.length)
+    )
+      throw new AiError('UNSUPPORTED_FILE');
+    return this.authorized(actor, projectId, async (tx, currentGrant) => {
+      if (currentGrant !== grantId) throw new NotFoundException();
+      signal.throwIfAborted();
+      const current = await this.ownedAnswer(
+        tx,
+        actor,
+        projectId,
+        answer.id,
+        grantId,
+      );
+      if (current.status !== 'RUNNING') throw new NotFoundException();
+      const scope = await this.sourceScope(
+        tx,
+        actor,
+        projectId,
+        'ALL',
+        pin.context,
+      );
+      const rows = await tx.chatAiSourceIndex.findMany({
+        where: {
+          AND: [
+            scope,
+            ...(read
+              ? [{ id: read.sourceId }]
+              : search?.query
+                ? [
+                    {
+                      OR: [
+                        {
+                          label: {
+                            contains: search.query,
+                            mode: 'insensitive' as const,
+                          },
+                        },
+                        {
+                          text: {
+                            contains: search.query,
+                            mode: 'insensitive' as const,
+                          },
+                        },
+                      ],
+                    },
+                  ]
+                : []),
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+        take: read ? 1 : 50,
+      });
+      const results = [];
+      const sources: { handle: string; text: string }[] = [];
+      for (const index of rows) {
+        try {
+          await this.checkSource(tx, actor, projectId, index);
+          assertEgress(
+            config,
+            actor.organizationId,
+            projectId,
+            pin.dataClassification,
+            [index],
+          );
+        } catch (error) {
+          if (
+            read ||
+            (!this.denied(error) &&
+              !(
+                error instanceof AiError &&
+                error.code === 'EGRESS_POLICY_DENIED'
+              ))
+          )
+            throw error;
+          continue;
+        }
+        const selected = (
+          media.length
+            ? (media[0]!.selectedChunks ??
+              (media[0]!.index.chunks as unknown as SourceChunk[]))
+            : (index.chunks as unknown as SourceChunk[])
+        )
+          .filter(
+            (chunk) =>
+              !read ||
+              (chunk.endLine >= (read.startLine ?? 1) &&
+                (read.page === null || chunk.page === read.page)),
+          )
+          .slice(0, read ? 6 : 1);
+        results.push({
+          sourceId: index.id,
+          label: index.label,
+          version: index.version,
+          status: index.status,
+          provenance: index.provenance,
+          coverage: 'Đoạn được chọn, không phải toàn bộ hồ sơ',
+          chunks: selected.map((chunk) => ({
+            handle: chunk.handle,
+            startLine: chunk.startLine,
+            endLine: chunk.endLine,
+            page: chunk.page ?? null,
+            text: chunk.text,
+          })),
+        });
+        sources.push(
+          ...selected.map((chunk) => ({
+            handle: chunk.handle,
+            text: `[${index.provenance}; ${index.label}; version ${index.version}; dòng ${chunk.startLine}-${chunk.endLine}]\n${chunk.text}`,
+          })),
+        );
+        const existing = await tx.chatAiAnswerDependency.findFirst({
+          where: { answerId: answer.id, sourceIndexId: index.id },
+        });
+        const handles = [
+          ...new Set([
+            ...(existing?.handles ?? []),
+            ...selected.map((chunk) => chunk.handle),
+          ]),
+        ];
+        if (existing)
+          await tx.chatAiAnswerDependency.update({
+            where: {
+              answerId_sourceIndexId: {
+                answerId: answer.id,
+                sourceIndexId: index.id,
+              },
+            },
+            data: { handles },
+          });
+        else
+          await tx.chatAiAnswerDependency.create({
+            data: {
+              organizationId: actor.organizationId,
+              projectId,
+              answerId: answer.id,
+              sourceIndexId: index.id,
+              handles,
+            },
+          });
+        if (results.length >= (search?.limit ?? 1)) break;
+      }
+      if (read && !results.length) throw new NotFoundException();
+      const content = JSON.stringify({
+        results,
+        coverage:
+          'Nguồn phù hợp trong dự án hiện hành theo quyền; có giới hạn số nguồn/đoạn.',
+      });
+      if (Buffer.byteLength(content) > 32000)
+        throw new AiError('TOOL_OUTPUT_TOO_LARGE');
+      return {
+        content,
+        sources,
+        media: media
+          .filter((item) => item.bytes.length)
+          .map((item) => ({
+            handle:
+              item.handle ??
+              (item.index.chunks as unknown as SourceChunk[])[0]!.handle,
+            mime: item.mime,
+            bytes: item.bytes,
+          })),
+      };
+    });
   }
 
   async run(actor: CurrentActor, projectId: string, id: string) {
@@ -2470,6 +2782,9 @@ export class ProjectAiService {
       upstream_status: null,
     };
     let priorTurns: { question: string; answer: string }[] = [];
+    const toolSources: ToolSource[] = [];
+    const providerCalls: ProviderCall[] = [];
+    const toolPermissions: ToolSource['permissions'] = [];
     let limitedSources = false;
     let retrievalError = false;
     const controller = new AbortController();
@@ -2598,6 +2913,11 @@ export class ProjectAiService {
                 )
               )
                 throw new AiError('UNSUPPORTED_FILE');
+              for (const permission of savedToolPermissions(
+                previousAnswer.usage,
+              ))
+                if (!toolPermissions.includes(permission))
+                  toolPermissions.push(permission);
               priorDependencies.push(...deps);
               priorTurns.push({
                 question: previousAnswer.question,
@@ -2776,7 +3096,7 @@ export class ProjectAiService {
             ))
               for (const handle of dependency.handles)
                 if (!handles.includes(handle)) handles.push(handle);
-            if (handles.length > 12) throw new AiError('INPUT_TOO_LARGE');
+            if (handles.length > 48) throw new AiError('INPUT_TOO_LARGE');
             if (handles.length)
               await tx.chatAiAnswerDependency.create({
                 data: {
@@ -2805,6 +3125,11 @@ export class ProjectAiService {
       if (context) {
         // Final gate immediately before sending context. No DB lock spans provider I/O.
         const beforeAttempt = async () => {
+          if (
+            pin?.toolConfigDigest &&
+            readAiConfig().fileDigest !== pin.toolConfigDigest
+          )
+            throw new AiError('CONFIG_CHANGED');
           const allowed = await this.authorized(
             actor,
             projectId,
@@ -2830,6 +3155,21 @@ export class ProjectAiService {
               )
                 throw new AiError(visible.status);
               if (
+                answer.usage &&
+                typeof answer.usage === 'object' &&
+                !Array.isArray(answer.usage) &&
+                answer.usage.toolActivity
+              )
+                await tx.chatAiAnswer.update({
+                  where: { id },
+                  data: {
+                    usage: {
+                      ...answer.usage,
+                      toolActivity: null,
+                    } as Prisma.InputJsonObject,
+                  },
+                });
+              if (
                 'provider' in config &&
                 (await this.costViolation(tx, config.model, config.revision))
               )
@@ -2843,6 +3183,401 @@ export class ProjectAiService {
         };
         if (!('provider' in config)) await beforeAttempt();
         controller.signal.throwIfAborted();
+        const webConfig = readAiConfig();
+        const web =
+          webConfig.web?.enabled &&
+          webConfig.web.organizationId === actor.organizationId &&
+          webConfig.web.credentialConfigured &&
+          webConfig.web.creditsPerDay > 0
+            ? { ...webConfig.web, key: webConfig.webKey! }
+            : null;
+        const publicUrls = new Map<string, string>();
+        for (const match of claimed.answer.question.matchAll(
+          /https?:\/\/[^\s<>"']+/g,
+        )) {
+          const url = match[0].replace(/[),.;]+$/, '');
+          if (publicUrls.size < 5)
+            publicUrls.set(
+              'W_' +
+                createHash('sha256')
+                  .update(id + url)
+                  .digest('hex')
+                  .slice(0, 24),
+              url,
+            );
+        }
+        let webCalls = 0;
+        let toolActivity: string | null = null;
+        const persistToolSources = async () =>
+          this.authorized(actor, projectId, async (tx, grantId) => {
+            const answer = await this.ownedAnswer(
+              tx,
+              actor,
+              projectId,
+              id,
+              grantId,
+            );
+            if (answer.status !== 'RUNNING' || grantId !== claimed.grantId)
+              throw new NotFoundException();
+            if (toolSources.length > 12)
+              throw new AiError('TOOL_CONTEXT_LIMIT');
+            await tx.chatAiAnswer.update({
+              where: { id },
+              data: {
+                usage: {
+                  request: pin!,
+                  toolSources,
+                  toolPermissions,
+                  toolActivity,
+                },
+              },
+            });
+          });
+        if (toolPermissions.length) await persistToolSources();
+        const execute = async (
+          name: ToolName,
+          input: unknown,
+          key: string,
+          signal: AbortSignal,
+        ): Promise<ToolOutput> => {
+          await beforeAttempt();
+          signal.throwIfAborted();
+          if (
+            pin?.toolConfigDigest &&
+            readAiConfig().fileDigest !== pin.toolConfigDigest
+          )
+            throw new AiError('CONFIG_CHANGED');
+          toolActivity =
+            name === 'search_web' || name === 'fetch_public_page'
+              ? 'Đang tra cứu nguồn công khai'
+              : name === 'calculate' || name === 'analyze_table'
+                ? 'Đang tính và đối chiếu dữ liệu'
+                : 'Đang tìm và đọc nguồn dự án';
+          await persistToolSources();
+          if (name === 'search_web' || name === 'fetch_public_page') {
+            let values: { text: string; web: NonNullable<ToolSource['web']> }[];
+            if (name === 'search_web') {
+              const args = toolInputs.search_web.parse(input);
+              if (!web || ++webCalls > web.maxCallsPerRequest)
+                throw new AiError('NEEDS_PROVIDER_CONFIGURATION_OR_BUDGET');
+              if (
+                !web.subjects.some((subject) => subject.id === args.subjectId)
+              )
+                throw new AiError('PUBLIC_SUBJECT_REQUIRED');
+              await this.authorized(actor, projectId, async (tx) => {
+                await tx.$queryRaw`WITH quota_lock AS (SELECT pg_advisory_xact_lock(hashtextextended(${`ai-web-quota:${actor.organizationId}`},0))) SELECT TRUE AS locked FROM quota_lock`;
+                const since = new Date();
+                since.setUTCHours(0, 0, 0, 0);
+                if (
+                  await tx.auditLog.findFirst({
+                    where: {
+                      organizationId: actor.organizationId,
+                      action: {
+                        in: ['AI_WEB_COST_VIOLATION', 'AI_WEB_COST_UNVERIFIED'],
+                      },
+                      metadata: { path: ['revision'], equals: web.revision },
+                    },
+                  })
+                )
+                  throw new AiError('WEB_COST_VIOLATION');
+                const spent = await tx.auditLog.count({
+                  where: {
+                    organizationId: actor.organizationId,
+                    action: 'AI_WEB_CREDIT_RESERVED',
+                    createdAt: { gte: since },
+                  },
+                });
+                if (spent >= web.creditsPerDay)
+                  throw new AiError('WEB_BUDGET_LIMIT');
+                await tx.auditLog.create({
+                  data: {
+                    organizationId: actor.organizationId,
+                    actorUserId: actor.userId,
+                    action: 'AI_WEB_CREDIT_RESERVED',
+                    entityType: 'ChatAiAnswer',
+                    entityId: id,
+                    metadata: {
+                      projectId,
+                      toolKey: key,
+                      revision: web.revision,
+                      subjectId: args.subjectId,
+                      topic: args.topic,
+                      reservedCredits: 1,
+                    },
+                  },
+                });
+              });
+              const result = await webSearch(
+                web,
+                args.subjectId,
+                args.topic,
+                signal,
+                beforeAttempt,
+                async (receipt) => {
+                  await this.db.auditLog.create({
+                    data: {
+                      organizationId: actor.organizationId,
+                      actorUserId: actor.userId,
+                      action:
+                        receipt.credits === null
+                          ? 'AI_WEB_COST_UNVERIFIED'
+                          : receipt.credits > 1
+                            ? 'AI_WEB_COST_VIOLATION'
+                            : 'AI_WEB_SEARCH_RESULT',
+                      entityType: 'ChatAiAnswer',
+                      entityId: id,
+                      metadata: {
+                        projectId,
+                        revision: web.revision,
+                        subjectId: args.subjectId,
+                        query:
+                          web.subjects.find(
+                            (subject) => subject.id === args.subjectId,
+                          )!.query +
+                          ' ' +
+                          args.topic,
+                        requestId: receipt.requestId,
+                        credits: receipt.credits,
+                      },
+                    },
+                  });
+                },
+              );
+              values = [];
+              for (const item of result.results) {
+                try {
+                  await publicTarget(item.url, signal);
+                } catch {
+                  continue;
+                }
+                const urlId =
+                  'W_' +
+                  createHash('sha256')
+                    .update(id + item.url)
+                    .digest('hex')
+                    .slice(0, 24);
+                publicUrls.set(urlId, item.url);
+                values.push({
+                  text: `[Snippet tìm kiếm; chưa fetch trang; urlId ${urlId}]\n${item.content.slice(0, 2000)}`,
+                  web: {
+                    url: item.url,
+                    title: item.title,
+                    retrievedAt: result.retrievedAt,
+                    provider: 'TAVILY',
+                    kind: 'SNIPPET',
+                    query: result.query,
+                    requestId: result.requestId,
+                  },
+                });
+              }
+            } else {
+              const args = toolInputs.fetch_public_page.parse(input),
+                url = publicUrls.get(args.urlId);
+              if (!url) throw new AiError('PUBLIC_URL_REQUIRED');
+              const result = await fetchPublicPage(url, signal, beforeAttempt);
+              values = [
+                {
+                  text: result.coverage + '\n' + result.text,
+                  web: {
+                    url: result.url,
+                    title: result.title || new URL(result.url).hostname,
+                    retrievedAt: result.retrievedAt,
+                    provider: 'LOCAL_PUBLIC_FETCH',
+                    kind: 'PAGE',
+                  },
+                },
+              ];
+            }
+            const sources: { handle: string; text: string }[] = [];
+            for (const value of values) {
+              const handle =
+                'T_' +
+                createHash('sha256')
+                  .update(id + key + value.web.url)
+                  .digest('hex')
+                  .slice(0, 24);
+              const source: ToolSource = {
+                handle,
+                label: value.web.title.slice(0, 200),
+                text: value.text,
+                version: createHash('sha256').update(value.text).digest('hex'),
+                provenance: 'PUBLIC_WEB',
+                permissions: [],
+                createdAt: value.web.retrievedAt,
+                web: value.web,
+              };
+              toolSources.push(source);
+              sources.push({ handle, text: JSON.stringify(source) });
+            }
+            await persistToolSources();
+            return {
+              content: JSON.stringify({
+                sources: values.map((value) => value.web),
+                publicUrls: [...publicUrls].map(([id, url]) => ({ id, url })),
+                coverage:
+                  name === 'search_web'
+                    ? 'Snippet tìm kiếm; chưa đọc toàn trang.'
+                    : 'Trang được chọn; không đọc toàn website.',
+              }),
+              sources,
+            };
+          }
+          if (
+            name === 'calculate' ||
+            name === 'read_project_records' ||
+            name === 'analyze_table'
+          ) {
+            let value: unknown;
+            let permissions: ToolSource['permissions'] = [];
+            if (name === 'calculate')
+              value = calculate(toolInputs.calculate.parse(input));
+            else if (name === 'analyze_table') {
+              const args = toolInputs.analyze_table.parse(input);
+              await this.sourceTool(
+                actor,
+                projectId,
+                claimed.answer,
+                claimed.grantId,
+                'read_project_source',
+                {
+                  sourceId: args.sourceId,
+                  representation: 'text',
+                  startLine: 1,
+                  page: null,
+                },
+                config as ConfiguredModel,
+                signal,
+              );
+              const checked = await this.authorized(
+                actor,
+                projectId,
+                async (tx) => {
+                  const index = await tx.chatAiSourceIndex.findFirst({
+                    where: {
+                      AND: [
+                        await this.sourceScope(
+                          tx,
+                          actor,
+                          projectId,
+                          'ALL',
+                          pin?.context,
+                        ),
+                        { id: args.sourceId },
+                      ],
+                    },
+                  });
+                  if (!index) throw new NotFoundException();
+                  return this.checkSource(tx, actor, projectId, index);
+                },
+              );
+              if (
+                checked.mime !== xlsxMime ||
+                !checked.storageKey ||
+                !checked.checksum
+              )
+                throw new AiError('UNSUPPORTED_FILE');
+              value = await analyzeTable(
+                await this.readBinary(
+                  checked.storageKey,
+                  checked.checksum,
+                  signal,
+                ),
+                args.sheet,
+                args.range,
+              );
+            } else {
+              const args = toolInputs.read_project_records.parse(input);
+              const fresh = await this.authorized(actor, projectId, (tx) =>
+                this.access.freshActor(tx, actor),
+              );
+              const data = await this.stageTwo.get(fresh, projectId);
+              if (
+                !data.permittedCommands.viewPlan ||
+                (args.includeFinancial &&
+                  !data.permittedCommands.viewAllocatedBudget)
+              )
+                throw new NotFoundException();
+              permissions = [
+                'project.read',
+                'task.read',
+                ...(args.includeFinancial ? ['estimate.read' as const] : []),
+              ];
+              const rows = data.plan.map(({ allocatedBudget, ...row }) => ({
+                ...row,
+                ...(args.includeFinancial
+                  ? { allocatedBudget: allocatedBudget ?? null }
+                  : {}),
+              }));
+              const amounts = rows.flatMap((row) =>
+                'allocatedBudget' in row &&
+                typeof row.allocatedBudget === 'string'
+                  ? [row.allocatedBudget]
+                  : [],
+              );
+              const total = decimalTotal(amounts);
+              value = {
+                view: args.view,
+                coverage:
+                  'Toàn bộ kế hoạch giai đoạn 2 của dự án hiện hành tại thời điểm đọc; không bao gồm nhóm nghiệp vụ khác.',
+                count: rows.length,
+                rows,
+                ...(args.includeFinancial
+                  ? {
+                      knownAllocatedBudget: total,
+                      missingBudgetCount: rows.length - amounts.length,
+                      totalAllocatedBudget:
+                        amounts.length === rows.length ? total : null,
+                    }
+                  : {}),
+              };
+            }
+            const text = JSON.stringify(value);
+            if (Buffer.byteLength(text) > 32000)
+              throw new AiError('TOOL_OUTPUT_TOO_LARGE');
+            const handle =
+              'T_' +
+              createHash('sha256')
+                .update(id + key)
+                .digest('hex')
+                .slice(0, 24);
+            const source: ToolSource = {
+              handle,
+              text,
+              label:
+                name === 'calculate'
+                  ? 'Kết quả tính Decimal'
+                  : name === 'analyze_table'
+                    ? `Phân tích XLSX · ${toolInputs.analyze_table.parse(input).sheet}!${toolInputs.analyze_table.parse(input).range}`
+                    : 'Kế hoạch giai đoạn 2 · ảnh chụp dữ liệu',
+              version: key,
+              provenance: 'AI_DRAFT',
+              permissions,
+              createdAt: new Date().toISOString(),
+            };
+            if (!toolSources.some((existing) => existing.handle === handle))
+              toolSources.push(source);
+            for (const permission of permissions)
+              if (!toolPermissions.includes(permission))
+                toolPermissions.push(permission);
+            await persistToolSources();
+            return { content: text, sources: [{ handle, text }] };
+          }
+          if (
+            name === 'search_project_sources' ||
+            name === 'read_project_source'
+          )
+            return this.sourceTool(
+              actor,
+              projectId,
+              claimed.answer,
+              claimed.grantId,
+              name,
+              input,
+              config as ConfiguredModel,
+              signal,
+            );
+          throw new AiError('TOOL_NOT_AVAILABLE');
+        };
         const result = await answerFromProvider(
           config!,
           claimed.answer.question,
@@ -2850,6 +3585,27 @@ export class ProjectAiService {
           controller.signal,
           {
             beforeAttempt,
+            receipt: (call) => providerCalls.push(call),
+            ...(pin?.toolRevision &&
+            pin.mode === 'UNIFIED' &&
+            pin.provider === 'openrouter'
+              ? {
+                  tools: {
+                    definitions: toolDefinitions([
+                      'search_project_sources',
+                      'read_project_source',
+                      'read_project_records',
+                      'calculate',
+                      'analyze_table',
+                      ...(web ? ['search_web' as const] : []),
+                      ...(web || publicUrls.size
+                        ? ['fetch_public_page' as const]
+                        : []),
+                    ]),
+                    execute,
+                  },
+                }
+              : {}),
             diagnostic: (event) => {
               diagnostic = {
                 ...diagnostic,
@@ -2868,6 +3624,12 @@ export class ProjectAiService {
                 conversationId: claimed.answer.conversationId,
                 group: claimed.scope,
                 at: new Date().toISOString(),
+                publicSubjects:
+                  web?.subjects.map(({ id, label }) => ({ id, label })) ?? [],
+                publicUrls: [...publicUrls].map(([id, url]) => ({ id, url })),
+                webSearchStatus: web
+                  ? 'AVAILABLE'
+                  : 'NEEDS_PROVIDER_CONFIGURATION_OR_BUDGET',
                 sourceState: retrievalError
                   ? ('ERROR' as const)
                   : context.length
@@ -2921,6 +3683,11 @@ export class ProjectAiService {
               usage: pin
                 ? {
                     request: pin,
+                    toolSources,
+                    toolPermissions,
+                    ...('providerCalls' in result
+                      ? { providerCalls: result.providerCalls }
+                      : {}),
                     tokens: result.usage,
                     returnedModel: result.returnedModel,
                     ...(pin.provider === 'openrouter' && {
@@ -3002,7 +3769,37 @@ export class ProjectAiService {
         },
       });
     } finally {
-      this.running.delete(id);
+      try {
+        if (providerCalls.length)
+          await this.db.$transaction(async (tx) => {
+            const current = await tx.chatAiAnswer.findFirst({
+              where: {
+                id,
+                organizationId: actor.organizationId,
+                projectId,
+                ownerId: actor.userId,
+              },
+              select: { usage: true },
+            });
+            if (!current) return;
+            const usage =
+              current.usage &&
+              typeof current.usage === 'object' &&
+              !Array.isArray(current.usage)
+                ? current.usage
+                : {};
+            await tx.chatAiAnswer.update({
+              where: { id },
+              data: {
+                usage: JSON.parse(
+                  JSON.stringify({ ...usage, providerCalls }),
+                ) as Prisma.InputJsonObject,
+              },
+            });
+          });
+      } finally {
+        this.running.delete(id);
+      }
     }
     return this.authorized(actor, projectId, async (tx, grantId) =>
       this.view(

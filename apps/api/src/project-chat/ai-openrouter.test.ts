@@ -487,3 +487,96 @@ it.each([
     }
   },
 );
+
+it.each([0, 12])(
+  'tool loop với %i nguồn giữ FREE_ONLY/privacy, usage/identity mọi vòng',
+  async (initialCount) => {
+    const { toolDefinitions } = await import('./ai-tools');
+    let posts = 0;
+    const bodies: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init?: RequestInit) => {
+      if (!init?.body)
+        return Response.json({
+          data: catalogue.data.map((m) => ({
+            ...m,
+            supported_parameters: ['tools'],
+          })),
+        });
+      const body = JSON.parse(String(init.body));
+      bodies.push(body);
+      posts++;
+      return Response.json({
+        ...output,
+        id: `gen-${posts}`,
+        usage: {
+          ...output.usage,
+          cost: initialCount && posts === 1 ? null : 0,
+        },
+        choices: [
+          {
+            finish_reason: posts === 1 ? 'tool_calls' : 'stop',
+            message:
+              posts === 1
+                ? {
+                    content: null,
+                    tool_calls: [
+                      {
+                        id: 'call_1',
+                        type: 'function',
+                        function: {
+                          name: 'calculate',
+                          arguments: JSON.stringify({
+                            operation: 'add',
+                            operands: ['0.1', '0.2'],
+                            decimalPlaces: null,
+                          }),
+                        },
+                      },
+                    ],
+                  }
+                : {
+                    content: JSON.stringify({
+                      answer: '0.3',
+                      citations: ['T_calc'],
+                      uncertainty: 'Theo toán hạng cung cấp.',
+                    }),
+                  },
+          },
+        ],
+      });
+    });
+    const execute = vi.fn(async () => ({
+      content: '{"value":"0.3"}',
+      sources: [{ handle: 'T_calc', text: '0.1 + 0.2 = 0.3; công cụ Decimal' }],
+    }));
+    const beforeAttempt = vi.fn(async () => {});
+    const result = await ask(
+      Array.from({ length: initialCount }, (_, i) => ({
+        handle: 'S_initial_' + i,
+        text: 'Nguồn ' + i,
+      })),
+      {
+        beforeAttempt,
+        tools: { definitions: toolDefinitions(['calculate']), execute },
+      },
+    );
+    expect(result.answer).toBe('0.3');
+    expect(result.usage).toMatchObject({ input_tokens: 24, output_tokens: 12 });
+    expect(result.providerCalls).toHaveLength(2);
+    expect(result.cost.status).toBe(initialCount ? 'UNKNOWN' : 'KNOWN');
+    expect(execute).toHaveBeenCalledOnce();
+    expect(beforeAttempt).toHaveBeenCalledTimes(2);
+    for (const body of bodies) {
+      expect(body.model).toBe('openrouter/free');
+      expect(body.provider).toMatchObject({
+        max_price: { prompt: 0, completion: 0, request: 0 },
+        data_collection: 'deny',
+        require_parameters: true,
+      });
+      expect(body.tools).toHaveLength(1);
+      expect(body.plugins).toBeUndefined();
+    }
+    expect(JSON.stringify(bodies[1])).toContain('tool_call_id');
+    expect(JSON.stringify(bodies[1])).toContain('T_calc');
+  },
+);

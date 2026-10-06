@@ -415,3 +415,39 @@ it('paused blocks dispatch while historical configuration retains current input 
     paused: true,
   });
 });
+
+it('web dùng env canonical tùy chọn, metadata không có key và pin config digest', () => {
+  const envPath = join(directory, 'tool-keys.env');
+  writeFileSync(envPath, 'TAVILY_API_KEY="fixture-tavily"\n', { mode: 0o600 });
+  writeFileSync(
+    path,
+    JSON.stringify({
+      providers: {},
+      credentialSource: { mode: 'env', path: envPath },
+      tools: {
+        web: {
+          enabled: true,
+          revision: 'web-v1',
+          organizationId: '11111111-1111-4111-8111-111111111111',
+          decisionReference: 'Owner instruction',
+          creditsPerDay: 5,
+          maxCallsPerRequest: 1,
+          accountPaidUsageDisabled: true,
+          subjects: [
+            {
+              id: 'sku',
+              label: 'SKU công khai',
+              query: 'PUBLIC-SKU manufacturer',
+              domains: ['example.com'],
+            },
+          ],
+        },
+      },
+    }),
+    { mode: 0o600 },
+  );
+  const config = readAiConfig({ GALAXY_AI_CONFIG_FILE: path });
+  expect(config.web?.credentialConfigured).toBe(true);
+  expect(config.webKey).toBe('fixture-tavily');
+  expect(JSON.stringify(config)).not.toContain('fixture-tavily');
+});

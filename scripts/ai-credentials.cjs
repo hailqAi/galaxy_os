@@ -8,6 +8,8 @@ const names = [
   'KIRA_API_KEY',
   'OPENROUTER_API_KEY',
   'LLAMA_CLOUD_API_KEY',
+  'TAVILY_API_KEY',
+  'OPENAI_API_KEY',
 ];
 function readCredentials(source) {
   if (

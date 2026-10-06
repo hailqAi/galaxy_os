@@ -262,3 +262,55 @@ it('DOCX theo root relationship thật, XML lỗi trả lỗi input và nhận l
   );
   expect(result.text).toContain('word/media/image1.png');
 });
+
+it('đọc riêng trang PDF được yêu cầu giữ đúng locator, không tự đọc hết', async () => {
+  const bytes = scanPdfFixture(4),
+    checksum = createHash('sha256').update(bytes).digest('hex');
+  const result = await scanPages(
+    source,
+    'Trang.pdf',
+    bytes,
+    checksum,
+    undefined,
+    4,
+  );
+  expect(result.chunks.map((chunk) => chunk.page)).toEqual([4]);
+  expect(result.media).toHaveLength(1);
+  expect(result.chunks[0]?.text).toContain('chỉ trang 4/4');
+  await expect(
+    scanPages(source, 'Trang.pdf', bytes, checksum, undefined, 5),
+  ).rejects.toThrow('INVALID_PAGE');
+});
+
+it('phân tích vùng XLSX dùng cached value, giữ công thức/tiền tệ và phân biệt ô thiếu', async () => {
+  const ExcelJS = (await import('exceljs')).default;
+  const workbook = new ExcelJS.Workbook(),
+    sheet = workbook.addWorksheet('Dự toán');
+  sheet.getCell('A1').value = 0.1;
+  sheet.getCell('A2').value = 0.2;
+  sheet.getCell('A3').value = { formula: 'SUM(A1:A2)', result: 0.3 };
+  sheet.getCell('B1').value = { formula: 'NOW()' };
+  sheet.getCell('C1').value = 200;
+  sheet.getCell('C1').numFmt = '#,##0.00 "VND"';
+  const bytes = Buffer.from(await workbook.xlsx.writeBuffer());
+  const { analyzeTable } = await import('./ai-native-source');
+  const result = await analyzeTable(bytes, 'Dự toán', 'A1:C3');
+  expect(result.cells.find((cell) => cell.address === 'A3')).toMatchObject({
+    formula: 'SUM(A1:A2)',
+    value: '0.3',
+    recalculated: false,
+  });
+  expect(result.cells.find((cell) => cell.address === 'B1')).toMatchObject({
+    value: null,
+    recalculated: false,
+  });
+  expect(
+    result.numericGroups.find((group) => group.format === 'General')?.sum,
+  ).toBe('0.6');
+  expect(
+    result.numericGroups.find((group) => group.format.includes('VND'))?.sum,
+  ).toBe('200');
+  await expect(analyzeTable(bytes, 'Dự toán', 'A1:ZZ9999')).rejects.toThrow(
+    'TABLE_RANGE_LIMIT',
+  );
+});

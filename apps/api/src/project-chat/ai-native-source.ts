@@ -5,6 +5,8 @@ import { AiError } from './ai-registry';
 import { chunks, extractText, SourceChunk, TextSource } from './ai-source';
 import { validUploadHeader } from '../uploads/uploads.service';
 import ExcelJS from 'exceljs';
+import { Prisma } from '@prisma/client';
+import { ToolDecimal } from './ai-tools';
 import { assertBoundedWorkbook } from '../imports/imports.service';
 import { docxMime, docxText } from '../files/office-document';
 
@@ -177,6 +179,7 @@ export async function scanPages(
   bytes: Buffer,
   checksum: string,
   signal?: AbortSignal,
+  page?: number,
 ) {
   const native = await nativeSource(
     source,
@@ -185,10 +188,29 @@ export async function scanPages(
     bytes,
     checksum,
   );
+  if (
+    page !== undefined &&
+    (!Number.isInteger(page) || page < 1 || page > native.pages)
+  )
+    throw new AiError('INVALID_PAGE');
   const count = Math.min(native.pages, 3);
-  const selected = native.chunks.slice(0, count).map((chunk) => ({
+  const selected = (
+    page === undefined
+      ? native.chunks.slice(0, count)
+      : native.chunks.filter((chunk) => chunk.page === page)
+  ).map((chunk) => ({
     ...chunk,
-    text: `${name} · bản ${source.version} · trang ${chunk.page}. PDF scan: chỉ trang 1–${count}/${native.pages} được gửi ảnh để đọc; không khẳng định đã đọc các trang còn lại.`,
+    ...(page === undefined
+      ? {}
+      : {
+          handle:
+            'S_' +
+            createHash('sha256')
+              .update(chunk.handle + ':render-page')
+              .digest('hex')
+              .slice(0, 24),
+        }),
+    text: `${name} · bản ${source.version} · trang ${chunk.page}. PDF đọc dạng ảnh: chỉ trang ${page ?? `1–${count}`}/${native.pages} được gửi ảnh để đọc; không khẳng định đã đọc các trang còn lại.`,
   }));
   const media: { handle: string; mime: string; bytes: Buffer }[] = [];
   let total = 0;
@@ -239,4 +261,94 @@ export async function scanPages(
     media.push({ handle: chunk.handle, mime: 'image/png', bytes: image });
   }
   return { pages: native.pages, chunks: selected, media };
+}
+
+export async function analyzeTable(
+  bytes: Buffer,
+  sheetName: string,
+  range: string,
+) {
+  const match = /^([A-Z]{1,3})([1-9]\d{0,3}):([A-Z]{1,3})([1-9]\d{0,3})$/.exec(
+    range,
+  );
+  const column = (value: string) =>
+    [...value].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0);
+  if (!match) throw new AiError('TABLE_RANGE_LIMIT');
+  const left = column(match[1]!),
+    top = Number(match[2]),
+    right = column(match[3]!),
+    bottom = Number(match[4]);
+  if (
+    left > right ||
+    top > bottom ||
+    right > 16384 ||
+    (right - left + 1) * (bottom - top + 1) > 400
+  )
+    throw new AiError('TABLE_RANGE_LIMIT');
+  if (bytes.length > 5_000_000 || !assertBoundedWorkbook(bytes))
+    throw new AiError('UNSUPPORTED_FILE');
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(bytes as never);
+  const sheet = workbook.getWorksheet(sheetName);
+  if (!sheet) throw new AiError('SHEET_NOT_FOUND');
+  const cells: {
+    address: string;
+    value: string | null;
+    formula: string | null;
+    format: string;
+    recalculated: false;
+  }[] = [];
+  const numericGroups = new Map<
+    string,
+    { format: string; sum: Prisma.Decimal; count: number }
+  >();
+  for (let r = top; r <= bottom; r++)
+    for (let c = left; c <= right; c++) {
+      const cell = sheet.getCell(r, c),
+        formula = cell.type === ExcelJS.ValueType.Formula;
+      const raw = formula ? cell.result : cell.value;
+      const format = cell.numFmt || 'General';
+      const value =
+        raw === undefined || raw === null
+          ? null
+          : raw instanceof Date
+            ? raw.toISOString()
+            : typeof raw === 'number' ||
+                typeof raw === 'boolean' ||
+                typeof raw === 'string'
+              ? String(raw)
+              : cell.text;
+      cells.push({
+        address: cell.address,
+        value,
+        formula: formula ? cell.formula : null,
+        format,
+        recalculated: false,
+      });
+      if (typeof raw === 'number' && Number.isFinite(raw)) {
+        const group = numericGroups.get(format) ?? {
+          format,
+          sum: new ToolDecimal(0),
+          count: 0,
+        };
+        group.sum = group.sum.add(String(raw));
+        group.count++;
+        numericGroups.set(format, group);
+      }
+    }
+  const result = {
+    sheet: sheetName,
+    range,
+    cells,
+    numericGroups: [...numericGroups.values()].map((group) => ({
+      ...group,
+      sum: group.sum.toString(),
+    })),
+    missingCount: cells.filter((cell) => cell.value === null).length,
+    coverage:
+      'Chỉ vùng ô yêu cầu; tổng các ô số theo định dạng hiển thị, có thể gồm cả ô tổng. Không xác nhận tiền tệ hoặc tổng nghiệp vụ; không tính lại công thức.',
+  };
+  if (Buffer.byteLength(JSON.stringify(result)) > 32000)
+    throw new AiError('TOOL_OUTPUT_TOO_LARGE');
+  return result;
 }

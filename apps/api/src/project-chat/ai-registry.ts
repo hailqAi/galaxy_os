@@ -228,7 +228,34 @@ const settings = z
       ),
   );
 export type AiSettings = z.infer<typeof settings>;
+const webSettings = z
+  .object({
+    enabled: z.boolean().default(false),
+    revision: z.string().min(1).max(100),
+    organizationId: z.string().uuid(),
+    decisionReference: z.string().min(1).max(300),
+    creditsPerDay: z.number().int().min(0).max(1000),
+    maxCallsPerRequest: z.number().int().min(1).max(3),
+    accountPaidUsageDisabled: z.literal(true),
+    subjects: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1).max(80),
+            label: z.string().min(1).max(100),
+            query: z.string().min(1).max(200),
+            domains: z
+              .array(z.string().regex(/^(?:[a-z0-9-]+\.)+[a-z]{2,}$/i))
+              .max(5),
+          })
+          .strict(),
+      )
+      .max(100),
+  })
+  .strict();
 type ConfigMetadata = {
+  web?: z.infer<typeof webSettings> & { credentialConfigured: boolean };
+  webKey?: string;
   connections?: {
     llama_cloud?: {
       category: 'DOCUMENT_KNOWLEDGE';
@@ -286,6 +313,7 @@ export function readAiConfig(
     const root = z
       .object({
         providers: z.record(z.string(), z.unknown()),
+        tools: z.object({ web: webSettings.optional() }).strict().optional(),
         connections: z
           .object({
             llama_cloud: z
@@ -322,6 +350,12 @@ export function readAiConfig(
         credentialPresence: { value: {} },
       },
     );
+    if (root.data.tools?.web) {
+      const key =
+        secret?.status === 'LOADED' ? secret.keys.TAVILY_API_KEY : undefined;
+      result.web = { ...root.data.tools.web, credentialConfigured: !!key };
+      Object.defineProperty(result, 'webKey', { value: key });
+    }
     const connection = root.data.connections?.llama_cloud;
     if (connection)
       result.connections = {
@@ -698,6 +732,8 @@ export const aiContextSchema = z
 export type AiContext = z.infer<typeof aiContextSchema>;
 
 const requestSchema = z.object({
+  toolRevision: z.literal('project-tools-v1').optional(),
+  toolConfigDigest: z.string().optional(),
   mode: z.enum(['GENERAL', 'PROJECT', 'UNIFIED']).default('PROJECT'),
   version: z.literal(1),
   provider: z.enum(['google_gemini', 'mistral', 'kira', 'openrouter']),

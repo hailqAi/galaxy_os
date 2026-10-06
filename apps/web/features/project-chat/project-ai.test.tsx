@@ -379,3 +379,23 @@ it('tách câu hỏi và answer thành hai vùng đọc, citation ở trong answ
   );
   expect(html).toContain('Nguồn trích dẫn');
 });
+
+it('hiện hoạt động công cụ thật đang chạy, không giả phần trăm hoặc lộ arguments', () => {
+  const html = renderToStaticMarkup(
+    createElement(AiAnswer, {
+      answer: {
+        id: 'tool',
+        status: 'RUNNING',
+        toolActivity: 'Đang tra cứu nguồn công khai',
+        question: 'Tra thông số',
+        answer: null,
+        sources: [],
+      },
+      onSource: () => {},
+      onCancel: () => {},
+      onRun: () => {},
+    }),
+  );
+  expect(html).toContain('Đang tra cứu nguồn công khai');
+  expect(html).not.toContain('50%');
+});

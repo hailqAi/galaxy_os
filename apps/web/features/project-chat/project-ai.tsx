@@ -98,6 +98,7 @@ type Answer = {
   returnedModel?: string | null;
   cost?: { status: string; value: number | null; source: string | null };
   errorCode?: string | null;
+  toolActivity?: string | null;
   createdAt?: string;
   usage?: { input_tokens: number; output_tokens: number } | null;
   id: string;
@@ -121,6 +122,12 @@ type SourceDetail = Source & {
   sourceId: string;
   sequence?: number;
   downloadUrl?: string;
+  web?: {
+    url: string;
+    retrievedAt: string;
+    kind: 'SNIPPET' | 'PAGE';
+    provider: string;
+  };
 };
 const pending = ['QUEUED', 'INDEXING', 'RUNNING'];
 const scopes = [
@@ -231,6 +238,28 @@ export const aiStatusLabel = (
     QUEUED: 'Câu hỏi đã lưu, chờ xử lý',
     INDEXING: 'Đang tìm và đọc nguồn',
     RUNNING: 'Đang xử lý câu trả lời',
+    NEEDS_PROVIDER_CONFIGURATION_OR_BUDGET:
+      'Công cụ này chưa được quản trị bật hoặc cấp hạn mức.',
+    PUBLIC_SUBJECT_REQUIRED:
+      'Chưa có mục tra cứu công khai phù hợp được cấu hình.',
+    PUBLIC_URL_REQUIRED:
+      'Chỉ đọc URL công khai hợp lệ được chọn trong lượt này.',
+    PUBLIC_PAGE_UNAVAILABLE: 'Trang công khai tạm chưa đọc được.',
+    WEB_SEARCH_UNAVAILABLE: 'Tìm kiếm web tạm lỗi; chưa có kết quả xác minh.',
+    WEB_BUDGET_LIMIT: 'Đã hết hạn mức tra web trong ngày.',
+    TOOL_CALL_LIMIT:
+      'Lượt này đã đạt giới hạn công cụ; hãy chia yêu cầu nhỏ hơn.',
+    TOOL_CONTEXT_LIMIT:
+      'Phạm vi đọc vượt giới hạn lượt này; hãy chọn phần cụ thể hơn.',
+    TOOL_TIMEOUT: 'Công cụ mất quá nhiều thời gian; lượt này đã dừng.',
+    WEB_COST_VIOLATION: 'Đường tra web đã dừng do mức sử dụng bất thường.',
+    WEB_COST_UNVERIFIED:
+      'Chưa xác minh được mức sử dụng web; cần quản trị kiểm tra.',
+    TOOL_TOKEN_LIMIT: 'Lượt này đã đạt giới hạn xử lý.',
+    TOOL_OUTPUT_TOO_LARGE: 'Kết quả quá lớn; hãy thu hẹp phần cần đọc.',
+    TABLE_RANGE_LIMIT: 'Chỉ phân tích tối đa 400 ô trong một lần gọi.',
+    SHEET_NOT_FOUND: 'Không tìm thấy sheet được yêu cầu trong file.',
+
     COMPLETED: 'AI tạo — chưa phải quyết định chính thức',
     CANCELLED: 'Đã hủy',
     FAILED: 'Không thể xử lý yêu cầu',
@@ -283,10 +312,12 @@ export function AiAnswer({
       >
         <p className="ai-author">✦ Galaxy AI</p>
         <p role="status" className="chat-metadata">
-          {aiStatusLabel(
-            answer.errorCode ?? answer.status,
-            aiStatusLabel(answer.status),
-          )}
+          {answer.status === 'RUNNING' && answer.toolActivity
+            ? answer.toolActivity
+            : aiStatusLabel(
+                answer.errorCode ?? answer.status,
+                aiStatusLabel(answer.status),
+              )}
         </p>
         <details className="ai-answer-details">
           <summary>Thông tin lượt trả lời</summary>
@@ -1781,10 +1812,30 @@ export function ProjectAi({
               ? `trang ${source.page}`
               : `dòng ${source.startLine}–${source.endLine}`}{' '}
             ·{' '}
-            {source.provenance === 'PUBLISHED'
-              ? 'Nguồn đã phát hành'
-              : 'Trao đổi chưa xác nhận'}
+            {source.provenance === 'PUBLIC_WEB'
+              ? 'Nguồn web công khai'
+              : source.provenance === 'AI_DRAFT'
+                ? 'Kết quả công cụ — chưa xác nhận nghiệp vụ'
+                : source.provenance === 'PUBLISHED'
+                  ? 'Nguồn đã phát hành'
+                  : 'Trao đổi chưa xác nhận'}
           </p>
+          {source.web && /^https?:\/\//.test(source.web.url) && (
+            <p>
+              <a
+                href={source.web.url}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Mở trang nguồn
+              </a>{' '}
+              ·{' '}
+              {source.web.kind === 'SNIPPET'
+                ? 'Snippet tìm kiếm, chưa đọc trang'
+                : 'Trang đã đọc'}{' '}
+              · {new Date(source.web.retrievedAt).toLocaleString('vi-VN')}
+            </p>
+          )}
           <pre className="whitespace-pre-wrap">{source.text}</pre>
           {source.downloadUrl?.startsWith('/api/v1/project-chat/') && (
             <a href={source.downloadUrl}>Mở file đúng phiên bản</a>

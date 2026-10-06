@@ -62,10 +62,10 @@
 **Files:** `apps/api/src/project-chat/ai-tools.ts`, `ai-tools.test.ts`, `ai-provider.ts`, `project-ai.service.ts`, registry hiện có và integration tests.
 **Interfaces:** Tool arguments không nhận Project/actor; handler nhận scope backend. Result mang provenance, cost class, status và giới hạn; provider loop dùng existing request/cancel/idempotency.
 
-- [ ] RED tests schema/call budget/cancel, scoped source read/search, Decimal calculate, field permission, public query và SSRF/redirect/rebinding/size/MIME/timeouts.
-- [ ] Nối tool loop OpenRouter theo capability thật; local tools miễn phí độc lập FREE_ONLY. Tavily Search/Extract một adapter disabled khi chưa cấu hình/budget; OpenAI Responses contract riêng theo docs hiện hành.
-- [ ] GREEN mock/local; live web chỉ khi configured/authorized. Expected: không fake web/citation, không raw SQL/shell/path/model scope override.
-- [ ] Commit scoped tools.
+- [x] RED tests schema/call budget/cancel, scoped source read/search, Decimal calculate, field permission, public query và SSRF/redirect/rebinding/size/MIME/timeouts.
+- [x] Nối tool loop OpenRouter theo capability thật; local tools miễn phí độc lập FREE_ONLY. Tavily Search một adapter disabled khi chưa cấu hình/budget; đọc trang bằng fetch HTTP local có kiểm SSRF, không cần thêm Extract trả phí. OpenAI Responses chuyển T5 cùng adapter image/audio, không bỏ phạm vi.
+- [x] GREEN mock/local; live web chỉ khi configured/authorized. Expected: không fake web/citation, không raw SQL/shell/path/model scope override.
+- [x] Commit scoped tools.
 
 ### Task 4: Artifact bản nháp thật
 
@@ -82,7 +82,7 @@
 **Interfaces:** Consumes capability/provider/budget admin; produces versioned AI media/transcript đúng conversation, không chat-model giả tính năng.
 
 - [ ] RED mock capability off/cost denied; image source ACL/version, transcript Project, cancellation/idempotency.
-- [ ] Dedicated API contracts theo docs chính thức; disabled/live chỉ theo cấu hình thật; microphone explicit gesture/permission, secure-context reason trên HTTP LAN.
+- [ ] Dedicated OpenAI Responses/image/audio API contracts theo docs chính thức; disabled/live chỉ theo cấu hình thật; microphone explicit gesture/permission, secure-context reason trên HTTP LAN.
 - [ ] GREEN local/mock; live thiếu cấu hình ghi NEEDS_PROVIDER_CONFIGURATION_OR_BUDGET, không cản task khác. Commit scoped.
 
 ### Task 6: Hồi quy, review và release

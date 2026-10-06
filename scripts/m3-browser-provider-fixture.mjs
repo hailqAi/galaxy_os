@@ -27,6 +27,7 @@ globalThis.fetch = async (input, options) => {
             input_modalities: ['text', 'image'],
             output_modalities: ['text'],
           },
+          supported_parameters: ['tools'],
           pricing: { prompt: '0', completion: '0', request: '0' },
         },
       ],
@@ -61,7 +62,15 @@ globalThis.fetch = async (input, options) => {
       choices: [
         {
           finish_reason: 'stop',
-          message: { content: 'Lời chúc từ provider fixture.' },
+          message: {
+            content: body.tools
+              ? JSON.stringify({
+                  answer: 'Lời chúc từ provider fixture.',
+                  citations: [],
+                  uncertainty: '',
+                })
+              : 'Lời chúc từ provider fixture.',
+          },
         },
       ],
       usage: { prompt_tokens: 10, completion_tokens: 10, cost: 0 },
