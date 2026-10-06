@@ -9,11 +9,12 @@ import React, {
   useState,
 } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Actor, api, ApiError, apiUrl } from '../../app/lib/api';
 import { ChatManagement, ReleasePanel, ReleaseList } from './chat-controls';
 import { projectDomainLabel } from '../projects/project-domain-labels';
 import { AiMount, useAiSurfaces } from './project-ai-surfaces';
+import { Conversation } from './project-ai';
 import { ChatComposerInput } from './chat-composer-input';
 import {
   ProjectWorkspaceHeader,
@@ -163,9 +164,24 @@ export function ProjectChat({ projectId }: { projectId: string }) {
   const [revision, setRevision] = useState(0);
   const [actor, setActor] = useState<Actor>();
   const [selected, setSelected] = useState('');
+  const selectedAi = useSearchParams().get('ai') ?? undefined;
+  const [aiHistory, setAiHistory] = useState<{
+    projectId: string;
+    items: Conversation[];
+  }>();
+  const aiConversations =
+    aiHistory?.projectId === projectId ? aiHistory.items : [];
+  const rememberConversations = useCallback(
+    (items: Conversation[]) => setAiHistory({ projectId, items }),
+    [projectId],
+  );
   const [group, setGroup] = useState('CONSULTING');
   const [roomSearch, setRoomSearch] = useState('');
   const [roomDrawerOpen, setRoomDrawerOpen] = useState(false);
+  const browseConversations = useCallback(
+    () => setRoomDrawerOpen((value) => !value),
+    [],
+  );
   const draftWriterRef = useRef<((text: string) => void) | undefined>(
     undefined,
   );
@@ -215,32 +231,36 @@ export function ProjectChat({ projectId }: { projectId: string }) {
   const hasAi = Boolean(
     data?.aiEnabled && actor && data?.authorityActions.includes('INVOKE'),
   );
-  function navigateRoom(nextGroup: string, nextRoom = '') {
+  function navigateRoom(nextGroup: string, nextRoom = '', nextAi?: string) {
     leaveGuardRef.current(() => {
       setGroup(nextGroup);
       setSelected(nextRoom);
       setRoomDrawerOpen(false);
       const url = new URL(location.href);
       url.searchParams.set('group', nextGroup);
-      url.searchParams.delete('ai');
+      if (nextAi) url.searchParams.set('ai', nextAi);
+      else url.searchParams.delete('ai');
       if (nextRoom) url.searchParams.set('room', nextRoom);
       else url.searchParams.delete('room');
-      window.history.pushState(window.history.state, '', url);
+      window.history.pushState(null, '', url);
     });
   }
   return (
-    <section className="project-chat-workspace grid gap-4">
-      <ProjectWorkspaceHeader
-        projectId={projectId}
-        name={data?.project.name ?? 'Không gian dự án'}
-        active="work"
-        permissions={actor?.permissions ?? []}
-        aiEnabled={hasAi}
-      />
+    <section className="project-chat-workspace p04-workspace">
       {error && <p role="alert">{error}</p>}
       {!data && !error && <p>Đang kiểm tra phạm vi…</p>}
       {data && (
         <>
+          <details className="p04-project-navigation">
+            <summary>{data.project.name} · Hồ sơ và quyền</summary>
+            <ProjectWorkspaceHeader
+              projectId={projectId}
+              name={data.project.name}
+              active="work"
+              permissions={actor?.permissions ?? []}
+              aiEnabled={hasAi}
+            />
+          </details>
           {actor &&
             data.authorityActions.some((a) =>
               ['CREATE', 'ACCESS_ADMIN'].includes(a),
@@ -253,7 +273,9 @@ export function ProjectChat({ projectId }: { projectId: string }) {
                 onChanged={() => setRevision((v) => v + 1)}
               />
             )}
-          <div className={`contextual-workspace ${hasAi ? 'with-ai' : ''}`}>
+          <div
+            className={`contextual-workspace p04-columns ${hasAi ? 'with-ai' : ''} ${room ? 'has-human-room' : ''}`}
+          >
             <aside
               className={`room-sidebar panel ${room ? 'room-selected' : ''} ${roomDrawerOpen ? 'is-open' : ''}`}
               aria-label="Cuộc trao đổi"
@@ -270,13 +292,7 @@ export function ProjectChat({ projectId }: { projectId: string }) {
               >
                 ☰
               </button>
-              <h2 className="font-semibold">Cuộc trao đổi</h2>
-              <input
-                aria-label="Tìm cuộc trao đổi"
-                placeholder="Tìm chủ đề…"
-                value={roomSearch}
-                onChange={(e) => setRoomSearch(e.target.value)}
-              />
+              <h2 className="font-semibold">Hội thoại</h2>
               <nav aria-label="Nhóm chuyên môn" className="room-groups">
                 {groups.map(([id, label]) => (
                   <button
@@ -288,7 +304,33 @@ export function ProjectChat({ projectId }: { projectId: string }) {
                   </button>
                 ))}
               </nav>
+              <input
+                aria-label="Tìm cuộc trao đổi"
+                placeholder="Tìm chủ đề…"
+                value={roomSearch}
+                onChange={(e) => setRoomSearch(e.target.value)}
+              />
               <div className="room-list">
+                {hasAi &&
+                  aiConversations
+                    .filter((c) => c.scope === group || c.scope === 'ALL')
+                    .map((c, i) => (
+                      <button
+                        className="room-choice"
+                        key={c.id}
+                        aria-pressed={selectedAi === c.id && !room}
+                        onClick={() =>
+                          navigateRoom(
+                            c.scope === 'ALL' ? group : c.scope,
+                            '',
+                            c.id,
+                          )
+                        }
+                      >
+                        <strong>Hội thoại AI · {i + 1}</strong>
+                        <small>AI · Chỉ mình tôi</small>
+                      </button>
+                    ))}
                 {data.rooms
                   .filter(
                     (r) =>
@@ -354,15 +396,17 @@ export function ProjectChat({ projectId }: { projectId: string }) {
                 onBack={() => navigateRoom(group)}
               />
             ) : (
-              <div className="panel empty-state room-empty">
-                <span className="text-3xl">▤</span>
-                <h2 className="mt-4 font-semibold">
-                  Chọn một cuộc trao đổi để làm việc.
-                </h2>
-                <p className="mt-2 text-sm">
-                  Mỗi chủ đề có thành viên, công việc và hồ sơ riêng.
-                </p>
-              </div>
+              !hasAi && (
+                <div className="panel empty-state room-empty">
+                  <span className="text-3xl">▤</span>
+                  <h2 className="mt-4 font-semibold">
+                    Chọn một cuộc trao đổi để làm việc.
+                  </h2>
+                  <p className="mt-2 text-sm">
+                    Mỗi chủ đề có thành viên, công việc và hồ sơ riêng.
+                  </p>
+                </div>
+              )
             )}
             {hasAi && actor && (
               <AiMount
@@ -372,13 +416,11 @@ export function ProjectChat({ projectId }: { projectId: string }) {
                 )}
                 key={`${projectId}/${actor.userId}`}
                 projectId={projectId}
+                kind={room ? 'sidebar' : 'workspace'}
                 scope={group}
-                conversationId={
-                  typeof window === 'undefined'
-                    ? undefined
-                    : (new URLSearchParams(location.search).get('ai') ??
-                      undefined)
-                }
+                conversationId={selectedAi}
+                onConversations={rememberConversations}
+                onBrowse={browseConversations}
                 onDraft={
                   room?.actions.includes('SEND') && !room.locked
                     ? (text) => draftWriterRef.current?.(text)
@@ -412,6 +454,7 @@ function ChatRoomView({
   leaveGuardRef: React.RefObject<(leave: () => void) => void>;
   draftWriterRef: React.RefObject<((text: string) => void) | undefined>;
 }) {
+  const ai = useAiSurfaces();
   const router = useRouter();
   const [leaveAction, setLeaveAction] = useState<(() => void) | undefined>();
   const leaveDialog = useRef<HTMLDialogElement>(null);
@@ -1028,6 +1071,20 @@ function ChatRoomView({
             </p>
           )}
         </div>
+      )}
+      {ai?.access?.allowed && !reason && (
+        <button
+          className="ai-draft-action"
+          onClick={() =>
+            ai.open({
+              projectId,
+              scope: room.group,
+              context: { roomId: room.id },
+            })
+          }
+        >
+          ✦ Nhờ AI soạn
+        </button>
       )}
       <ChatComposer
         value={draft}

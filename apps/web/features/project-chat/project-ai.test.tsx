@@ -342,3 +342,40 @@ it.each(['TEMPORARY_ERROR', 'RATE_LIMITED_UNKNOWN'])(
     expect(html).not.toContain('paused-model');
   },
 );
+
+it('tách câu hỏi và answer thành hai vùng đọc, citation ở trong answer thay vì metadata kỹ thuật thường trực', () => {
+  const html = renderToStaticMarkup(
+    createElement(AiAnswer, {
+      answer: {
+        id: 'answer',
+        status: 'COMPLETED',
+        question: 'Mã cửa?',
+        answer: 'A-724',
+        model: 'openrouter/free',
+        provider: 'openrouter',
+        sources: [
+          {
+            handle: 'S1',
+            label: 'Cửa.pdf',
+            version: '2:hash',
+            provenance: 'UNCONFIRMED',
+            page: 2,
+            startLine: 1,
+            endLine: 4,
+          },
+        ],
+      },
+      onSource: () => {},
+      onCancel: () => {},
+      onRun: () => {},
+    }),
+  );
+  expect(html).toContain('aria-label="Câu trả lời Galaxy AI"');
+  expect(html.indexOf('Mã cửa?')).toBeLessThan(
+    html.indexOf('aria-label="Câu trả lời Galaxy AI"'),
+  );
+  expect(html.indexOf('Cửa.pdf')).toBeGreaterThan(
+    html.indexOf('aria-label="Câu trả lời Galaxy AI"'),
+  );
+  expect(html).toContain('Nguồn trích dẫn');
+});

@@ -108,6 +108,13 @@ async function configureProjectPolicy() {
 test.afterAll(async () => {
   await db.$disconnect();
 });
+test.afterEach(async ({ page }, info) => {
+  if (info.status !== info.expectedStatus)
+    writeFileSync(
+      info.outputPath('fixture-state.txt'),
+      `${page.url()}\n${await page.locator('body').innerText()}`,
+    );
+});
 
 async function login(page: Page) {
   const cookie = fixture.users.sender!.cookie,
@@ -123,6 +130,9 @@ async function login(page: Page) {
     },
   ]);
   await page.goto(`/projects/${fixture.projectId}/work`);
+  await page
+    .getByRole('button', { name: '＋ Tạo cuộc trao đổi mới', exact: true })
+    .click();
 }
 
 test('composer không còn control pilot hoặc cấu hình nhà cung cấp', async ({
@@ -154,6 +164,9 @@ test('private AI uses old sources, persists history and clears revoked derived c
   );
   const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
   await expect(panel).toBeVisible();
+  await panel
+    .getByRole('button', { name: '＋ Tạo cuộc trao đổi mới', exact: true })
+    .click();
   await panel
     .getByLabel('Câu hỏi AI', { exact: true })
     .fill('GH-M3-42 kích thước?');
@@ -284,9 +297,13 @@ test('private AI uses old sources, persists history and clears revoked derived c
   await panel
     .getByLabel('Model AI', { exact: true })
     .selectOption('openrouter/free');
-  await panel.getByRole('button', { name: 'Chat AI mới', exact: true }).click();
-  await panel.getByLabel('Phạm vi AI', { exact: true }).selectOption('ALL');
-  // Scope toàn dự án là phiên riêng trong popup; panel nhóm vẫn giữ đúng scope.
+  await panel
+    .getByRole('button', { name: '＋ Chat AI mới', exact: true })
+    .click();
+  await page
+    .getByRole('button', { name: 'Mở Hỏi AI dự án', exact: true })
+    .click();
+  // Popup toàn dự án giữ pipeline chung, không có selector mode hoặc scope.
   const projectPopup = page.getByRole('dialog', { name: /Galaxy AI/ });
   await projectPopup
     .getByLabel('Câu hỏi AI', { exact: true })
@@ -372,16 +389,32 @@ test('slow denied polling removes old-account answers and drafts', async ({
 test('switching between AI-enabled actors discards the old private conversation URL', async ({
   page,
 }) => {
+  const senderRole = await db.userRole.findFirstOrThrow({
+    where: { userId: fixture.users.sender!.id },
+  });
+  await db.userRole.create({
+    data: {
+      organizationId: senderRole.organizationId,
+      userId: fixture.users.viewer!.id,
+      roleId: senderRole.roleId,
+      scopeType: 'ORGANIZATION',
+    },
+  });
   await post(`/projects/${fixture.projectId}/authorities`, {
     userId: fixture.users.viewer!.id,
     actions: ['INVOKE'],
     roomCeiling: [],
   });
+  await post(
+    `/rooms/${fixture.roomId}/messages`,
+    { clientKey: randomUUID(), body: 'ACTOR-M3-42 nguồn riêng 900 mm.' },
+    'sender',
+  );
   await login(page);
   const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
   await panel
     .getByLabel('Câu hỏi AI', { exact: true })
-    .fill('SLOW-M3-42 thông tin?');
+    .fill('ACTOR-M3-42 thông tin?');
   await panel.getByRole('button', { name: 'Gửi', exact: true }).click();
   await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
   await expect(page).toHaveURL(/\?ai=[\da-f-]+/);
@@ -400,7 +433,12 @@ test('switching between AI-enabled actors discards the old private conversation 
   ]);
   await expect(page).not.toHaveURL(/\?ai=/);
   await expect(panel).toBeVisible();
-  await expect(panel.getByLabel('Lịch sử AI', { exact: true })).toHaveValue('');
+  await expect(
+    panel.locator('.ai-thread-history [aria-current="page"]'),
+  ).toHaveCount(0);
+  await panel
+    .getByRole('button', { name: '＋ Tạo cuộc trao đổi mới', exact: true })
+    .click();
   await expect(panel.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue('');
   await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toHaveCount(0);
 });
@@ -408,6 +446,15 @@ test('switching between AI-enabled actors discards the old private conversation 
 test('T2 cùng request và hội thoại khi dock, floating, expanded và page', async ({
   page,
 }) => {
+  // Nguồn riêng của ca này; không phụ thuộc ca revoke trước đó đã chạy.
+  await post(
+    `/rooms/${fixture.roomId}/messages`,
+    {
+      clientKey: randomUUID(),
+      body: 'SURFACE-M3-42 nguồn kiểm chuyển màn 900 mm.',
+    },
+    'sender',
+  );
   await login(page);
   let runs = 0;
   let release!: () => void;
@@ -423,7 +470,7 @@ test('T2 cùng request và hội thoại khi dock, floating, expanded và page',
   const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
   await panel
     .getByLabel('Câu hỏi AI', { exact: true })
-    .fill('T2 chuyển presentation giữ nguồn SLOW-M3-42?');
+    .fill('SURFACE-M3-42 chuyển presentation giữ nguồn?');
   await panel.getByRole('button', { name: 'Gửi', exact: true }).click();
   await expect.poll(() => runs).toBe(1);
   const id = new URL(page.url()).searchParams.get('ai');
@@ -457,9 +504,9 @@ test('T2 cùng request và hội thoại khi dock, floating, expanded và page',
     .getByLabel('Câu hỏi AI', { exact: true })
     .fill('Nháp của cùng phiên');
   await panel.getByRole('button', { name: 'Mở rộng AI', exact: true }).click();
-  await expect(panel.getByLabel('Lịch sử AI', { exact: true })).toHaveValue(
-    id!,
-  );
+  await expect(
+    panel.locator('.ai-thread-history [aria-current="page"]'),
+  ).toHaveAttribute('data-conversation-id', id!);
   await expect(panel.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue(
     'Nháp của cùng phiên',
   );
@@ -521,6 +568,80 @@ test('T2 cùng request và hội thoại khi dock, floating, expanded và page',
   await expect(citation).toBeFocused();
 });
 
+test('sidebar nguồn mở được, huỷ rời room giữ phiên và mobile chỉ đọc vẫn chọn được room', async ({
+  page,
+}) => {
+  await post(
+    `/rooms/${fixture.roomId}/messages`,
+    { clientKey: randomUUID(), body: 'RAIL-M3-81 nguồn kiểm sidebar.' },
+    'sender',
+  );
+  await login(page);
+  const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
+  await panel
+    .getByLabel('Câu hỏi AI', { exact: true })
+    .fill('RAIL-M3-81 có gì?');
+  await panel.getByRole('button', { name: 'Gửi', exact: true }).click();
+  await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
+  const id = new URL(page.url()).searchParams.get('ai');
+  await post(
+    `/projects/${fixture.projectId}/ai/conversations`,
+    { clientKey: randomUUID(), scope: 'CONSULTING' },
+    'sender',
+  );
+  await page.goto(
+    `/projects/${fixture.projectId}/work?group=CONSULTING&room=${fixture.roomId}&ai=${id}`,
+  );
+  await expect(page.locator('form.ai-composer')).toHaveCount(0);
+  await panel.locator('.ai-context-sources > button').first().click();
+  const drawer = panel.getByRole('dialog', { name: 'Nguồn câu trả lời' });
+  await expect(drawer).toBeVisible();
+  await drawer.getByRole('button', { name: 'Đóng nguồn' }).click();
+  await page.getByLabel('Tin nhắn', { exact: true }).fill('Nháp room chưa gửi');
+  await page
+    .locator('.room-list .room-choice')
+    .filter({ hasText: 'Hội thoại AI' })
+    .first()
+    .click();
+  await page.getByRole('button', { name: 'Ở lại', exact: true }).click();
+  await expect(page.getByLabel('Tin nhắn', { exact: true })).toHaveValue(
+    'Nháp room chưa gửi',
+  );
+  await expect(
+    panel.locator('.ai-thread-history [aria-current="page"]'),
+  ).toHaveAttribute('data-conversation-id', id!);
+  await expect(page).toHaveURL(new RegExp(`ai=${id}`));
+  await post(
+    `/rooms/${fixture.roomId}/grants`,
+    { userId: fixture.users.locker!.id, actions: ['READ'] },
+    'manager',
+  );
+  const cookie = fixture.users.locker!.cookie,
+    separator = cookie.indexOf('=');
+  await page.context().clearCookies();
+  await page.context().addCookies([
+    {
+      name: cookie.slice(0, separator),
+      value: cookie.slice(separator + 1),
+      url: process.env.APP_PUBLIC_ORIGIN!,
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Lax',
+    },
+  ]);
+  await page.setViewportSize({ width: 375, height: 983 });
+  await page.goto(`/projects/${fixture.projectId}/work`);
+  await page
+    .getByRole('button', { name: 'Mở danh sách cuộc trao đổi', exact: true })
+    .click();
+  await page.getByRole('button', { name: /Nội bộ thử nghiệm/ }).click();
+  await expect(page.getByLabel('Tin nhắn', { exact: true })).toBeDisabled();
+  await page.screenshot({
+    path: '/home/galaxy_os/.runtime/five-pdfs-20261006/ui-read-only.png',
+    fullPage: true,
+  });
+});
+
 for (const lateStatus of [200, 403]) {
   test(`T5 response A muộn ${lateStatus} không tác động popup Project B`, async ({
     page,
@@ -555,7 +676,7 @@ for (const lateStatus of [200, 403]) {
     await configureProjectPolicy();
     await login(page);
     await page
-      .getByRole('button', { name: 'Hỏi Galaxy AI', exact: true })
+      .getByRole('button', { name: 'Mở Hỏi AI dự án', exact: true })
       .click();
     const popup = page.getByRole('dialog', { name: /Galaxy AI/ });
     let release!: () => void;
@@ -577,12 +698,13 @@ for (const lateStatus of [200, 403]) {
     await expect.poll(() => runs).toBe(1);
     try {
       await popup.getByRole('button', { name: 'Đóng AI', exact: true }).click();
+      await page.locator('.p04-project-navigation > summary').click();
       await page
         .getByRole('link', { name: '← Các dự án được cấp', exact: true })
         .click();
       await page.getByRole('link', { name: b.name, exact: true }).click();
       await page
-        .getByRole('button', { name: 'Hỏi Galaxy AI', exact: true })
+        .getByRole('button', { name: 'Mở Hỏi AI dự án', exact: true })
         .click();
       await expect(popup.getByText(b.name, { exact: true })).toBeVisible();
       const input = popup.getByLabel('Câu hỏi AI', { exact: true });
@@ -602,12 +724,13 @@ for (const lateStatus of [200, 403]) {
         await popup
           .getByRole('button', { name: 'Đóng AI', exact: true })
           .click();
+        await page.locator('.p04-project-navigation > summary').click();
         await page
           .getByRole('link', { name: '← Các dự án được cấp', exact: true })
           .click();
         await page.getByRole('link', { name: a.name, exact: true }).click();
         await page
-          .getByRole('button', { name: 'Hỏi Galaxy AI', exact: true })
+          .getByRole('button', { name: 'Mở Hỏi AI dự án', exact: true })
           .click();
         await expect(
           popup.getByRole('heading', { name: question, exact: true }),

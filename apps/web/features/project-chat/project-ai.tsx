@@ -9,6 +9,8 @@ import React, {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
+import Image from 'next/image';
+import conversationEmpty from '../../app/assets/conversation-empty.svg';
 import { api, ApiError } from '../../app/lib/api';
 import { ChatText } from './chat-text';
 import { ChatComposerInput } from './chat-composer-input';
@@ -105,7 +107,7 @@ type Answer = {
   uncertainty?: string | null;
   sources: Source[];
 };
-type Conversation = {
+export type Conversation = {
   mode?: 'GENERAL' | 'PROJECT' | 'UNIFIED';
   id: string;
   scope: string;
@@ -270,63 +272,76 @@ export function AiAnswer({
       {answer.status !== 'ACCESS_REVOKED' && answer.question && (
         <h3 className="ai-question">{answer.question}</h3>
       )}
-      <p role="status" className="chat-metadata">
-        {aiStatusLabel(
-          answer.errorCode ?? answer.status,
-          aiStatusLabel(answer.status),
+      <div
+        className="ai-response-card"
+        role="region"
+        aria-label="Câu trả lời Galaxy AI"
+      >
+        <p className="ai-author">✦ Galaxy AI</p>
+        <p role="status" className="chat-metadata">
+          {aiStatusLabel(
+            answer.errorCode ?? answer.status,
+            aiStatusLabel(answer.status),
+          )}
+        </p>
+        <details className="ai-answer-details">
+          <summary>Thông tin lượt trả lời</summary>
+          {answer.model && (
+            <p className="chat-metadata">
+              {answer.modelLabel ?? answer.model} ·{' '}
+              {answer.provider === 'openrouter'
+                ? `Qua OpenRouter · model thực tế: ${answer.returnedModel ?? 'chưa xác định'}`
+                : (answer.providerLabel ?? answer.provider)}
+              {answer.createdAt
+                ? ` · ${new Date(answer.createdAt).toLocaleString('vi-VN')}`
+                : ''}
+            </p>
+          )}
+          {answer.status === 'COMPLETED' && answer.usage && (
+            <p className="chat-metadata">
+              Token đầu vào: {answer.usage.input_tokens} · đầu ra:{' '}
+              {answer.usage.output_tokens}.{' '}
+              {answer.cost?.status === 'KNOWN'
+                ? `Chi phí: ${answer.cost.value} USD (${answer.cost.source}).`
+                : 'Chi phí tiền chưa xác định.'}
+            </p>
+          )}
+        </details>
+        {answer.status === 'COMPLETED' && (
+          <>
+            <ChatText text={answer.answer ?? ''} />
+            {answer.uncertainty && (
+              <p className="whitespace-pre-wrap">{answer.uncertainty}</p>
+            )}
+            {onDraft && answer.answer && (
+              <button onClick={() => onDraft(answer.answer!)}>
+                Dùng làm nháp phản hồi
+              </button>
+            )}
+            {answer.sources.length > 0 && (
+              <p className="ai-citation-heading">Nguồn trích dẫn</p>
+            )}
+            <ul className="ai-citations">
+              {answer.sources.map((source) => (
+                <li key={source.handle}>
+                  <button onClick={() => onSource(source)}>
+                    {source.label} · bản {source.version.split(':')[0]} ·{' '}
+                    {source.page
+                      ? `trang ${source.page}`
+                      : `dòng ${source.startLine}–${source.endLine}`}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
-      </p>
-      {answer.model && (
-        <p className="chat-metadata">
-          {answer.modelLabel ?? answer.model} ·{' '}
-          {answer.provider === 'openrouter'
-            ? `Qua OpenRouter · model thực tế: ${answer.returnedModel ?? 'chưa xác định'}`
-            : (answer.providerLabel ?? answer.provider)}
-          {answer.createdAt
-            ? ` · ${new Date(answer.createdAt).toLocaleString('vi-VN')}`
-            : ''}
-        </p>
-      )}
-      {answer.status === 'COMPLETED' && answer.usage && (
-        <p className="chat-metadata">
-          Token đầu vào: {answer.usage.input_tokens} · đầu ra:{' '}
-          {answer.usage.output_tokens}.{' '}
-          {answer.cost?.status === 'KNOWN'
-            ? `Chi phí: ${answer.cost.value} USD (${answer.cost.source}).`
-            : 'Chi phí tiền chưa xác định.'}
-        </p>
-      )}
-      {answer.status === 'COMPLETED' && (
-        <>
-          <ChatText text={answer.answer ?? ''} />
-          {answer.uncertainty && (
-            <p className="whitespace-pre-wrap">{answer.uncertainty}</p>
-          )}
-          {onDraft && answer.answer && (
-            <button onClick={() => onDraft(answer.answer!)}>
-              Dùng làm nháp phản hồi
-            </button>
-          )}
-          <ul className="ai-citations">
-            {answer.sources.map((source) => (
-              <li key={source.handle}>
-                <button onClick={() => onSource(source)}>
-                  {source.label} · bản {source.version} ·{' '}
-                  {source.page
-                    ? `trang ${source.page}`
-                    : `dòng ${source.startLine}–${source.endLine}`}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-      {answer.status === 'QUEUED' && (
-        <button onClick={onRun}>Tiếp tục yêu cầu đã lưu</button>
-      )}
-      {pending.includes(answer.status) && (
-        <button onClick={onCancel}>Dừng yêu cầu</button>
-      )}
+        {answer.status === 'QUEUED' && (
+          <button onClick={onRun}>Tiếp tục yêu cầu đã lưu</button>
+        )}
+        {pending.includes(answer.status) && (
+          <button onClick={onCancel}>Dừng yêu cầu</button>
+        )}
+      </div>
     </article>
   );
 }
@@ -375,7 +390,8 @@ export function ProjectAi({
   projectName,
   initialConversationId,
   onSelected,
-  onScopeChange,
+  onConversations,
+  onBrowse,
   onFloat,
   onExpand,
   onMinimize,
@@ -392,10 +408,18 @@ export function ProjectAi({
   onDraft?: (text: string) => void;
   portalTarget?: HTMLElement | null;
   active?: boolean;
-  presentation?: 'docked' | 'floating' | 'expanded' | 'page';
+  presentation?:
+    | 'docked'
+    | 'floating'
+    | 'expanded'
+    | 'page'
+    | 'workspace'
+    | 'sidebar';
   projectName?: string;
   initialConversationId?: string;
   onSelected?: (id: string) => void;
+  onConversations?: (items: Conversation[]) => void;
+  onBrowse?: () => void;
   onScopeChange?: (scope: string) => void;
   onFloat?: () => void;
   onExpand?: () => void;
@@ -404,6 +428,9 @@ export function ProjectAi({
   onPage?: () => void;
 }) {
   const panel = useRef<HTMLElement>(null);
+  const workspace = presentation === 'workspace' || presentation === 'page';
+  const [started, setStarted] = useState(false);
+  const [mobileHistory, setMobileHistory] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [models, setModels] = useState<ModelChoice[]>([]);
   const choices = models.filter((item) => item.available);
@@ -448,11 +475,16 @@ export function ProjectAi({
   }
   const drafts = useRef(new Map<string, string>());
   const selectedCallback = useRef(onSelected);
+  const conversationsCallback = useRef(onConversations);
+  useLayoutEffect(() => {
+    conversationsCallback.current = onConversations;
+  }, [onConversations]);
   const pagePresentation = useRef(presentation === 'page');
   useLayoutEffect(() => {
     selectedCallback.current = onSelected;
     pagePresentation.current =
-      active && (presentation === 'page' || presentation === 'docked');
+      active &&
+      ['page', 'docked', 'workspace', 'sidebar'].includes(presentation);
   }, [onSelected, presentation, active]);
   const updateUrl = (id: string) => {
     selectedCallback.current?.(id);
@@ -466,7 +498,7 @@ export function ProjectAi({
     const url = new URL(location.href);
     if (id) url.searchParams.set('ai', id);
     else url.searchParams.delete('ai');
-    window.history.replaceState(window.history.state, '', url);
+    window.history.replaceState(null, '', url);
   };
   const [question, setQuestion] = useState('');
   const [busy, setBusy] = useState(false);
@@ -558,6 +590,7 @@ export function ProjectAi({
       indexScope.current = undefined;
       setHistory(undefined);
       setList([]);
+      conversationsCallback.current?.([]);
       setSource(undefined);
       setIndex(undefined);
       setLoadError(
@@ -578,7 +611,7 @@ export function ProjectAi({
         if (location.pathname.startsWith(`/projects/${projectId}/`)) {
           const url = new URL(location.href);
           url.searchParams.delete('ai');
-          window.history.replaceState(window.history.state, '', url);
+          window.history.replaceState(null, '', url);
         }
         onRevoked(cause.status);
       }
@@ -586,6 +619,7 @@ export function ProjectAi({
     [onRevoked, setSource, setQuestion, setRetryPin, projectId],
   );
   const select = (id: string) => {
+    setStarted(true);
     if (!id) {
       const router = models.find(
         (item) => item.id === 'openrouter/free' && item.available,
@@ -678,6 +712,7 @@ export function ProjectAi({
         if (
           detail &&
           detail.mode !== 'GENERAL' &&
+          detail.mode !== 'UNIFIED' &&
           aiSessionKey(
             projectId,
             detail.scope,
@@ -713,9 +748,11 @@ export function ProjectAi({
               : 'default',
           );
         }
+        conversationsCallback.current?.(result.conversations);
         setList(
           result.conversations.filter(
             (item) =>
+              item.mode === 'UNIFIED' ||
               (item.mode === 'GENERAL' && item.scope === group) ||
               aiSessionKey(projectId, item.scope, item.context) === identity,
           ),
@@ -772,16 +809,22 @@ export function ProjectAi({
     presentationActive.current = active;
     if (active && controller.current) void refresh();
   }, [active, refresh]);
+  const externalSelection = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (
-      initialConversationId &&
-      initialConversationId !== selectedRef.current &&
+      initialConversationId !== externalSelection.current &&
       !sending.current
     ) {
-      selectedRef.current = initialConversationId;
-      void refresh();
+      externalSelection.current = initialConversationId;
+      if (
+        initialConversationId &&
+        initialConversationId !== selectedRef.current
+      ) {
+        select(initialConversationId);
+        void refresh();
+      }
     }
-  }, [initialConversationId, refresh]);
+  });
   useEffect(() => {
     controller.current = new AbortController();
     const generation = reading;
@@ -853,8 +896,10 @@ export function ProjectAi({
   };
   const ensureConversation = async () => {
     if (selectedRef.current) return selectedRef.current;
-    const creation = conversationCreation.current ?? {
-      key: createCommandKey(),
+    if (conversationCreation.current?.pending)
+      return conversationCreation.current.pending;
+    const creation: { key: string; pending?: Promise<string> } = {
+      key: conversationCreation.current?.key ?? createCommandKey(),
     };
     conversationCreation.current = creation;
     if (!creation.pending)
@@ -1090,11 +1135,146 @@ export function ProjectAi({
       }
     });
   };
+  const modelControls = (
+    <div className="ai-context-bar">
+      <p className="ai-privacy">
+        Ngữ cảnh: {projectName ?? 'Dự án'} · Chỉ dự án này
+      </p>
+      <div className="ai-model-controls">
+        <ModelSelector
+          models={choices}
+          value={model}
+          onChange={(value) => {
+            setModel(value);
+            const choice = models.find((m) => m.id === value);
+            setReasoning(
+              choice?.capabilities.reasoningModes.includes('high')
+                ? 'high'
+                : 'default',
+            );
+            try {
+              sessionStorage.setItem(modelStorageKey, value);
+            } catch {
+              /* Không lưu secret tại browser. */
+            }
+          }}
+        />
+        {chosenModel && chosenModel.capabilities.reasoningModes.length > 1 && (
+          <label>
+            Mức suy luận{' '}
+            <select
+              aria-label="Mức suy luận"
+              value={reasoning}
+              onChange={(e) => setReasoning(e.target.value)}
+            >
+              {chosenModel.capabilities.reasoningModes.map((value) => (
+                <option key={value} value={value}>
+                  {
+                    (
+                      {
+                        default: 'Mặc định nhà cung cấp',
+                        none: 'Tối thiểu',
+                        low: 'Thấp',
+                        medium: 'Trung bình',
+                        high: 'Cao',
+                      } as Record<string, string>
+                    )[value]
+                  }
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+      {!choices.length && (
+        <p role="status" className="ai-capability-state">
+          Hiện chưa có model có thể nhận yêu cầu. Nội dung của bạn được giữ lại.
+        </p>
+      )}
+    </div>
+  );
+  const rail = (
+    <aside
+      className={`ai-workspace-rail ${mobileHistory ? 'is-open' : ''}`}
+      aria-label="Nguồn và lịch sử AI"
+    >
+      {(workspace || presentation === 'sidebar') && modelControls}
+      <section className="ai-context-sources">
+        <h3>Nguồn tham chiếu</h3>
+        {history?.answers
+          .filter((a) => a.status === 'COMPLETED')
+          .flatMap((a) => a.sources.map((item) => ({ answerId: a.id, item })))
+          .filter(
+            (entry, i, all) =>
+              all.findIndex(
+                (other) => other.item.handle === entry.item.handle,
+              ) === i,
+          )
+          .map(({ answerId, item }) => (
+            <button
+              key={item.handle}
+              onClick={() => void openSource(answerId, item)}
+            >
+              {item.label}
+            </button>
+          ))}
+        {!history?.answers.some(
+          (a) => a.status === 'COMPLETED' && a.sources.length,
+        ) && (
+          <p className="chat-metadata">Nguồn được dùng sẽ xuất hiện tại đây.</p>
+        )}
+      </section>
+      <nav className="ai-thread-history" aria-label="Lịch sử phiên AI">
+        <h3>Lịch sử phiên AI</h3>
+        <button
+          disabled={busy}
+          onClick={() => {
+            select('');
+            setQuestion('');
+            setMobileHistory(false);
+            if (presentation === 'sidebar') onFloat?.();
+          }}
+        >
+          ＋ Chat AI mới
+        </button>
+        {list.map((conversation, i) => (
+          <button
+            key={conversation.id}
+            data-conversation-id={conversation.id}
+            disabled={busy}
+            aria-current={selected === conversation.id ? 'page' : undefined}
+            onClick={() => {
+              select(conversation.id);
+              setMobileHistory(false);
+              void refresh();
+              if (presentation === 'sidebar') onFloat?.();
+            }}
+          >
+            <strong>
+              {scopes.find(([value]) => value === conversation.scope)?.[1] ??
+                'Hội thoại AI'}{' '}
+              · {i + 1}
+            </strong>
+            <small>
+              {conversation.createdAt
+                ? new Date(conversation.createdAt).toLocaleString('vi-VN')
+                : 'Hội thoại riêng'}
+            </small>
+          </button>
+        ))}
+        {!list.length && (
+          <p className="chat-metadata">Chưa có phiên AI đã lưu.</p>
+        )}
+      </nav>
+    </aside>
+  );
   const content = (
     <section
       ref={panel}
       aria-label="Hỏi AI"
-      className={`project-ai-panel ${collapsed && presentation === 'docked' ? 'is-collapsed' : ''}`}
+      data-presentation={presentation}
+      data-workspace-state={!selected && !started ? 'empty' : 'selected'}
+      className={`project-ai-panel ${workspace ? 'ai-workspace-panel' : ''} ${collapsed && presentation === 'docked' ? 'is-collapsed' : ''}`}
       onKeyDown={(event) => {
         if (
           event.key !== 'Escape' ||
@@ -1117,12 +1297,30 @@ export function ProjectAi({
       }}
     >
       <header className="ai-panel-header">
+        {workspace && (
+          <button
+            className="ai-mobile-back"
+            onClick={onBrowse}
+            aria-label="Chọn cuộc trao đổi hoặc dự án"
+          >
+            ‹
+          </button>
+        )}
         <div>
           <span className="eyebrow">Galaxy AI · Riêng tư</span>
           <h2 className="mt-1 font-semibold">Galaxy AI</h2>
           {projectName && <p className="ai-project-name">{projectName}</p>}
         </div>
         <div className="flex gap-1">
+          {workspace && (
+            <button
+              aria-label="Mở nguồn và lịch sử AI"
+              aria-expanded={mobileHistory}
+              onClick={() => setMobileHistory((value) => !value)}
+            >
+              Lịch sử
+            </button>
+          )}
           <button
             disabled={busy}
             aria-label="Phiên AI mới"
@@ -1138,11 +1336,14 @@ export function ProjectAi({
               ↗
             </button>
           )}
-          {onFloat && presentation === 'docked' && (
-            <button aria-label="Tách AI thành cửa sổ nổi" onClick={onFloat}>
-              ▱
-            </button>
-          )}
+          {onFloat &&
+            (presentation === 'docked' ||
+              presentation === 'sidebar' ||
+              presentation === 'workspace') && (
+              <button aria-label="Tách AI thành cửa sổ nổi" onClick={onFloat}>
+                ▱
+              </button>
+            )}
           {onExpand ? (
             <button
               aria-label={
@@ -1170,21 +1371,23 @@ export function ProjectAi({
               ⤢
             </button>
           )}
-          <button
-            aria-label={
-              onMinimize
-                ? 'Thu nhỏ AI'
-                : collapsed
-                  ? 'Mở panel AI'
-                  : 'Thu gọn panel AI'
-            }
-            aria-expanded={!collapsed}
-            onClick={() =>
-              onMinimize ? onMinimize() : setCollapsed((value) => !value)
-            }
-          >
-            {collapsed ? '+' : '−'}
-          </button>
+          {(onMinimize || presentation === 'docked') && (
+            <button
+              aria-label={
+                onMinimize
+                  ? 'Thu nhỏ AI'
+                  : collapsed
+                    ? 'Mở panel AI'
+                    : 'Thu gọn panel AI'
+              }
+              aria-expanded={!collapsed}
+              onClick={() =>
+                onMinimize ? onMinimize() : setCollapsed((value) => !value)
+              }
+            >
+              {collapsed ? '+' : '−'}
+            </button>
+          )}
           {onClose && (
             <button aria-label="Đóng AI" onClick={onClose}>
               ×
@@ -1198,454 +1401,380 @@ export function ProjectAi({
       >
         {!verified && <p role="status">Đang kiểm tra quyền và hội thoại…</p>}
         {!verified && loadError && <p role="alert">{loadError}</p>}
-        <div className="ai-session-content" hidden={!verified}>
-          <div className="ai-context-bar">
-            <p className="ai-privacy">
-              {group === 'ALL' && !initialContext
-                ? 'Toàn dự án — theo quyền của bạn'
-                : scopes.find(([id]) => id === group)?.[1]}{' '}
-              · Chỉ mình tôi
-            </p>
-            <div className="ai-model-controls">
-              <ModelSelector
-                models={choices}
-                value={model}
-                onChange={(value) => {
-                  setModel(value);
-                  const choice = models.find((m) => m.id === value);
-                  setReasoning(
-                    choice?.capabilities.reasoningModes.includes('high')
-                      ? 'high'
-                      : 'default',
-                  );
-                  try {
-                    sessionStorage.setItem(modelStorageKey, value);
-                  } catch {
-                    /* Không lưu secret tại browser. */
-                  }
-                }}
-              />
-              {chosenModel &&
-                chosenModel.capabilities.reasoningModes.length > 1 && (
-                  <label>
-                    Mức suy luận{' '}
-                    <select
-                      aria-label="Mức suy luận"
-                      value={reasoning}
-                      onChange={(e) => setReasoning(e.target.value)}
-                    >
-                      {chosenModel.capabilities.reasoningModes.map((value) => (
-                        <option key={value} value={value}>
-                          {
-                            (
-                              {
-                                default: 'Mặc định nhà cung cấp',
-                                none: 'Tối thiểu',
-                                low: 'Thấp',
-                                medium: 'Trung bình',
-                                high: 'Cao',
-                              } as Record<string, string>
-                            )[value]
-                          }
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-            </div>
-          </div>
-          <div
-            className="ai-scroll-body"
-            ref={scrollRef}
-            onScroll={(event) => {
-              const node = event.currentTarget;
-              const nearEnd =
-                node.scrollHeight - node.scrollTop - node.clientHeight < 48;
-              scrollPosition.current = { top: node.scrollTop, nearEnd };
-              if (nearEnd) setNewMessages(false);
-            }}
-          >
-            {error && <p role="alert">{error}</p>}
-            {loadError && <p role="alert">{loadError}</p>}
-            <div className="flex flex-wrap gap-3">
-              <button
-                disabled={busy}
-                onClick={() => {
-                  select('');
-                  setQuestion('');
-                  setScope(group);
-                }}
-              >
-                Chat AI mới
-              </button>
-              <label>
-                Phạm vi{' '}
-                <select
-                  aria-label="Phạm vi AI"
-                  value={selected ? (history?.scope ?? scope) : scope}
-                  disabled={
-                    busy || Boolean(selected) || Boolean(initialContext?.roomId)
-                  }
-                  onChange={(e) =>
-                    onScopeChange
-                      ? onScopeChange(e.target.value)
-                      : setScope(e.target.value)
-                  }
-                >
-                  {scopes.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Lịch sử{' '}
-                <select
-                  aria-label="Lịch sử AI"
-                  value={selected}
-                  disabled={busy}
-                  onChange={(e) => {
-                    select(e.target.value);
-                    void refresh();
-                  }}
-                >
-                  <option value="">Chat mới</option>
-                  {list.map((conversation, i) => (
-                    <option key={conversation.id} value={conversation.id}>
-                      {
-                        scopes.find(
-                          ([value]) => value === conversation.scope,
-                        )?.[1]
-                      }{' '}
-                      ·{' '}
-                      {conversation.createdAt
-                        ? new Date(conversation.createdAt).toLocaleString(
-                            'vi-VN',
-                          )
-                        : i + 1}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            {context && (
-              <p
-                className="rounded border border-amber-200 bg-amber-50 p-3 text-xs"
-                role="status"
-              >
-                {context.roomId
-                  ? `Ngữ cảnh hội thoại: ${roomLabels?.[context.roomId] ?? context.roomId}.`
-                  : context.productLineId
-                    ? 'Ngữ cảnh: các cuộc trao đổi liên kết hạng mục.'
-                    : `Ngữ cảnh: file gốc, phiên bản v${context.fileVersion}.`}
-                {context.roomId &&
-                  context.roomId !== initialContext?.roomId &&
-                  ' Phạm vi đã ghim khác room đang mở; chọn Chat AI mới để dùng room mới.'}{' '}
-                Chỉ dùng nguồn có quyền trong chỉ mục hiện hữu; file chưa được
-                gửi qua chat/phát hành có thể chưa có nguồn AI. Hội thoại đã lưu
-                giữ phạm vi này.
-              </p>
+        {verified && (workspace || presentation === 'sidebar') && rail}
+        {presentation !== 'sidebar' && (
+          <div className="ai-session-content" hidden={!verified}>
+            {!workspace && modelControls}
+            {!workspace && (
+              <details className="ai-compact-history">
+                <summary>Nguồn và lịch sử</summary>
+                {rail}
+              </details>
             )}
-            <div className="ai-suggestions" aria-label="Gợi ý AI">
-              {[
-                'Tóm tắt các nguồn được phép và nêu việc còn thiếu.',
-                'Đối chiếu các nguồn, chỉ rõ thông tin mâu thuẫn và phiên bản.',
-                'Dịch nội dung nguồn được chọn sang tiếng Anh, giữ mã và con số.',
-                'Soạn nháp phản hồi dựa trên nguồn, nêu rõ điểm cần xác nhận.',
-              ].map((prompt, i) => (
-                <button
-                  key={prompt}
-                  disabled={busy || Boolean(retryPin)}
-                  onClick={() => setQuestion(prompt)}
-                >
-                  {['Tóm tắt', 'Đối chiếu', 'Dịch', 'Soạn phản hồi'][i]}
-                </button>
-              ))}
-            </div>
-            {index && (
-              <div aria-label="Trạng thái nguồn">
+            {presentation === 'workspace' && !selected && !started ? (
+              <div className="ai-workspace-empty">
+                <span className="ai-empty-symbol" aria-hidden="true">
+                  <Image
+                    src={conversationEmpty}
+                    alt=""
+                    width={40}
+                    height={40}
+                  />
+                </span>
+                <h2>Chọn một cuộc trao đổi để làm việc</h2>
                 <p>
-                  {index.hasMore
-                    ? 'Còn nguồn chờ đọc; cập nhật tiếp để tiếp tục.'
-                    : 'Đã xử lý lượt nguồn hiện tại.'}
+                  Mỗi chủ đề có thành viên, công việc và hồ sơ riêng. Bắt đầu
+                  một phiên AI riêng trong dự án này.
                 </p>
-                <ul>
-                  {index.sources.map((item) => (
-                    <li key={item.id}>
-                      {(item.status === 'READY' || item.nativeFile) && (
-                        <input
-                          type="checkbox"
-                          aria-label={`Chọn ${item.label}`}
-                          disabled={
-                            busy ||
-                            (item.status !== 'READY' &&
-                              !(item.label.toLowerCase().endsWith('.pdf')
-                                ? chosenModel?.capabilities.pdfInput
-                                : chosenModel?.capabilities.imageInput))
-                          }
-                          checked={sourceIds.includes(item.id)}
-                          onChange={(e) =>
-                            setSourceIds((current) =>
-                              e.target.checked
-                                ? [...current, item.id].slice(0, 3)
-                                : current.filter((id) => id !== item.id),
-                            )
-                          }
-                        />
-                      )}
-                      {item.label}: {aiStatusLabel(item.status)}
-                      {item.nativeFile
-                        ? ' · Có thể chọn gửi native khi capability đã được bật; tối đa 3 file, PDF ngắn tối đa 10 trang/file.'
-                        : ''}
-                    </li>
-                  ))}
-                </ul>
+                <button className="chat-send" onClick={() => setStarted(true)}>
+                  ＋ Tạo cuộc trao đổi mới
+                </button>
               </div>
-            )}
-            {history?.answers.map((answer) => (
-              <AiAnswer
-                key={answer.id}
-                answer={answer}
-                onDraft={onDraft}
-                onSource={(item) => {
-                  void openSource(answer.id, item);
-                }}
-                onRun={() => {
-                  void act(async () => {
-                    await run(answer.id);
-                  });
-                }}
-                onCancel={() => {
-                  void call(`/answers/${answer.id}/cancel`, {})
-                    .then(refresh)
-                    .catch(invalidate);
-                }}
-              />
-            ))}
-            {source && (
-              <SourceDrawer
-                dialogRef={sourceDialog}
-                title="Nguồn câu trả lời"
-                className="ai-source-drawer"
-                closeLabel="Đóng nguồn"
-                onClose={() => {
-                  sourceKey.current = undefined;
-                  setSource(undefined);
-                }}
-              >
-                <h3>{source.label}</h3>
-                <p>
-                  Bản {source.version} ·{' '}
-                  {source.page
-                    ? `trang ${source.page}`
-                    : `dòng ${source.startLine}–${source.endLine}`}{' '}
-                  ·{' '}
-                  {source.provenance === 'PUBLISHED'
-                    ? 'Nguồn đã phát hành'
-                    : 'Trao đổi chưa xác nhận'}
-                </p>
-                <pre className="whitespace-pre-wrap">{source.text}</pre>
-                {source.downloadUrl?.startsWith('/api/v1/project-chat/') && (
-                  <a href={source.downloadUrl}>Mở file đúng phiên bản</a>
-                )}
-              </SourceDrawer>
-            )}
-            {!busy && retryPin && (
-              <aside role="status" className="grid gap-2 rounded border p-3">
-                <p>
-                  Lượt gửi chưa rõ kết quả:{' '}
-                  {models.find((m) => m.id === retryPin.model)?.label ??
-                    retryPin.model}{' '}
-                  · mức {retryPin.reasoning} · {retryPin.sourceIds.length} file.
-                  Thử lại giữ nguyên câu hỏi, model và nguồn đã chốt.
-                </p>
-                <button type="button" onClick={() => void ask(true)}>
-                  Thử lại lượt đã chốt
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    requestKey.current = undefined;
-                    setRetryPin(undefined);
-                    setError(
-                      'Đã bỏ retry. Lượt tiếp theo là yêu cầu mới; lượt trước có thể đã được xử lý.',
-                    );
+            ) : (
+              <>
+                <div
+                  className="ai-scroll-body"
+                  ref={scrollRef}
+                  onScroll={(event) => {
+                    const node = event.currentTarget;
+                    const nearEnd =
+                      node.scrollHeight - node.scrollTop - node.clientHeight <
+                      48;
+                    scrollPosition.current = { top: node.scrollTop, nearEnd };
+                    if (nearEnd) setNewMessages(false);
                   }}
                 >
-                  Tạo lượt mới theo lựa chọn hiện tại
-                </button>
-              </aside>
-            )}
-          </div>
-          {newMessages && (
-            <button
-              className="ai-new-messages"
-              onClick={() => {
-                const node = scrollNode.current;
-                if (node) node.scrollTop = node.scrollHeight;
-                scrollPosition.current.nearEnd = true;
-                setNewMessages(false);
-              }}
-            >
-              Có cập nhật · Xuống cuối ↓
-            </button>
-          )}
-          <form
-            className="ai-composer"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void ask();
-            }}
-          >
-            <label>
-              Câu hỏi AI
-              <ChatComposerInput
-                aria-label="Câu hỏi AI"
-                value={question}
-                disabled={busy}
-                onChange={setQuestion}
-              />
-            </label>
-            <input
-              ref={fileInput}
-              type="file"
-              aria-label="Tải tệp từ máy"
-              accept=".txt,.md,.pdf,.png,.jpg,.jpeg,.xlsx"
-              multiple
-              hidden
-              onChange={(event) => {
-                chooseFiles(event.target.files);
-                event.target.value = '';
-              }}
-            />
-            {uploads.length > 0 && (
-              <ul className="ai-file-chips">
-                {uploads.map((item) => (
-                  <li key={item.key}>
-                    {item.file.name} · {Math.ceil(item.file.size / 1024)} KB ·{' '}
-                    {item.status}
-                    {item.error && <span role="alert"> · {item.error}</span>}
-                    {item.status === 'Lỗi' && (
+                  {error && <p role="alert">{error}</p>}
+                  {loadError && <p role="alert">{loadError}</p>}
+                  {context && (
+                    <p
+                      className="rounded border border-amber-200 bg-amber-50 p-3 text-xs"
+                      role="status"
+                    >
+                      {context.roomId
+                        ? `Ngữ cảnh hội thoại: ${roomLabels?.[context.roomId] ?? context.roomId}.`
+                        : context.productLineId
+                          ? 'Ngữ cảnh: các cuộc trao đổi liên kết hạng mục.'
+                          : `Ngữ cảnh: file gốc, phiên bản v${context.fileVersion}.`}
+                      {context.roomId &&
+                        context.roomId !== initialContext?.roomId &&
+                        ' Phạm vi đã ghim khác room đang mở; chọn Chat AI mới để dùng room mới.'}{' '}
+                      Chỉ dùng nguồn có quyền trong chỉ mục hiện hữu; file chưa
+                      được gửi qua chat/phát hành có thể chưa có nguồn AI. Hội
+                      thoại đã lưu giữ phạm vi này.
+                    </p>
+                  )}
+                  <details className="ai-suggestions">
+                    <summary>Gợi ý AI</summary>
+                    {[
+                      'Tóm tắt các nguồn được phép và nêu việc còn thiếu.',
+                      'Đối chiếu các nguồn, chỉ rõ thông tin mâu thuẫn và phiên bản.',
+                      'Dịch nội dung nguồn được chọn sang tiếng Anh, giữ mã và con số.',
+                      'Soạn nháp phản hồi dựa trên nguồn, nêu rõ điểm cần xác nhận.',
+                    ].map((prompt, i) => (
+                      <button
+                        key={prompt}
+                        disabled={busy || Boolean(retryPin)}
+                        onClick={() => setQuestion(prompt)}
+                      >
+                        {['Tóm tắt', 'Đối chiếu', 'Dịch', 'Soạn phản hồi'][i]}
+                      </button>
+                    ))}
+                  </details>
+                  {index && (
+                    <div aria-label="Trạng thái nguồn">
+                      <p>
+                        {index.hasMore
+                          ? 'Còn nguồn chờ đọc; cập nhật tiếp để tiếp tục.'
+                          : 'Đã xử lý lượt nguồn hiện tại.'}
+                      </p>
+                      <ul>
+                        {index.sources.map((item) => (
+                          <li key={item.id}>
+                            {(item.status === 'READY' || item.nativeFile) && (
+                              <input
+                                type="checkbox"
+                                aria-label={`Chọn ${item.label}`}
+                                disabled={
+                                  busy ||
+                                  (item.status !== 'READY' &&
+                                    !(item.label.toLowerCase().endsWith('.pdf')
+                                      ? chosenModel?.capabilities.pdfInput
+                                      : chosenModel?.capabilities.imageInput))
+                                }
+                                checked={sourceIds.includes(item.id)}
+                                onChange={(e) =>
+                                  setSourceIds((current) =>
+                                    e.target.checked
+                                      ? [...current, item.id].slice(0, 3)
+                                      : current.filter((id) => id !== item.id),
+                                  )
+                                }
+                              />
+                            )}
+                            {item.label}: {aiStatusLabel(item.status)}
+                            {item.nativeFile
+                              ? ' · Có thể chọn gửi native khi capability đã được bật; tối đa 3 file, PDF ngắn tối đa 10 trang/file.'
+                              : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {history?.answers.map((answer) => (
+                    <AiAnswer
+                      key={answer.id}
+                      answer={answer}
+                      onDraft={onDraft}
+                      onSource={(item) => {
+                        void openSource(answer.id, item);
+                      }}
+                      onRun={() => {
+                        void act(async () => {
+                          await run(answer.id);
+                        });
+                      }}
+                      onCancel={() => {
+                        void call(`/answers/${answer.id}/cancel`, {})
+                          .then(refresh)
+                          .catch(invalidate);
+                      }}
+                    />
+                  ))}
+                  {!busy && retryPin && (
+                    <aside
+                      role="status"
+                      className="grid gap-2 rounded border p-3"
+                    >
+                      <p>
+                        Lượt gửi chưa rõ kết quả:{' '}
+                        {models.find((m) => m.id === retryPin.model)?.label ??
+                          retryPin.model}{' '}
+                        · mức {retryPin.reasoning} · {retryPin.sourceIds.length}{' '}
+                        file. Thử lại giữ nguyên câu hỏi, model và nguồn đã
+                        chốt.
+                      </p>
+                      <button type="button" onClick={() => void ask(true)}>
+                        Thử lại lượt đã chốt
+                      </button>
                       <button
                         type="button"
-                        disabled={busy}
-                        onClick={() => void uploadFile(item)}
+                        onClick={() => {
+                          requestKey.current = undefined;
+                          setRetryPin(undefined);
+                          setError(
+                            'Đã bỏ retry. Lượt tiếp theo là yêu cầu mới; lượt trước có thể đã được xử lý.',
+                          );
+                        }}
                       >
-                        Thử lại tệp
+                        Tạo lượt mới theo lựa chọn hiện tại
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      aria-label={`Bỏ ${item.file.name}`}
-                      disabled={busy}
-                      onClick={() => {
-                        uploadItems.current = uploadItems.current.filter(
-                          (entry) => entry !== item,
-                        );
-                        setUploads([...uploadItems.current]);
-                      }}
-                    >
-                      ×
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {sourceIds.length > 0 && (
-              <ul className="ai-file-chips">
-                {sourceIds.map((id) => (
-                  <li key={id}>
-                    {index?.sources.find((item) => item.id === id)?.label ??
-                      'Nguồn đã chọn'}
-                    <button
-                      type="button"
-                      aria-label="Bỏ file đã chọn"
-                      disabled={busy}
-                      onClick={() =>
-                        setSourceIds((current) =>
-                          current.filter((value) => value !== id),
-                        )
-                      }
-                    >
-                      ×
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="ai-composer-actions">
-              <div>
-                <button
-                  type="button"
-                  aria-label="Đính kèm tệp"
-                  aria-expanded={attachmentMenu}
-                  disabled={busy}
-                  onClick={() => setAttachmentMenu((value) => !value)}
-                >
-                  ＋
-                </button>
-                {attachmentMenu && (
-                  <div role="group" aria-label="Chọn cách đính kèm">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAttachmentMenu(false);
-                        fileInput.current?.click();
-                      }}
-                    >
-                      Tải tệp từ máy
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAttachmentMenu(false);
-                        updateSources();
-                      }}
-                    >
-                      Chọn trong hồ sơ dự án
-                    </button>
-                  </div>
+                    </aside>
+                  )}
+                </div>
+                {newMessages && (
+                  <button
+                    className="ai-new-messages"
+                    onClick={() => {
+                      const node = scrollNode.current;
+                      if (node) node.scrollTop = node.scrollHeight;
+                      scrollPosition.current.nearEnd = true;
+                      setNewMessages(false);
+                    }}
+                  >
+                    Có cập nhật · Xuống cuối ↓
+                  </button>
                 )}
-              </div>
-              <span className="chat-metadata">
-                {chosenModel?.label ?? 'Chưa chọn model'} · Shift+Enter xuống
-                dòng
-              </span>
-              <button
-                className="chat-send"
-                type="submit"
-                disabled={
-                  busy ||
-                  Boolean(retryPin) ||
-                  (!question.trim() && !uploads.length && !sourceIds.length) ||
-                  !chosenModel?.available
-                }
-              >
-                {busy ? 'Đang xử lý…' : 'Gửi'}
-              </button>
-              {history?.answers.some((answer) =>
-                pending.includes(answer.status),
-              ) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const answer = history.answers.findLast((item) =>
-                      pending.includes(item.status),
-                    );
-                    if (answer)
-                      void call(`/answers/${answer.id}/cancel`, {})
-                        .then(refresh)
-                        .catch(invalidate);
+                <form
+                  className="ai-composer"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void ask();
                   }}
                 >
-                  Dừng
-                </button>
-              )}
-            </div>
-          </form>
-        </div>
+                  <label>
+                    Câu hỏi AI
+                    <ChatComposerInput
+                      aria-label="Câu hỏi AI"
+                      value={question}
+                      disabled={busy}
+                      onChange={setQuestion}
+                    />
+                  </label>
+                  <input
+                    ref={fileInput}
+                    type="file"
+                    aria-label="Tải tệp từ máy"
+                    accept=".txt,.md,.pdf,.png,.jpg,.jpeg,.xlsx"
+                    multiple
+                    hidden
+                    onChange={(event) => {
+                      chooseFiles(event.target.files);
+                      event.target.value = '';
+                    }}
+                  />
+                  {uploads.length > 0 && (
+                    <ul className="ai-file-chips">
+                      {uploads.map((item) => (
+                        <li key={item.key}>
+                          {item.file.name} · {Math.ceil(item.file.size / 1024)}{' '}
+                          KB · {item.status}
+                          {item.error && (
+                            <span role="alert"> · {item.error}</span>
+                          )}
+                          {item.status === 'Lỗi' && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void uploadFile(item)}
+                            >
+                              Thử lại tệp
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            aria-label={`Bỏ ${item.file.name}`}
+                            disabled={busy}
+                            onClick={() => {
+                              uploadItems.current = uploadItems.current.filter(
+                                (entry) => entry !== item,
+                              );
+                              setUploads([...uploadItems.current]);
+                            }}
+                          >
+                            ×
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {sourceIds.length > 0 && (
+                    <ul className="ai-file-chips">
+                      {sourceIds.map((id) => (
+                        <li key={id}>
+                          {index?.sources.find((item) => item.id === id)
+                            ?.label ?? 'Nguồn đã chọn'}
+                          <button
+                            type="button"
+                            aria-label="Bỏ file đã chọn"
+                            disabled={busy}
+                            onClick={() =>
+                              setSourceIds((current) =>
+                                current.filter((value) => value !== id),
+                              )
+                            }
+                          >
+                            ×
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="ai-composer-actions">
+                    <div>
+                      <button
+                        type="button"
+                        aria-label="Đính kèm tệp"
+                        aria-expanded={attachmentMenu}
+                        disabled={busy}
+                        onClick={() => setAttachmentMenu((value) => !value)}
+                      >
+                        ＋
+                      </button>
+                      {attachmentMenu && (
+                        <div role="group" aria-label="Chọn cách đính kèm">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAttachmentMenu(false);
+                              fileInput.current?.click();
+                            }}
+                          >
+                            Tải tệp từ máy
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAttachmentMenu(false);
+                              updateSources();
+                            }}
+                          >
+                            Chọn trong hồ sơ dự án
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <span className="chat-metadata">
+                      {chosenModel?.label ?? 'Chưa chọn model'} · Shift+Enter
+                      xuống dòng
+                    </span>
+                    <button
+                      className="chat-send"
+                      type="submit"
+                      disabled={
+                        busy ||
+                        Boolean(retryPin) ||
+                        (!question.trim() &&
+                          !uploads.length &&
+                          !sourceIds.length) ||
+                        !chosenModel?.available
+                      }
+                    >
+                      {busy ? 'Đang xử lý…' : 'Gửi'}
+                    </button>
+                    {history?.answers.some((answer) =>
+                      pending.includes(answer.status),
+                    ) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const answer = history.answers.findLast((item) =>
+                            pending.includes(item.status),
+                          );
+                          if (answer)
+                            void call(`/answers/${answer.id}/cancel`, {})
+                              .then(refresh)
+                              .catch(invalidate);
+                        }}
+                      >
+                        Dừng
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </>
+            )}
+          </div>
+        )}
       </div>
+      {verified && source && (
+        <SourceDrawer
+          dialogRef={sourceDialog}
+          title="Nguồn câu trả lời"
+          className="ai-source-drawer"
+          closeLabel="Đóng nguồn"
+          onClose={() => {
+            sourceKey.current = undefined;
+            setSource(undefined);
+          }}
+        >
+          <h3>{source.label}</h3>
+          <p>
+            Bản {source.version} ·{' '}
+            {source.page
+              ? `trang ${source.page}`
+              : `dòng ${source.startLine}–${source.endLine}`}{' '}
+            ·{' '}
+            {source.provenance === 'PUBLISHED'
+              ? 'Nguồn đã phát hành'
+              : 'Trao đổi chưa xác nhận'}
+          </p>
+          <pre className="whitespace-pre-wrap">{source.text}</pre>
+          {source.downloadUrl?.startsWith('/api/v1/project-chat/') && (
+            <a href={source.downloadUrl}>Mở file đúng phiên bản</a>
+          )}
+        </SourceDrawer>
+      )}
     </section>
   );
   return portalTarget === undefined

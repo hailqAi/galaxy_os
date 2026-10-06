@@ -105,7 +105,7 @@ test('nút native file, binary riêng, chờ đọc một lần và chat mới t
       sameSite: 'Lax',
     },
   ]);
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.setViewportSize({ width: 1440, height: 1024 });
   await page.goto(`/projects/${projectId}/work?group=COMMERCIAL`);
   const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
   await expect(panel).toBeVisible();
@@ -128,6 +128,40 @@ test('nút native file, binary riêng, chờ đọc một lần và chat mới t
   page.on('request', (request) => {
     if (/\/ai\/answers\/[^/]+\/run$/.test(request.url())) dispatches++;
   });
+  await expect(
+    panel.getByRole('button', {
+      name: '＋ Tạo cuộc trao đổi mới',
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(panel.getByLabel('Câu hỏi AI', { exact: true })).toHaveCount(0);
+  await expect
+    .poll(() =>
+      panel
+        .locator('.ai-workspace-empty img')
+        .evaluate((el) => (el as HTMLImageElement).naturalWidth),
+    )
+    .toBeGreaterThan(0);
+  expect(
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+      return Array.from(document.fonts).some(
+        (font) => font.status === 'loaded' && font.family.includes('Vietnam'),
+      );
+    }),
+  ).toBe(true);
+  await page.screenshot({
+    path: '/home/galaxy_os/.runtime/five-pdfs-20261006/ui-empty.png',
+    fullPage: true,
+  });
+  await panel
+    .getByRole('button', { name: '＋ Tạo cuộc trao đổi mới', exact: true })
+    .click();
+  await expect(page.locator('form.ai-composer')).toHaveCount(1);
+  const rail = panel.getByRole('complementary', {
+    name: 'Nguồn và lịch sử AI',
+  });
+  await expect(rail).toBeVisible();
   const input = panel.getByLabel('Câu hỏi AI', { exact: true });
   await input.fill('Mã vật liệu trong tệp là gì?');
   await panel
@@ -149,6 +183,10 @@ test('nút native file, binary riêng, chờ đọc một lần và chat mới t
   await expect(panel.getByText('Đang đọc', { exact: false })).toBeVisible();
   await panel.getByRole('button', { name: 'Gửi', exact: true }).click();
   expect(dispatches).toBe(0);
+  await page.screenshot({
+    path: '/home/galaxy_os/.runtime/five-pdfs-20261006/ui-loading.png',
+    fullPage: true,
+  });
   release();
   await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
   expect(dispatches).toBe(1);
@@ -160,10 +198,115 @@ test('nút native file, binary riêng, chờ đọc một lần và chat mới t
       },
     }),
   ).toBe(1);
-  await panel.getByRole('button', { name: 'Chat AI mới', exact: true }).click();
+  await panel
+    .getByRole('button', { name: '＋ Chat AI mới', exact: true })
+    .click();
   await input.fill('Vật liệu LAN-6827 đã lưu là gì?');
   await panel.getByRole('button', { name: 'Gửi', exact: true }).click();
   await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
   expect(dispatches).toBe(2);
   await expect(panel.getByText(/LAN-6827/).first()).toBeVisible();
+  await panel.locator('.ai-scroll-body').evaluate((el) => (el.scrollTop = 0));
+  await page.screenshot({
+    path: '/home/galaxy_os/.runtime/five-pdfs-20261006/ui-selected.png',
+    fullPage: true,
+  });
+  const center = await panel.locator('.ai-session-content').boundingBox();
+  const right = await rail.boundingBox();
+  expect(right!.x).toBeGreaterThan(center!.x + center!.width - 2);
+  const conversation = new URL(page.url()).searchParams.get('ai');
+  await input.fill('Nháp riêng của phiên đang mở');
+  await page.locator('.room-list .room-choice').last().click();
+  await expect(page).not.toHaveURL(new RegExp(`ai=${conversation}`));
+  await expect(input).toHaveValue('');
+  await page.locator('.room-list .room-choice').first().click();
+  await expect(input).toHaveValue('Nháp riêng của phiên đang mở');
+  await input.fill('');
+  await panel
+    .getByRole('button', { name: '＋ Chat AI mới', exact: true })
+    .click();
+  await expect(page).not.toHaveURL(new RegExp(`ai=${conversation}`));
+  await page.locator('.room-list .room-choice').first().click();
+  await expect(page).toHaveURL(new RegExp(`ai=${conversation}`));
+  await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
+  await page.goto(
+    `/projects/${projectId}/ai?ai=${conversation}&scope=COMMERCIAL`,
+  );
+  await expect(
+    page.getByRole('region', { name: 'Câu trả lời Galaxy AI' }).first(),
+  ).toBeVisible();
+  await page.screenshot({
+    path: '/home/galaxy_os/.runtime/five-pdfs-20261006/ui-direct.png',
+    fullPage: true,
+  });
+  expect(dispatches).toBe(2);
+  await page.setViewportSize({ width: 375, height: 983 });
+  await expect(page.getByLabel('Câu hỏi AI', { exact: true })).toBeVisible();
+  await page.locator('.ai-scroll-body').evaluate((el) => (el.scrollTop = 0));
+  await page.screenshot({
+    path: '/home/galaxy_os/.runtime/five-pdfs-20261006/ui-mobile.png',
+    fullPage: true,
+  });
+  const sendBounds = await page
+    .getByRole('button', { name: 'Gửi', exact: true })
+    .boundingBox();
+  expect(sendBounds!.y + sendBounds!.height).toBeLessThanOrEqual(983);
+  expect(
+    await page
+      .getByRole('button', { name: 'Gửi', exact: true })
+      .evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        return el.contains(
+          document.elementFromPoint(
+            box.x + box.width / 2,
+            box.y + box.height / 2,
+          ),
+        );
+      }),
+  ).toBe(true);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(375);
+  await page.getByLabel('Câu hỏi AI', { exact: true }).focus();
+  await expect(page.getByLabel('Câu hỏi AI', { exact: true })).toBeFocused();
+  await page.setViewportSize({ width: 720, height: 512 });
+  await expect(input).toBeVisible();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(720);
+  await page.screenshot({
+    path: '/home/galaxy_os/.runtime/five-pdfs-20261006/ui-reflow-200.png',
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 1024 });
+  await panel
+    .getByRole('button', { name: '＋ Chat AI mới', exact: true })
+    .click();
+  await input.fill('Giữ lại nội dung khi nhà cung cấp tạm lỗi.');
+  await page.route(/\/ai\/conversations\/[^/]+\/answers$/, (route) =>
+    route.fulfill({ status: 503, json: { message: 'TEMPORARY_ERROR' } }),
+  );
+  await panel.getByRole('button', { name: 'Gửi', exact: true }).click();
+  await expect(panel.getByRole('alert').first()).toBeVisible();
+  await expect(input).toHaveValue('Giữ lại nội dung khi nhà cung cấp tạm lỗi.');
+  await page.screenshot({
+    path: '/home/galaxy_os/.runtime/five-pdfs-20261006/ui-request-error.png',
+    fullPage: true,
+  });
+  await page.route(/\/ai$/, async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      json: { ...(await response.json()), models: [] },
+    });
+  });
+  await expect(
+    panel.getByText(
+      'Hiện chưa có model có thể nhận yêu cầu. Nội dung của bạn được giữ lại.',
+    ),
+  ).toBeVisible({ timeout: 8000 });
+  await page.screenshot({
+    path: '/home/galaxy_os/.runtime/five-pdfs-20261006/ui-capability.png',
+    fullPage: true,
+  });
 });

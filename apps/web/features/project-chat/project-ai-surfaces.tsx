@@ -12,7 +12,7 @@ import React, {
 } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Actor, api } from '../../app/lib/api';
-import { AiContext, ProjectAi, aiSessionKey } from './project-ai';
+import { AiContext, Conversation, ProjectAi, aiSessionKey } from './project-ai';
 
 type Spec = {
   projectId: string;
@@ -22,8 +22,10 @@ type Spec = {
 };
 type Mount = Spec & {
   target: HTMLElement;
-  kind: 'docked' | 'page';
+  kind: 'docked' | 'page' | 'workspace' | 'sidebar';
   onDraft?: (text: string) => void;
+  onConversations?: (items: Conversation[]) => void;
+  onBrowse?: () => void;
   roomLabels?: Record<string, string>;
 };
 type Session = Spec & {
@@ -344,7 +346,13 @@ function PersistentSession({
   actorId: string;
   active: boolean;
   target: HTMLElement | null;
-  presentation: 'docked' | 'page' | 'floating' | 'expanded';
+  presentation:
+    | 'docked'
+    | 'page'
+    | 'floating'
+    | 'expanded'
+    | 'workspace'
+    | 'sidebar';
   open: (spec: Spec) => void;
   close: () => void;
   expand: () => void;
@@ -374,6 +382,8 @@ function PersistentSession({
       initialContext={session.context}
       initialConversationId={session.conversationId}
       onSelected={selected}
+      onConversations={session.mount?.onConversations}
+      onBrowse={session.mount?.onBrowse}
       active={active && Boolean(target)}
       portalTarget={target}
       presentation={presentation}
@@ -403,10 +413,14 @@ export function AiMount({
   kind = 'docked',
   roomLabels,
   onDraft,
+  onConversations,
+  onBrowse,
 }: Spec & {
-  kind?: 'docked' | 'page';
+  kind?: 'docked' | 'page' | 'workspace' | 'sidebar';
   roomLabels?: Record<string, string>;
   onDraft?: (text: string) => void;
+  onConversations?: (items: Conversation[]) => void;
+  onBrowse?: () => void;
 }) {
   const surfaces = useAiSurfaces();
   const [target, setTarget] = useState<HTMLDivElement | null>(null);
@@ -439,6 +453,8 @@ export function AiMount({
         kind,
         roomLabels: stableLabels,
         onDraft: canDraft ? draft : undefined,
+        onConversations,
+        onBrowse,
       });
   }, [
     target,
@@ -452,6 +468,8 @@ export function AiMount({
     draft,
     canDraft,
     stableLabels,
+    onConversations,
+    onBrowse,
   ]);
   return (
     <div className={`ai-mount ai-mount-${kind}`}>

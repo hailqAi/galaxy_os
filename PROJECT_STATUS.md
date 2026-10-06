@@ -1,5 +1,11 @@
 # Project status
 
+## Năm PDF mới + công cụ Project-only — đang triển khai 06/10
+
+Đã bảo toàn dirty baseline bằng checkpoint `1df19da106a4b563f3692c480a4cf08f0c7112ab` (base32d62a2), không reset/clean. T1 UI năm PDF đã có code và Chrome fixture9/9; lượt kiểm cuối upload/history/mobile/error1/1, unit27, lint/types/build scoped PASS. Main vẫn `local-a0429faf5733`; chưa phát hành UI mới, T2–T6 tiếp tục. Full baseline còn một test M2 vượt5000ms; không gọi full GREEN.
+
+[Handoff đang triển khai](docs/galaxy-os/handoffs/2026-10-06-five-pdfs-project-tools.md) phân biệt Git SHA/snapshot/artifact, manifest/ngoại lệ, review và phần còn thiếu. Các mục dưới là lịch sử.
+
 ## Chat AI thống nhất theo Project — phát hành local 06/10
 
 Luồng câu hỏi/file không mode hoặc approve/synthetic đã chạy thật trên Chrome LAN `192.168.1.80:3000`, Project hiện hành/COMMERCIAL không có room. OpenRouter PROJECT_AUTHORIZED chỉ tenant Galaxy, giữ IAM/source revoke/private/financial/FREE_ONLY/privacy. PDF binary723byte/link/version/downloadSHA đạt; answer đúng nội dung và citation trang1; câu nối tiếp không upload lại. PNG capability qua API main/vendor thật PASS; chưa upload ảnh main thứ hai. Popup560/1100, chữ16/26 và chuyển panel/trang/reload giữ history,0POST trùng.
