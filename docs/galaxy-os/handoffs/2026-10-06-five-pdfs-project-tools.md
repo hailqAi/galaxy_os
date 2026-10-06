@@ -48,8 +48,16 @@ Fresh regression API225/225 và Web29/29 (`/tmp/five-pdf-t4-regression13.log`), 
 
 [PDFKit](https://pdfkit.org/docs/getting_started.html), [DrawingML của Microsoft](https://learn.microsoft.com/en-us/office/open-xml/word/how-to-insert-a-picture-into-a-word-processing-document) là nguồn contract engine. Thẻ file dùng style chip sẵn có, bổ sung state chức năng được brief yêu cầu; không đổi bố cục năm PDF.
 
+## T5 contract OpenAI — disabled, chưa tích hợp paid
+
+Wire codec Responses tái dùng tool schemas T3, function_call/call_id/function_call_output, continuation reasoning mã hóa riêng không đưa UI/log; store:false không được hiểu là không có mọi retention. Image generate/edit dùng endpoint riêng và multipart image[] bytes; WAV/WebM transcript và MP3 speech dùng audio endpoint riêng. Không pin model trả phí mặc định; model phải được quản trị xác minh access/capability/giá khi chọn kết nối. Không thêm env, key, SDK, provider router hoặc nút giả.
+
+Năm mock contract đạt (`/tmp/five-pdf-t5-green4.log`): gate chặn trước network, strict tools, multipart binary, reasoning không thành answer, ảnh gần8MB không tràn stack, MP3 bounded. Đây là codec chuẩn bị, không phải orchestrator paid đã nối. Production không đăng ký media tools; dispatch luôn NEEDS_PROVIDER_CONFIGURATION_OR_BUDGET. Khi được bật còn phải nối reservation/receipt bền vững, current ACL/version, cancel/idempotency và lưu media/transcript vào FileAsset/conversation hiện hữu; các kiểm thử lifecycle đó chưa chạy với OpenAI. Không bật microphone khi chưa có capability; HTTP LAN cần HTTPS nội bộ cho getUserMedia, không dùng insecure flags. Voice/video và ảnh sinh/chỉnh live NOT_RUN.
+
+Nguồn: [Responses function calling](https://developers.openai.com/api/docs/guides/function-calling), [stateless reasoning](https://developers.openai.com/api/docs/guides/migrate-to-responses), [image API](https://developers.openai.com/api/docs/guides/image-generation), [speech to text](https://developers.openai.com/api/docs/guides/speech-to-text), [text to speech](https://developers.openai.com/api/docs/guides/text-to-speech), [data controls](https://developers.openai.com/api/docs/guides/your-data). Không kiểm access tài khoản/chi phí bằng gọi inference trả phí.
+
 ## Phần tiếp tục, chưa làm xong
 
-T5 OpenAI Responses/image/audio contracts theo capability; T6 full regression, review và local release/main live. T2 code/fixture như trên; composer vendor/main và PDF hỗn hợp còn chờ nghiệm thu/đọc trang theo công cụ. Web/OpenAI/Tavily/image/audio paid không có cấu hình/ngân sách được bật; live tương ứng NEEDS_PROVIDER_CONFIGURATION_OR_BUDGET, không chặn các task local.
+T5 paid lifecycle/live còn điều kiện cấu hình và ngân sách như trên; T6 full regression, review và local release/main live. T2 code/fixture như trên; composer vendor/main và PDF hỗn hợp còn chờ nghiệm thu/đọc trang theo công cụ. Web/OpenAI/Tavily/image/audio paid không có cấu hình/ngân sách được bật; live tương ứng NEEDS_PROVIDER_CONFIGURATION_OR_BUDGET, không chặn các task local.
 
 Không sửa credential, database/storage/session/Edge/keeper, không bật public hoặc paid. Không coi fixture/mock hoặc screenshot là vendor/main PASS.

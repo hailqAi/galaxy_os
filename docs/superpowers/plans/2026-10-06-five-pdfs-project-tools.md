@@ -81,9 +81,9 @@
 **Files:** adapter/registry công cụ hiện có từ T3, media output/input UI khi capability bật; tests.
 **Interfaces:** Consumes capability/provider/budget admin; produces versioned AI media/transcript đúng conversation, không chat-model giả tính năng.
 
-- [ ] RED mock capability off/cost denied; image source ACL/version, transcript Project, cancellation/idempotency.
-- [ ] Dedicated OpenAI Responses/image/audio API contracts theo docs chính thức; disabled/live chỉ theo cấu hình thật; microphone explicit gesture/permission, secure-context reason trên HTTP LAN.
-- [ ] GREEN local/mock; live thiếu cấu hình ghi NEEDS_PROVIDER_CONFIGURATION_OR_BUDGET, không cản task khác. Commit scoped.
+- [x] RED→GREEN contract capability off trước network/bounds/binary; paid source ACL/version, transcript Project, cancellation/idempotency chưa nối khi chưa có cấu hình/ngân sách. Không báo lifecycle PASS từ mock codec.
+- [x] Dedicated Responses/image/audio wire contracts theo docs chính thức; production gate disabled. Chưa có microphone UI/live; khi bật phải explicit gesture/permission và HTTPS nội bộ trên LAN.
+- [x] GREEN5 mock codec; live NEEDS_PROVIDER_CONFIGURATION_OR_BUDGET. Không cản T6; không dựng paid transport chưa được bật. Commit scoped.
 
 ### Task 6: Hồi quy, review và release
 
