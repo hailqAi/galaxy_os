@@ -20,6 +20,7 @@ export default defineConfig({
         ? [
             'm2-project-chat.spec.ts',
             'm3-project-ai.spec.ts',
+            'm3-unified-ai.spec.ts',
             'm3-pdf-workspace.spec.ts',
           ]
         : 'm2-project-chat.spec.ts',

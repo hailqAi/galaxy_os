@@ -31,6 +31,7 @@ const service = new ProjectAiService(
   null as never,
   null as never,
   null as never,
+  null as never,
 );
 afterEach(() => vi.unstubAllEnvs());
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
@@ -217,6 +218,10 @@ it.each(['BACKOFF', 'CANCELLED'])(
     let posts = 0;
     const tx = {
       $queryRaw: async () => [],
+      project: {
+        findFirst: async () => ({ id: 'project' }),
+        findUniqueOrThrow: async () => ({ name: 'Project fixture' }),
+      },
       chatAiConversation: { findFirst: async () => ({ scope: 'ALL' }) },
       chatAiAnswerDependency: { findMany: async () => [] },
       chatAiAnswer: {
@@ -254,7 +259,11 @@ it.each(['BACKOFF', 'CANCELLED'])(
         _project: unknown,
         run: (tx: unknown) => unknown,
       ) => run(tx),
-      freshActor: async () => {},
+      freshActor: async () => ({
+        ...actor,
+        permissions: ['ai.invoke'],
+        administrationScope: 'ORGANIZATION',
+      }),
       authority: async () => ({ id: 'grant' }),
     };
     const runner = new ProjectAiService(
@@ -262,6 +271,7 @@ it.each(['BACKOFF', 'CANCELLED'])(
       null as never,
       null as never,
       access as never,
+      null as never,
     );
     vi.stubGlobal('fetch', async (url: string) => {
       if (url.endsWith('/models'))

@@ -248,7 +248,11 @@ describe('ProjectProductsService', () => {
         organizationId: actor.organizationId,
         deletedAt: null,
         attachments: { some: { projectId: 'project' } },
-        NOT: { attachments: { some: { entityType: 'ChatRoom' } } },
+        NOT: {
+          attachments: {
+            some: { entityType: { in: ['ChatRoom', 'ChatAiConversation'] } },
+          },
+        },
       },
       select: {
         id: true,

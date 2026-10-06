@@ -205,7 +205,7 @@ function sharedStringSizes(xmlBytes: Buffer) {
   return sizes;
 }
 
-function assertBoundedWorkbook(bytes: Buffer) {
+export function assertBoundedWorkbook(bytes: Buffer) {
   if (bytes.length < 22)
     throw new BadRequestException('Invalid Excel workbook');
   let end = -1;
@@ -328,6 +328,7 @@ function assertBoundedWorkbook(bytes: Buffer) {
         `Workbook accepts at most ${maximumGenericImportColumns} columns`,
       );
   }
+  return worksheets.length;
 }
 
 export async function parseStageTwoWorkbook(

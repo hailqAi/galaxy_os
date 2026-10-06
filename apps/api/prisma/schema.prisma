@@ -3611,6 +3611,8 @@ model RequirementVersion {
 }
 
 model FileAsset {
+  aiProjectSources ChatAiSourceIndex[] @relation("AiProjectFile")
+  aiSources ChatAiSourceIndex[]
   siteDeliveries SiteDelivery[]
   contractDocuments ContractDocument[]
   chatReleases ChatDocumentRelease[]
@@ -3640,6 +3642,7 @@ model FileAsset {
   stageOneDocumentVersions ProjectStageOneDocumentVersion[] @relation("StageOneDocumentVersionFile")
   importJobs               ImportJob[]
 
+  @@unique([id,organizationId,uploadedById])
   @@index([organizationId, category, deletedAt])
   @@index([organizationId, uploadedById, createdAt])
   @@index([organizationId, mimeType])
@@ -5132,6 +5135,7 @@ model ChatAiConversation {
   project Project @relation(fields:[organizationId,projectId], references:[organizationId,id], onDelete:Restrict)
   membership OrganizationMembership @relation(fields:[organizationId,ownerId], references:[organizationId,userId], onDelete:Restrict)
   answers ChatAiAnswer[]
+  files ChatAiSourceIndex[]
   @@unique([id,organizationId,projectId,ownerId])
   @@unique([organizationId,projectId,ownerId,clientKey])
   @@index([organizationId,projectId,ownerId,createdAt])
@@ -5170,7 +5174,13 @@ model ChatAiSourceIndex {
   id String @id @default(uuid()) @db.Uuid
   organizationId String @db.Uuid
   projectId String @db.Uuid
-  roomId String @db.Uuid
+  roomId String? @db.Uuid
+  fileAssetId String? @db.Uuid
+  projectFileAssetId String? @db.Uuid
+  ownerId String? @db.Uuid
+  conversationId String? @db.Uuid
+  clientKey String? @db.Uuid
+  payloadHash String?
   messageId String? @db.Uuid
   chatFileId String? @db.Uuid
   releaseId String? @db.Uuid
@@ -5188,12 +5198,19 @@ model ChatAiSourceIndex {
   errorCode String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  room ChatRoom @relation(fields:[roomId,organizationId,projectId], references:[id,organizationId,projectId], onDelete:Restrict)
+  file FileAsset? @relation(fields:[fileAssetId,organizationId,ownerId], references:[id,organizationId,uploadedById], onDelete:Restrict)
+  projectFile FileAsset? @relation("AiProjectFile", fields:[projectFileAssetId], references:[id], onDelete:Restrict)
+  conversation ChatAiConversation? @relation(fields:[conversationId,organizationId,projectId,ownerId], references:[id,organizationId,projectId,ownerId], onDelete:Restrict)
+  room ChatRoom? @relation(fields:[roomId,organizationId,projectId], references:[id,organizationId,projectId], onDelete:Restrict)
   message ChatMessage? @relation(fields:[messageId,organizationId,projectId,roomId], references:[id,organizationId,projectId,roomId], onDelete:Restrict)
   chatFile ChatFile? @relation(fields:[chatFileId,organizationId,projectId,roomId], references:[id,organizationId,projectId,roomId], onDelete:Restrict)
   release ChatDocumentRelease? @relation(fields:[releaseId,organizationId,projectId,roomId], references:[id,organizationId,projectId,roomId], onDelete:Restrict)
   dependencies ChatAiAnswerDependency[]
   @@unique([id,organizationId,projectId])
+  @@unique([conversationId,clientKey])
+  @@unique([fileAssetId,extractor])
+  @@unique([projectId,projectFileAssetId,version,extractor], map:"ChatAiSourceIndex_project_file_version_key")
+  @@index([organizationId,projectId,ownerId,status])
   @@unique([messageId,extractor])
   @@unique([chatFileId,extractor])
   @@unique([releaseId,extractor])

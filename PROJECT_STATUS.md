@@ -1,5 +1,13 @@
 # Project status
 
+## Chat AI thống nhất theo Project — phát hành local 06/10
+
+Luồng câu hỏi/file không mode hoặc approve/synthetic đã chạy thật trên Chrome LAN `192.168.1.80:3000`, Project hiện hành/COMMERCIAL không có room. OpenRouter PROJECT_AUTHORIZED chỉ tenant Galaxy, giữ IAM/source revoke/private/financial/FREE_ONLY/privacy. PDF binary723byte/link/version/downloadSHA đạt; answer đúng nội dung và citation trang1; câu nối tiếp không upload lại. PNG capability qua API main/vendor thật PASS; chưa upload ảnh main thứ hai. Popup560/1100, chữ16/26 và chuyển panel/trang/reload giữ history,0POST trùng.
+
+Release **local-a0429faf5733**, schema86, API/Web READY; credential/Edge/keeper/public-domain-closed giữ. HEAD nền32d62a2, source/docs chưa commit; TESTED_SNAPSHOT `a0429faf5733b54f13d125da20c7990a9c965ffa48f9c2f81674d4a2cf8ec5eb`. Không báo hoàn tất toàn yêu cầu: aggregate nghiệp vụ đầy đủ chưa nối; DOCX/PDFscan chưa hỗ trợ; XLSX extractor đạt nhưng chưa live vendor. Hồi quy cuối PASS API1314/Web564/Edge5/document1, CLI26 đạt; test M2 từng timeout5000ms, lượt cuối đạt4839ms, không đổi timeout chuẩn. Lint/types/build/format/review và Chrome fixture1+7 đạt.
+
+[Handoff hiện hành](docs/galaxy-os/handoffs/2026-10-06-unified-project-ai.md) ghi request/model/dispatch/version, chính sách mới, backup/migration, kiểm main và giới hạn. Các mục bên dưới là lịch sử.
+
 ## OpenRouter GENERAL — hai lượt thật đạt, phát hành 06/10
 
 **API_CHAT_MAIN: DÙNG ĐƯỢC.** Chrome popup/session thật,2lượt trong cùng hội thoại GENERAL, sourceCount0, vendor200×2/dispatch1mỗi lượt/0retry, usage.cost0mỗi lượt; reload sau release giữ2answer/0POSTtrùng. Requested `openrouter/free`; returned `inclusionai/ling-3.0-flash-sante:free` và `cohere/north-mini-code:free`.

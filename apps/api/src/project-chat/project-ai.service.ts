@@ -8,10 +8,11 @@ import {
 } from '@nestjs/common';
 import { Prisma, ChatAiSourceIndex, ChatAiAnswer } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
+import { projectWhereForPermissions } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
 import { ProjectChatPolicy } from '../access-control/project-chat.policy';
 import { PrismaService } from '../prisma.service';
-import { nativeSource } from './ai-native-source';
+import { nativeSource, documentText, xlsxMime } from './ai-native-source';
 import { ProviderConfig, answerFromProvider } from './ai-provider';
 import {
   AiError,
@@ -28,6 +29,7 @@ import {
   assertEgress,
   assertInput,
   requestMetadata,
+  projectPolicy,
 } from './ai-registry';
 import {
   chunks,
@@ -38,6 +40,7 @@ import {
 } from './ai-source';
 import { ProjectChatService } from './project-chat.service';
 import { FileStorage } from '../files/file-storage';
+import { FilesService } from '../files/files.service';
 import {
   activationFixture,
   activationFixtureVersion,
@@ -63,6 +66,7 @@ export class ProjectAiService {
     @Inject(ProjectChatService) private readonly chat: ProjectChatService,
     @Inject(FileStorage) private readonly storage: FileStorage,
     @Inject(ProjectChatPolicy) private readonly access: ProjectChatPolicy,
+    @Inject(FilesService) private readonly files: FilesService,
   ) {}
 
   private async authorized<T>(
@@ -73,7 +77,19 @@ export class ProjectAiService {
     if (process.env.FEATURE_PROJECT_AI !== 'true')
       throw new NotFoundException();
     return this.access.project(actor, projectId, async (tx) => {
-      await this.access.freshActor(tx, actor);
+      const fresh = await this.access.freshActor(tx, actor);
+      if (
+        !(await tx.project.findFirst({
+          where: {
+            AND: [
+              { id: projectId },
+              projectWhereForPermissions(fresh, 'ai.invoke'),
+            ],
+          },
+          select: { id: true },
+        }))
+      )
+        throw new NotFoundException();
       const grant = await this.access.authority(tx, actor, projectId, 'INVOKE');
       return run(tx, grant.id);
     });
@@ -104,6 +120,28 @@ export class ProjectAiService {
     scope: string,
     context?: AiContext,
   ) {
+    if (
+      context?.productLineId &&
+      !(await tx.projectProductLine.findFirst({
+        where: {
+          id: context.productLineId,
+          organizationId: actor.organizationId,
+          projectId,
+          deletedAt: null,
+        },
+        select: { id: true },
+      }))
+    )
+      throw new NotFoundException();
+    if (context?.roomId) {
+      const { room } = await this.access.assertRoom(
+        actor,
+        context.roomId,
+        'READ',
+        tx,
+      );
+      if (room.projectId !== projectId) throw new NotFoundException();
+    }
     const rooms = await tx.chatRoom.findMany({
       where: {
         organizationId: actor.organizationId,
@@ -184,6 +222,27 @@ export class ProjectAiService {
         if (!this.denied(error)) throw error;
       }
     }
+    if (!context?.roomId && !context?.productLineId)
+      allowed.push({
+        ownerId: actor.userId,
+        fileAssetId: context?.fileAssetId ?? { not: null },
+        ...(context?.fileVersion && { file: { version: context.fileVersion } }),
+      });
+    if (!context?.roomId)
+      allowed.push({
+        projectFileAssetId: context?.fileAssetId ?? { not: null },
+        OR: [{ errorCode: null }, { errorCode: { not: 'VERSION_CHANGED' } }],
+        projectFile: {
+          is: {
+            ...(await this.files.projectAiWhere(
+              await this.access.freshActor(tx, actor),
+              projectId,
+              tx,
+            )),
+            ...(context?.fileVersion && { version: context.fileVersion }),
+          },
+        },
+      });
     return {
       organizationId: actor.organizationId,
       projectId,
@@ -202,6 +261,74 @@ export class ProjectAiService {
       index.projectId !== projectId
     )
       throw new NotFoundException();
+    if (index.projectFileAssetId) {
+      const fresh = await this.access.freshActor(tx, actor);
+      const file = await this.files.projectAiFile(
+        fresh,
+        projectId,
+        index.projectFileAssetId,
+        tx,
+      );
+      if (index.version !== `${file.version}:${file.checksum}`)
+        throw new NotFoundException();
+      return {
+        text: null,
+        storageKey: file.storageKey,
+        mime: file.mimeType,
+        name: file.originalFilename,
+        bytes: Number(file.sizeBytes),
+        checksum: file.checksum,
+        downloadUrl: `/api/v1/files/${file.id}/download?version=${file.version}`,
+        sequence: null,
+      };
+    }
+    if (index.fileAssetId) {
+      if (index.ownerId !== actor.userId || !index.conversationId)
+        throw new NotFoundException();
+      await this.conversation(tx, actor, projectId, index.conversationId);
+      const fresh = await this.access.freshActor(tx, actor);
+      if (
+        !(await tx.project.findFirst({
+          where: {
+            AND: [
+              { id: projectId },
+              projectWhereForPermissions(fresh, ['file.read', 'file.download']),
+            ],
+          },
+          select: { id: true },
+        }))
+      )
+        throw new NotFoundException();
+      const file = await tx.fileAsset.findFirst({
+        where: {
+          id: index.fileAssetId ?? index.projectFileAssetId,
+          organizationId: actor.organizationId,
+          uploadedById: actor.userId,
+          deletedAt: null,
+          attachments: {
+            some: {
+              entityType: 'ChatAiConversation',
+              entityId: index.conversationId,
+              projectId,
+              createdBy: actor.userId,
+            },
+          },
+        },
+      });
+      if (!file || index.version !== `${file.version}:${file.checksum}`)
+        throw new NotFoundException();
+      return {
+        text: null,
+        storageKey: file.storageKey,
+        mime: file.mimeType,
+        name: file.originalFilename,
+        bytes: Number(file.sizeBytes),
+        checksum: file.checksum,
+        downloadUrl: `/api/v1/project-chat/projects/${projectId}/ai/files/${index.id}/download`,
+        sequence: null,
+      };
+    }
+    if (!index.roomId) throw new NotFoundException();
     const { grant } = await this.access.assertRoom(
       actor,
       index.roomId,
@@ -309,8 +436,79 @@ export class ProjectAiService {
           context,
         );
         let discovered = 0;
+        const fileScope = where.OR.find((kind) => kind.projectFile)?.projectFile
+          ?.is;
+        if (fileScope) {
+          // ponytail: scan only version metadata; add a DB delta cursor if Project file counts make this costly.
+          const candidates = (
+            await tx.fileAsset.findMany({
+              where: {
+                AND: [
+                  fileScope,
+                  ...(context?.fileAssetId
+                    ? [{ id: context.fileAssetId }]
+                    : []),
+                ],
+              },
+              select: {
+                id: true,
+                version: true,
+                checksum: true,
+                aiProjectSources: {
+                  where: { projectId, extractor: 'utf8-v1' },
+                  select: { version: true },
+                },
+              },
+              orderBy: { createdAt: 'desc' },
+            })
+          ).filter(
+            (file) =>
+              !file.aiProjectSources.some(
+                (source) =>
+                  source.version === `${file.version}:${file.checksum}`,
+              ),
+          );
+          const fresh = await this.access.freshActor(tx, actor);
+          for (const candidate of candidates) {
+            if (discovered >= 25) break;
+            try {
+              const file = await this.files.projectAiFile(
+                fresh,
+                projectId,
+                candidate.id,
+                tx,
+              );
+              await tx.chatAiSourceIndex.updateMany({
+                where: {
+                  projectId,
+                  projectFileAssetId: file.id,
+                  version: { not: `${file.version}:${file.checksum}` },
+                },
+                data: {
+                  status: 'INVALID',
+                  errorCode: 'VERSION_CHANGED',
+                  leaseToken: null,
+                  leaseUntil: null,
+                },
+              });
+              await tx.chatAiSourceIndex.create({
+                data: {
+                  organizationId: actor.organizationId,
+                  projectId,
+                  projectFileAssetId: file.id,
+                  version: `${file.version}:${file.checksum}`,
+                  label: file.originalFilename,
+                  provenance: 'UNCONFIRMED',
+                },
+              });
+              discovered++;
+            } catch (error) {
+              if (!this.denied(error)) throw error;
+            }
+          }
+        }
         // ponytail: bounded delta batches; add a background worker when indexing volume warrants it.
-        for (const room of where.OR)
+        for (const room of where.OR.filter((kind) => kind.roomId))
           for (const kind of room.OR ?? []) {
             if (discovered >= 25) break;
             const common = {
@@ -428,7 +626,12 @@ export class ProjectAiService {
       },
     );
     for (const row of jobs.rows) {
-      let result: { status: string; text?: string };
+      let result: {
+        status: string;
+        text?: string;
+        chunks?: SourceChunk[];
+        errorCode?: string;
+      };
       try {
         const source = await this.authorized(
           actor,
@@ -440,10 +643,20 @@ export class ProjectAiService {
         );
         if (source.text !== null)
           result = { status: 'READY', text: source.text };
-        else if (source.bytes > 262_144) result = { status: 'TOO_LARGE' };
+        else if (
+          source.bytes >
+          (['application/pdf', xlsxMime].includes(source.mime)
+            ? 8_000_000
+            : 262_144)
+        )
+          result = { status: 'TOO_LARGE' };
         else {
           result = extractText(source.name, source.mime, new Uint8Array());
-          if (result.status === 'READY') {
+          if (
+            result.status === 'READY' ||
+            (result.status !== 'FORBIDDEN' &&
+              ['application/pdf', xlsxMime].includes(source.mime))
+          ) {
             const stream = await this.storage.stream(source.storageKey!);
             const buffers: Buffer[] = [];
             let size = 0;
@@ -451,7 +664,13 @@ export class ProjectAiService {
               for await (const part of stream) {
                 const bytes = Buffer.from(part);
                 size += bytes.length;
-                if (size > 262_144) throw new Error('Source too large');
+                if (
+                  size >
+                  (['application/pdf', xlsxMime].includes(source.mime)
+                    ? 8_000_000
+                    : 262_144)
+                )
+                  throw new Error('Source too large');
                 buffers.push(bytes);
               }
             } finally {
@@ -463,7 +682,25 @@ export class ProjectAiService {
               source.checksum
             )
               throw new Error('Source checksum mismatch');
-            result = extractText(source.name, source.mime, bytes);
+            result = await documentText(
+              {
+                organizationId: actor.organizationId,
+                projectId,
+                roomId: row.roomId,
+                sourceId:
+                  row.messageId ??
+                  row.chatFileId ??
+                  row.releaseId ??
+                  row.fileAssetId ??
+                  row.projectFileAssetId!,
+                version: row.version,
+                text: '',
+              },
+              source.name,
+              source.mime,
+              bytes,
+              source.checksum!,
+            );
           }
         }
         await this.authorized(actor, projectId, async (tx, grantId) => {
@@ -471,14 +708,20 @@ export class ProjectAiService {
           await this.checkSource(tx, actor, projectId, row);
           const indexed =
             result.status === 'READY'
-              ? chunks({
+              ? (result.chunks ??
+                chunks({
                   organizationId: actor.organizationId,
                   projectId,
                   roomId: row.roomId,
-                  sourceId: row.messageId ?? row.chatFileId ?? row.releaseId!,
+                  sourceId:
+                    row.messageId ??
+                    row.chatFileId ??
+                    row.releaseId ??
+                    row.fileAssetId ??
+                    row.projectFileAssetId!,
                   version: row.version,
                   text: result.text!,
-                })
+                }))
               : [];
           await tx.chatAiSourceIndex.updateMany({
             where: {
@@ -497,11 +740,11 @@ export class ProjectAiService {
                   : null,
               leaseToken: null,
               leaseUntil: null,
-              errorCode: null,
+              errorCode: result.errorCode ?? null,
             },
           });
         });
-      } catch {
+      } catch (error) {
         await this.db.chatAiSourceIndex.updateMany({
           where: {
             id: row.id,
@@ -512,7 +755,8 @@ export class ProjectAiService {
             status: 'ERROR',
             leaseToken: null,
             leaseUntil: null,
-            errorCode: 'SOURCE_UNAVAILABLE',
+            errorCode:
+              error instanceof AiError ? error.code : 'SOURCE_UNAVAILABLE',
           },
         });
       }
@@ -570,6 +814,27 @@ export class ProjectAiService {
     }));
   }
 
+  async downloadFile(actor: CurrentActor, projectId: string, id: string) {
+    const source = await this.authorized(actor, projectId, async (tx) => {
+      const index = await tx.chatAiSourceIndex.findFirst({
+        where: {
+          id,
+          organizationId: actor.organizationId,
+          projectId,
+          ownerId: actor.userId,
+          fileAssetId: { not: null },
+        },
+      });
+      if (!index) throw new NotFoundException();
+      return this.checkSource(tx, actor, projectId, index);
+    });
+    if (!source.storageKey) throw new NotFoundException();
+    return {
+      file: { mimeType: source.mime, originalFilename: source.name },
+      data: await this.storage.stream(source.storageKey),
+    };
+  }
+
   private config(
     model?: string,
   ): ((ProviderConfig | ConfiguredModel) & { daily: number | null }) | null {
@@ -602,11 +867,17 @@ export class ProjectAiService {
   settings(actor: CurrentActor, projectId: string) {
     return this.authorized(actor, projectId, async (tx) => {
       await this.access.authority(tx, actor, projectId, 'ACCESS_ADMIN');
+      const metadata = readAiConfig();
       return {
         models: await this.operationalModels(tx, actor, projectId),
-        connections: readAiConfig().connections ?? {},
+        connections: metadata.connections ?? {},
         configuration: 'TERMINAL_LOCAL',
-        dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+        dataPolicy:
+          metadata.openrouter?.dataPolicy === 'PROJECT_AUTHORIZED' &&
+          metadata.openrouter.projectPolicy?.organizationId ===
+            actor.organizationId
+            ? 'PROJECT_AUTHORIZED'
+            : 'SYNTHETIC_PUBLIC_APPROVED',
       };
     });
   }
@@ -997,8 +1268,8 @@ export class ProjectAiService {
         let config: ConfiguredModel;
         try {
           config = configuredModel(readAiConfig(), input.model);
-          if (config.provider === 'openrouter')
-            throw new AiError('GENERAL_ONLY');
+          if (config.provider === 'openrouter' && input.capability === 'pdf')
+            throw new AiError('UNSUPPORTED_FILE');
         } catch (e) {
           throw new ConflictException(
             e instanceof AiError ? e.code : 'INVALID_CONFIG',
@@ -1195,7 +1466,11 @@ export class ProjectAiService {
         if (!index) firstResult = result;
         evidence.returnedModel = result.returnedModel;
         evidence.httpStatus = result.httpStatus;
-        if (result.returnedModel && result.returnedModel !== config.model)
+        if (
+          config.provider !== 'openrouter' &&
+          result.returnedModel &&
+          result.returnedModel !== config.model
+        )
           throw new AiError('MODEL_RETURNED_DIFFERENT');
         if (!fixture.assertions[index]!.test(result.answer))
           throw new AiError('FIXTURE_ASSERTION_FAILED');
@@ -1394,10 +1669,22 @@ export class ProjectAiService {
     conversationId: string,
     input: ChatAiQuestionDto,
   ) {
+    const metadata = readAiConfig();
+    const router = metadata.openrouter;
+    const unified =
+      router?.dataPolicy === 'PROJECT_AUTHORIZED' &&
+      router.projectPolicy?.organizationId === actor.organizationId;
+    if (unified)
+      input = {
+        ...input,
+        model: input.model ?? 'openrouter/free',
+        mode: undefined,
+        dataClassification: undefined,
+      };
     return this.authorized(actor, projectId, async (tx, grantId) => {
       await this.conversation(tx, actor, projectId, conversationId);
       const context = this.context(input);
-      const mode = input.mode ?? 'PROJECT';
+      const mode = unified ? 'UNIFIED' : (input.mode ?? 'PROJECT');
       if (mode === 'GENERAL' && (context || input.sourceIds?.length))
         throw new ConflictException('INVALID_CONTEXT');
       if (context && !input.model)
@@ -1460,16 +1747,21 @@ export class ProjectAiService {
         first &&
         (JSON.stringify(requestMetadata(first.usage)?.context) !==
           JSON.stringify(context) ||
-          (requestMetadata(first.usage)?.mode ?? 'PROJECT') !== mode)
+          (!unified &&
+            (requestMetadata(first.usage)?.mode ?? 'PROJECT') !== mode))
       )
         throw new ConflictException('CONVERSATION_CONTEXT_CHANGED');
       let pin: AiRequestMetadata | null = null;
       if (input.model) {
         try {
           const config = configuredModel(readAiConfig(), input.model);
-          if (config.provider === 'openrouter' && mode !== 'GENERAL')
+          if (
+            config.provider === 'openrouter' &&
+            mode !== 'GENERAL' &&
+            !projectPolicy(config, actor.organizationId)
+          )
             throw new AiError('GENERAL_ONLY');
-          if (mode === 'PROJECT')
+          if (mode !== 'GENERAL')
             assertEgress(
               config,
               actor.organizationId,
@@ -1487,6 +1779,13 @@ export class ProjectAiService {
           const reasoning = input.reasoning ?? 'default';
           if (!(config.reasoning as readonly string[]).includes(reasoning))
             throw new AiError('UNSUPPORTED_REASONING');
+          const previous =
+            unified && !input.sourceIds?.length
+              ? await tx.chatAiAnswer.findFirst({
+                  where: { conversationId, status: 'COMPLETED' },
+                  orderBy: { createdAt: 'desc' },
+                })
+              : null;
           pin = {
             version: 1,
             mode,
@@ -1495,8 +1794,14 @@ export class ProjectAiService {
             revision: config.revision,
             configDigest: config.configDigest,
             reasoning,
-            dataClassification: 'SYNTHETIC_PUBLIC_APPROVED',
-            sourceIds: input.sourceIds ?? [],
+            dataClassification: unified
+              ? 'PROJECT_AUTHORIZED'
+              : 'SYNTHETIC_PUBLIC_APPROVED',
+            sourceIds: input.sourceIds?.length
+              ? input.sourceIds
+              : ((previous
+                  ? requestMetadata(previous.usage)?.sourceIds
+                  : undefined) ?? []),
             ...(context && { context }),
           };
         } catch (error) {
@@ -1636,7 +1941,10 @@ export class ProjectAiService {
           select: { question: true, usage: true },
         });
         for (const turn of previous) {
-          if ((requestMetadata(turn.usage)?.mode ?? 'PROJECT') !== pin.mode)
+          if (
+            pin.mode !== 'UNIFIED' &&
+            (requestMetadata(turn.usage)?.mode ?? 'PROJECT') !== pin.mode
+          )
             throw new AiError('HISTORY_UNAVAILABLE');
           assertInput(
             config,
@@ -1800,10 +2108,15 @@ export class ProjectAiService {
         handle,
         projectId,
         roomId: index.roomId,
-        sourceId: index.messageId ?? index.chatFileId ?? index.releaseId,
+        sourceId:
+          index.messageId ??
+          index.chatFileId ??
+          index.releaseId ??
+          index.fileAssetId ??
+          index.projectFileAssetId,
         kind: index.messageId
           ? 'MESSAGE'
-          : index.chatFileId
+          : index.chatFileId || index.fileAssetId || index.projectFileAssetId
             ? 'FILE'
             : 'RELEASE',
         version: index.version,
@@ -1860,7 +2173,6 @@ export class ProjectAiService {
       [];
     if (!pin?.sourceIds.length) return result;
     const config = this.selectedConfig(answer)!;
-    if (!config.nativeMedia) throw new AiError('UNSUPPORTED_FILE');
     for (const id of pin.sourceIds) {
       const checked = await this.authorized(actor, projectId, async (tx) => {
         const index = await tx.chatAiSourceIndex.findFirst({
@@ -1880,6 +2192,9 @@ export class ProjectAiService {
           [index],
         );
         const source = await this.checkSource(tx, actor, projectId, index);
+        if (index.status === 'READY' && !source.mime.startsWith('image/'))
+          return { index, source, textOnly: true };
+        if (!config.nativeMedia) throw new AiError('UNSUPPORTED_FILE');
         if (
           source.mime === 'application/pdf'
             ? !config.pdfLiveVerified
@@ -1890,6 +2205,14 @@ export class ProjectAiService {
           throw new AiError('INPUT_TOO_LARGE');
         return { index, source };
       });
+      if ('textOnly' in checked) {
+        result.push({
+          index: checked.index,
+          mime: checked.source.mime,
+          bytes: Buffer.alloc(0),
+        });
+        continue;
+      }
       let bytes: Buffer;
       try {
         const stream = await this.storage.stream(checked.source.storageKey!);
@@ -1915,7 +2238,11 @@ export class ProjectAiService {
           organizationId: actor.organizationId,
           projectId,
           roomId: checked.index.roomId,
-          sourceId: checked.index.chatFileId ?? checked.index.releaseId!,
+          sourceId:
+            checked.index.chatFileId ??
+            checked.index.releaseId ??
+            checked.index.fileAssetId ??
+            checked.index.projectFileAssetId!,
           version: checked.index.version,
           text: '',
         },
@@ -2009,6 +2336,12 @@ export class ProjectAiService {
           scope: conversation.scope,
           grantId,
           config,
+          projectName: (
+            await tx.project.findUniqueOrThrow({
+              where: { id: projectId },
+              select: { name: true },
+            })
+          ).name,
         };
       },
     );
@@ -2027,11 +2360,31 @@ export class ProjectAiService {
     };
     let priorTurns: { question: string; answer: string }[] = [];
     let limitedSources = false;
+    let retrievalError = false;
     const controller = new AbortController();
     this.running.set(id, controller);
     try {
-      if (pin?.mode !== 'GENERAL')
-        await this.index(actor, projectId, claimed.scope, pin?.context);
+      if (pin?.mode !== 'GENERAL') {
+        try {
+          const indexed = await this.index(
+            actor,
+            projectId,
+            pin?.mode === 'UNIFIED' ? 'ALL' : claimed.scope,
+            pin?.context,
+          );
+          retrievalError = indexed.sources.some(
+            (source) => source.status === 'ERROR',
+          );
+        } catch (error) {
+          if (
+            this.denied(error) ||
+            pin?.mode !== 'UNIFIED' ||
+            pin.sourceIds.length
+          )
+            throw error;
+          retrievalError = true;
+        }
+      }
       controller.signal.throwIfAborted();
       const native =
         pin?.mode === 'GENERAL'
@@ -2040,7 +2393,7 @@ export class ProjectAiService {
               actor,
               projectId,
               claimed.answer,
-              claimed.scope,
+              pin?.mode === 'UNIFIED' ? 'ALL' : claimed.scope,
             );
       const context = await this.authorized(
         actor,
@@ -2057,7 +2410,7 @@ export class ProjectAiService {
           if (answer.status !== 'INDEXING') return null;
           // A top-k source answer never claims the full domain total.
           if (
-            pin?.mode !== 'GENERAL' &&
+            pin?.mode === 'PROJECT' &&
             /(?:^|[^\p{L}\p{N}_])(?:tổng|tất cả)(?:$|[^\p{L}\p{N}_])/iu.test(
               answer.question.normalize('NFKC'),
             )
@@ -2100,8 +2453,9 @@ export class ProjectAiService {
               const previousPin = requestMetadata(previousAnswer.usage);
               if (
                 !previousPin ||
-                previousPin.mode !== pin.mode ||
-                previousPin.dataClassification !== pin.dataClassification
+                (pin.mode !== 'UNIFIED' && previousPin.mode !== pin.mode) ||
+                (pin.mode !== 'UNIFIED' &&
+                  previousPin.dataClassification !== pin.dataClassification)
               )
                 throw new AiError('EGRESS_POLICY_DENIED');
               const deps = await tx.chatAiAnswerDependency.findMany({
@@ -2127,7 +2481,7 @@ export class ProjectAiService {
                 !config.nativeMedia &&
                 deps.some((d) =>
                   (d.source.chunks as unknown as SourceChunk[]).some(
-                    (c) => c.page,
+                    (c) => c.page && /Nội dung gửi native/.test(c.text),
                   ),
                 )
               )
@@ -2167,7 +2521,7 @@ export class ProjectAiService {
             tx,
             actor,
             projectId,
-            claimed.scope,
+            pin?.mode === 'UNIFIED' ? 'ALL' : claimed.scope,
             pin?.context,
           );
           await tx.$executeRaw`SET LOCAL default_text_search_config = 'pg_catalog.simple'`;
@@ -2209,11 +2563,20 @@ export class ProjectAiService {
               await this.checkSource(tx, actor, projectId, source);
               if (
                 'provider' in config &&
-                !config.approvedSources.some(
-                  (approved) =>
-                    approved.id === source.id &&
-                    approved.version === source.version,
-                )
+                !(() => {
+                  try {
+                    assertEgress(
+                      config,
+                      actor.organizationId,
+                      projectId,
+                      pin?.dataClassification,
+                      [source],
+                    );
+                    return true;
+                  } catch {
+                    return false;
+                  }
+                })()
               ) {
                 limitedSources = true;
                 continue;
@@ -2223,7 +2586,7 @@ export class ProjectAiService {
               if (!this.denied(error)) throw error;
             }
           }
-          const selected = retrieve(
+          let selected = retrieve(
             readable.flatMap((row) => row.chunks as unknown as SourceChunk[]),
             answer.question + ' ' + (priorTurns.at(-1)?.question ?? ''),
             {
@@ -2236,7 +2599,14 @@ export class ProjectAiService {
             await this.checkSource(tx, actor, projectId, item.index);
             if (!readable.some((s) => s.id === item.index.id))
               readable.push(item.index);
-            selected.push(...(item.index.chunks as unknown as SourceChunk[]));
+            const explicit = item.index.chunks as unknown as SourceChunk[];
+            selected = [
+              ...explicit,
+              ...selected.filter(
+                (chunk) =>
+                  !explicit.some((current) => current.handle === chunk.handle),
+              ),
+            ];
           }
           for (const dependency of priorDependencies) {
             if (!readable.some((s) => s.id === dependency.source.id))
@@ -2249,8 +2619,8 @@ export class ProjectAiService {
               )
                 selected.push(c);
           }
-          if (selected.length > 12) throw new AiError('INPUT_TOO_LARGE');
-          if (!selected.length) {
+          selected = selected.slice(0, 12);
+          if (!selected.length && pin?.mode !== 'UNIFIED') {
             await tx.chatAiAnswer.update({
               where: { id },
               data: {
@@ -2287,6 +2657,12 @@ export class ProjectAiService {
                 ),
               )
               .map((c) => c.handle);
+            for (const dependency of priorDependencies.filter(
+              (dependency) => dependency.source.id === source.id,
+            ))
+              for (const handle of dependency.handles)
+                if (!handles.includes(handle)) handles.push(handle);
+            if (handles.length > 12) throw new AiError('INPUT_TOO_LARGE');
             if (handles.length)
               await tx.chatAiAnswerDependency.create({
                 data: {
@@ -2371,12 +2747,28 @@ export class ProjectAiService {
             },
             reasoning: pin?.reasoning,
             history: priorTurns,
-            media: native.map((item) => ({
-              handle: (item.index.chunks as unknown as SourceChunk[])[0]!
-                .handle,
-              mime: item.mime,
-              bytes: item.bytes,
-            })),
+            ...(pin?.mode === 'UNIFIED' && {
+              projectContext: {
+                id: projectId,
+                name: claimed.projectName,
+                conversationId: claimed.answer.conversationId,
+                group: claimed.scope,
+                at: new Date().toISOString(),
+                sourceState: retrievalError
+                  ? ('ERROR' as const)
+                  : context.length
+                    ? ('AVAILABLE' as const)
+                    : ('EMPTY' as const),
+              },
+            }),
+            media: native
+              .filter((item) => item.bytes.length)
+              .map((item) => ({
+                handle: (item.index.chunks as unknown as SourceChunk[])[0]!
+                  .handle,
+                mime: item.mime,
+                bytes: item.bytes,
+              })),
           },
         );
         await this.authorized(actor, projectId, async (tx, grantId) => {

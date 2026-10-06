@@ -33,13 +33,6 @@ export const aiSessionKey = (
     context?.fileAssetId ?? null,
     context?.fileVersion ?? null,
   ]);
-type DocumentConnection = {
-  category: string;
-  enabled: boolean;
-  credentialConfigured: boolean;
-  credentialState: string;
-  status: string;
-};
 
 const contextParams = (context?: AiContext) =>
   Object.fromEntries(
@@ -95,7 +88,7 @@ type ModelChoice = {
   };
 };
 type Answer = {
-  mode?: 'GENERAL' | 'PROJECT';
+  mode?: 'GENERAL' | 'PROJECT' | 'UNIFIED';
   model?: string | null;
   modelLabel?: string | null;
   provider?: string | null;
@@ -113,7 +106,7 @@ type Answer = {
   sources: Source[];
 };
 type Conversation = {
-  mode?: 'GENERAL' | 'PROJECT';
+  mode?: 'GENERAL' | 'PROJECT' | 'UNIFIED';
   id: string;
   scope: string;
   createdAt?: string;
@@ -191,6 +184,12 @@ export const aiStatusLabel = (
       'Không giữ được suất kiểm thử; kiểm tra lượt đang chạy và hạn mức',
     INVALID_CONFIG:
       'Cấu hình model chưa hợp lệ; quản trị cần kiểm tra tại máy chủ',
+    PDF_SCAN_UNSUPPORTED:
+      'PDF dạng ảnh chưa có đường đọc đã kiểm chứng. Hãy chọn PDF có text hoặc ảnh PNG/JPG.',
+    PDF_TEXT_UNAVAILABLE:
+      'Chưa đọc được text PDF. Thử lại hoặc kiểm tra tệp có mật khẩu.',
+    PDF_VALIDATION_UNAVAILABLE:
+      'Không kiểm tra được PDF; tệp có thể hỏng hoặc được bảo vệ.',
     SOURCE_UNAVAILABLE: 'Nguồn chưa sẵn sàng hoặc phiên bản không còn hợp lệ',
     CONVERSATION_CONTEXT_CHANGED:
       'Phạm vi hội thoại đã được cố định. Tạo chat AI mới để đổi ngữ cảnh.',
@@ -200,7 +199,6 @@ export const aiStatusLabel = (
     FILE_NOT_LIVE_VERIFIED:
       'Ảnh/PDF chưa được kiểm chứng live và chưa được bật',
     PDF_PAGE_LIMIT: 'PDF vượt giới hạn 10 trang; cần bản trích trang phù hợp',
-    PDF_VALIDATION_UNAVAILABLE: 'Chưa kiểm được cấu trúc và số trang PDF',
     MISSING_BINARY: 'Thiếu file gốc trong storage; chưa gửi nhà cung cấp',
     DATA_POLICY_BLOCKED: 'Model này chưa được phép xử lý nguồn đã chọn',
     HISTORY_UNAVAILABLE:
@@ -250,19 +248,6 @@ export const aiStatusLabel = (
     INVALID: 'Không đọc được nội dung UTF-8',
     TOO_LARGE: 'Nguồn vượt giới hạn đọc',
   })[status] ?? fallback;
-
-const modelStatusLabel = (model: ModelChoice) =>
-  model.paused
-    ? aiStatusLabel('PROVIDER_PAUSED')
-    : model.credentialState && model.credentialState !== 'LOADED'
-      ? aiStatusLabel(model.credentialState)
-      : model.health?.code
-        ? aiStatusLabel(model.health.code)
-        : model.providerReason || model.reason
-          ? aiStatusLabel(model.providerReason ?? model.reason!)
-          : model.textLiveVerified
-            ? 'Văn bản đã kiểm chứng live'
-            : 'Cấu hình đã nạp; văn bản chưa kiểm chứng live';
 
 export function AiAnswer({
   answer,
@@ -364,12 +349,13 @@ export function ModelSelector({
         onChange={(e) => onChange(e.target.value)}
       >
         <option value="">Chọn model đã được bật</option>
-        {models.map((model) => (
-          <option key={model.id} value={model.id} disabled={!model.available}>
-            {model.label} · {model.providerLabel}
-            {` — ${modelStatusLabel(model)}`}
-          </option>
-        ))}
+        {models
+          .filter((model) => model.available)
+          .map((model) => (
+            <option key={model.id} value={model.id} disabled={!model.available}>
+              {model.label} · {model.providerLabel}
+            </option>
+          ))}
       </select>
     </label>
   );
@@ -380,7 +366,6 @@ export function ProjectAi({
   actorId,
   group,
   onRevoked,
-  canConfigure = false,
   onDraft,
   initialContext,
   roomLabels,
@@ -421,52 +406,39 @@ export function ProjectAi({
   const panel = useRef<HTMLElement>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [models, setModels] = useState<ModelChoice[]>([]);
-  const [mode, setMode] = useState<'GENERAL' | 'PROJECT'>('PROJECT');
-  const choices =
-    mode === 'GENERAL'
-      ? models.map((item) => ({
-          ...item,
-          available: item.generalAvailable ?? item.providerReady,
-          reason: item.providerReason,
-        }))
-      : models;
+  const choices = models.filter((item) => item.available);
   const [model, setModel] = useState('');
   const [reasoning, setReasoning] = useState('default');
-  const [pilotConfirmed, setPilotConfirmed] = useState(false);
-  const [settings, setSettings] = useState<ModelChoice[]>();
-  const [connections, setConnections] = useState<{
-    llama_cloud?: DocumentConnection;
-  }>({});
-  const activationKeys = useRef(new Map<string, string>());
-  const [activation, setActivation] = useState<{
-    requestId: string;
-    status: string;
-    errorCode: string | null;
-    evidence: {
-      result: string;
-      revision: string;
-      capability: string;
-      requestedModel: string;
-      returnedModel: string | null;
-    } | null;
-  }>();
   const [sourceIds, setSourceIds] = useState<string[]>([]);
+  type UploadChip = {
+    key: string;
+    file: File;
+    id?: string;
+    status: string;
+    error?: string;
+  };
+  const [uploads, setUploads] = useState<UploadChip[]>([]);
+  const uploadItems = useRef<UploadChip[]>([]);
+  const uploadJobs = useRef(new Map<string, Promise<void>>());
+  const fileInput = useRef<HTMLInputElement>(null);
+  const conversationCreation = useRef<
+    { key: string; pending?: Promise<string> } | undefined
+  >(undefined);
+  const [attachmentMenu, setAttachmentMenu] = useState(false);
+
   const modelInitialized = useRef(false);
   const modelConversation = useRef('');
   const modelStorageKey = `galaxy-ai-model:${actorId}:${projectId}`;
   const chosenModel = choices.find((m) => m.id === model);
   const [list, setList] = useState<Conversation[]>([]);
-  const [provider, setProvider] = useState('LOADING');
   const [selected, setSelected] = useState('');
   const selectedRef = useRef('');
   const [scope, setScope] = useState(group);
   const [history, setHistory] = useState<History>();
   const context =
-    mode === 'GENERAL'
-      ? undefined
-      : selected && history?.answers.length
-        ? (history.context ?? undefined)
-        : initialContext;
+    selected && history?.answers.length
+      ? (history.context ?? undefined)
+      : initialContext;
   const presentationActive = useRef(active);
   const [verified, setVerified] = useState(false);
   const [wasActive, setWasActive] = useState(active);
@@ -553,9 +525,7 @@ export function ProjectAi({
         question: string;
         scope: string;
         model: string;
-        mode: 'GENERAL' | 'PROJECT';
         reasoning: string;
-        dataClassification: string;
         sourceIds: string[];
         context?: AiContext;
         conversationId?: string;
@@ -616,9 +586,9 @@ export function ProjectAi({
     [onRevoked, setSource, setQuestion, setRetryPin, projectId],
   );
   const select = (id: string) => {
-    if (!id && mode === 'GENERAL') {
+    if (!id) {
       const router = models.find(
-        (item) => item.id === 'openrouter/free' && item.generalAvailable,
+        (item) => item.id === 'openrouter/free' && item.available,
       );
       if (router) {
         setModel(router.id);
@@ -639,6 +609,10 @@ export function ProjectAi({
     setSource(undefined);
     setIndex(undefined);
     setSourceIds([]);
+    uploadItems.current = [];
+    uploadJobs.current.clear();
+    setUploads([]);
+    conversationCreation.current = undefined;
     requestKey.current = undefined;
     setRetryPin(undefined);
     updateUrl(id);
@@ -700,7 +674,6 @@ export function ProjectAi({
           id !== selectedRef.current
         )
           return;
-        setProvider(result.provider);
         const identity = aiSessionKey(projectId, group, initialContext);
         if (
           detail &&
@@ -719,9 +692,6 @@ export function ProjectAi({
         }
         setVerified(true);
         setModels(result.models ?? []);
-        setSettings((current) =>
-          current === undefined ? current : (result.models ?? []),
-        );
         if (!modelInitialized.current && result.models) {
           modelInitialized.current = true;
           let saved: string | null = null;
@@ -731,9 +701,10 @@ export function ProjectAi({
             /* Lựa chọn vẫn dùng được khi trình duyệt chặn storage. */
           }
           const candidate = saved
-            ? result.models.find((m) => m.id === saved)
+            ? (result.models.find((m) => m.id === saved && m.available) ??
+              result.models.find((m) => m.available))
             : result.models.find(
-                (m) => m.provider === 'google_gemini' && m.available,
+                (m) => m.provider === 'openrouter' && m.available,
               );
           setModel(candidate?.id ?? '');
           setReasoning(
@@ -752,7 +723,6 @@ export function ProjectAi({
         setSelected(id);
         setHistory(detail);
         if (detail?.answers.length) {
-          setMode(detail.mode ?? 'PROJECT');
           if (modelConversation.current !== id) {
             modelConversation.current = id;
             const original = detail.answers.at(-1)?.model;
@@ -815,7 +785,7 @@ export function ProjectAi({
   useEffect(() => {
     controller.current = new AbortController();
     const generation = reading;
-    void refresh();
+    queueMicrotask(() => void refresh());
     const clear = () => {
       activePage.current = false;
       ++reading.current;
@@ -881,20 +851,143 @@ export function ProjectAi({
       }
     }
   };
+  const ensureConversation = async () => {
+    if (selectedRef.current) return selectedRef.current;
+    const creation = conversationCreation.current ?? {
+      key: createCommandKey(),
+    };
+    conversationCreation.current = creation;
+    if (!creation.pending)
+      creation.pending = call<Conversation>('/conversations', {
+        clientKey: creation.key,
+        scope,
+      })
+        .then((value) => {
+          if (
+            controller.current?.signal.aborted ||
+            conversationCreation.current !== creation
+          )
+            throw new Error('Đã đổi ngữ cảnh.');
+          selectedRef.current = value.id;
+          setSelected(value.id);
+          updateUrl(value.id);
+          return value.id;
+        })
+        .catch((error) => {
+          creation.pending = undefined;
+          throw error;
+        });
+    return creation.pending;
+  };
+  const uploadFile = (item: UploadChip) => {
+    const pending = uploadJobs.current.get(item.key);
+    if (pending) return pending;
+    const signal = controller.current?.signal;
+    const update = (value: Partial<UploadChip>) => {
+      if (signal?.aborted || !uploadItems.current.includes(item)) return;
+      Object.assign(item, value);
+      setUploads([...uploadItems.current]);
+    };
+    const job = (async () => {
+      try {
+        const conversationId = await ensureConversation();
+        if (signal?.aborted || !uploadItems.current.includes(item)) return;
+        if (!item.id) {
+          update({ status: 'Đang tải', error: undefined });
+          const form = new FormData();
+          form.append('clientKey', item.key);
+          form.append('file', item.file);
+          const saved = await api<{ id: string }>(
+            `${base}/conversations/${conversationId}/files`,
+            {
+              method: 'POST',
+              body: form,
+              headers: { 'X-Chat-Actor': actorId },
+              signal: AbortSignal.any([
+                ...(signal ? [signal] : []),
+                AbortSignal.timeout(110000),
+              ]),
+            },
+          );
+          update({ id: saved.id, status: 'Đã lưu' });
+        }
+        if (signal?.aborted || !uploadItems.current.includes(item)) return;
+        update({ status: 'Đang đọc' });
+        const indexed = await call<{
+          sources: {
+            id: string;
+            status: string;
+            errorCode?: string;
+            nativeFile?: boolean;
+            label: string;
+          }[];
+        }>('/index', { scope: 'ALL' });
+        const source = indexed.sources.find((source) => source.id === item.id);
+        const image = /^image\/(png|jpeg)$/.test(item.file.type);
+        if (
+          source?.status !== 'READY' &&
+          !(image && chosenModel?.capabilities.imageInput)
+        )
+          throw new Error(
+            aiStatusLabel(
+              source?.errorCode ??
+                (image
+                  ? 'FILE_NOT_LIVE_VERIFIED'
+                  : (source?.status ?? 'SOURCE_UNAVAILABLE')),
+            ),
+          );
+        update({ status: 'Sẵn sàng', error: undefined });
+      } catch (cause) {
+        update({
+          status: 'Lỗi',
+          error: aiStatusLabel(
+            (cause as Error).message,
+            (cause as Error).message,
+          ),
+        });
+      } finally {
+        uploadJobs.current.delete(item.key);
+      }
+    })();
+    uploadJobs.current.set(item.key, job);
+    return job;
+  };
+  const chooseFiles = (files: FileList | null) => {
+    setAttachmentMenu(false);
+    for (const file of Array.from(files ?? [])) {
+      if (uploadItems.current.length + sourceIds.length >= 3) {
+        setError('Mỗi lượt chọn tối đa 3 tệp.');
+        break;
+      }
+      const item: UploadChip = {
+        key: createCommandKey(),
+        file,
+        status: 'Đang tải',
+      };
+      uploadItems.current.push(item);
+      setUploads([...uploadItems.current]);
+      void uploadFile(item);
+    }
+  };
   const run = async (id: string) => call<Answer>(`/answers/${id}/run`, {});
   const ask = (retry = false) =>
     act(async () => {
       const text = retry
         ? (requestKey.current?.question ?? '')
-        : question.trim();
-      if (
-        (selected && !history) ||
-        !text ||
-        !pilotConfirmed ||
-        (!retry && !chosenModel?.available)
-      )
-        return;
+        : question.trim() ||
+          (uploadItems.current.length || sourceIds.length
+            ? 'Đọc và tóm tắt nội dung các tệp đã chọn, nêu rõ phần chưa đọc được.'
+            : '');
+      if (!text || (!retry && !chosenModel?.available)) return;
       if (requestKey.current && !retry) return;
+      if (!retry) {
+        await Promise.all(uploadJobs.current.values());
+        if (controller.current?.signal.aborted) return;
+        if (uploadItems.current.some((item) => item.status !== 'Sẵn sàng')) {
+          setError('Tệp chưa đọc được. Thử lại hoặc bỏ tệp trước khi gửi.');
+          return;
+        }
+      }
       if (!requestKey.current)
         requestKey.current = {
           conversationKey: createCommandKey(),
@@ -902,21 +995,20 @@ export function ProjectAi({
           question: text,
           scope,
           model,
-          mode,
           reasoning,
-          dataClassification: 'SYNTHETIC_PUBLIC_APPROVED',
-          sourceIds: [...sourceIds],
+          sourceIds: [
+            ...new Set([
+              ...sourceIds,
+              ...uploadItems.current.flatMap((item) =>
+                item.id ? [item.id] : [],
+              ),
+            ]),
+          ],
           context,
           conversationId: selectedRef.current || undefined,
         };
       const key = requestKey.current;
-      if (!key.conversationId)
-        key.conversationId = (
-          await call<Conversation>('/conversations', {
-            clientKey: key.conversationKey,
-            scope: key.scope,
-          })
-        ).id;
+      if (!key.conversationId) key.conversationId = await ensureConversation();
       if (controller.current?.signal.aborted) return;
       selectedRef.current = key.conversationId;
       setSelected(key.conversationId);
@@ -927,9 +1019,7 @@ export function ProjectAi({
           clientKey: key.clientKey,
           question: key.question,
           model: key.model,
-          mode: key.mode,
           reasoning: key.reasoning,
-          dataClassification: key.dataClassification,
           sourceIds: key.sourceIds,
           ...key.context,
         },
@@ -939,10 +1029,14 @@ export function ProjectAi({
       setRetryPin(undefined);
       await refresh();
       const result = await run(answer.id);
-      if (result.status === 'COMPLETED')
+      if (result.status === 'COMPLETED') {
         setQuestion((current) =>
           current.trim() === key.question ? '' : current,
         );
+        uploadItems.current = [];
+        setUploads([]);
+        setSourceIds([]);
+      }
     });
   const openSource = async (answerId: string, item: Source) => {
     const id = selectedRef.current;
@@ -971,7 +1065,7 @@ export function ProjectAi({
   };
   const updateSources = () => {
     void act(async () => {
-      const chosen = history?.scope ?? scope;
+      const chosen = 'ALL';
       const result = await call<{
         hasMore: boolean;
         sources: {
@@ -1027,13 +1121,6 @@ export function ProjectAi({
           <span className="eyebrow">Galaxy AI · Riêng tư</span>
           <h2 className="mt-1 font-semibold">Galaxy AI</h2>
           {projectName && <p className="ai-project-name">{projectName}</p>}
-          <p className="chat-metadata ai-connection" role="status">
-            {chosenModel
-              ? modelStatusLabel(chosenModel)
-              : provider === 'LOADING'
-                ? 'Đang kiểm tra model…'
-                : 'Chọn model khả dụng; cấu hình cần được kiểm chứng'}
-          </p>
         </div>
         <div className="flex gap-1">
           <button
@@ -1113,44 +1200,6 @@ export function ProjectAi({
         {!verified && loadError && <p role="alert">{loadError}</p>}
         <div className="ai-session-content" hidden={!verified}>
           <div className="ai-context-bar">
-            <label>
-              Chế độ hỏi{' '}
-              <select
-                aria-label="Chế độ hỏi AI"
-                value={mode}
-                disabled={busy || Boolean(retryPin)}
-                onChange={(event) => {
-                  const next = event.target.value as 'GENERAL' | 'PROJECT';
-                  if (next === mode) return;
-                  const draft = question;
-                  select('');
-                  setMode(next);
-                  if (next === 'GENERAL') {
-                    const router = models.find(
-                      (item) =>
-                        item.id === 'openrouter/free' && item.generalAvailable,
-                    );
-                    if (router) {
-                      setModel(router.id);
-                      setReasoning('default');
-                    }
-                  }
-                  setQuestion(draft);
-                  setError(
-                    'Đã mở ngữ cảnh sạch cho chế độ mới; hội thoại cũ vẫn trong lịch sử.',
-                  );
-                }}
-              >
-                <option value="PROJECT">Hỏi theo nguồn dự án</option>
-                <option value="GENERAL">Hỏi thông thường</option>
-              </select>
-            </label>
-            {mode === 'GENERAL' && (
-              <p role="status">
-                Không sử dụng hồ sơ dự án. Cần thông tin dự án: chọn Hỏi theo
-                nguồn dự án.
-              </p>
-            )}
             <p className="ai-privacy">
               {group === 'ALL' && !initialContext
                 ? 'Toàn dự án — theo quyền của bạn'
@@ -1176,32 +1225,33 @@ export function ProjectAi({
                   }
                 }}
               />
-              {chosenModel && (
-                <label>
-                  Mức suy luận{' '}
-                  <select
-                    aria-label="Mức suy luận"
-                    value={reasoning}
-                    onChange={(e) => setReasoning(e.target.value)}
-                  >
-                    {chosenModel.capabilities.reasoningModes.map((value) => (
-                      <option key={value} value={value}>
-                        {
-                          (
-                            {
-                              default: 'Mặc định nhà cung cấp',
-                              none: 'Tối thiểu',
-                              low: 'Thấp',
-                              medium: 'Trung bình',
-                              high: 'Cao',
-                            } as Record<string, string>
-                          )[value]
-                        }
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
+              {chosenModel &&
+                chosenModel.capabilities.reasoningModes.length > 1 && (
+                  <label>
+                    Mức suy luận{' '}
+                    <select
+                      aria-label="Mức suy luận"
+                      value={reasoning}
+                      onChange={(e) => setReasoning(e.target.value)}
+                    >
+                      {chosenModel.capabilities.reasoningModes.map((value) => (
+                        <option key={value} value={value}>
+                          {
+                            (
+                              {
+                                default: 'Mặc định nhà cung cấp',
+                                none: 'Tối thiểu',
+                                low: 'Thấp',
+                                medium: 'Trung bình',
+                                high: 'Cao',
+                              } as Record<string, string>
+                            )[value]
+                          }
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
             </div>
           </div>
           <div
@@ -1215,201 +1265,6 @@ export function ProjectAi({
               if (nearEnd) setNewMessages(false);
             }}
           >
-            {choices.length > 0 && !choices.some((item) => item.available) && (
-              <details>
-                <summary>Model chưa sẵn sàng</summary>
-                <ul>
-                  {choices.map((item) => (
-                    <li key={item.id}>
-                      {item.label}: {modelStatusLabel(item)}
-                    </li>
-                  ))}
-                </ul>
-                <p>
-                  {canConfigure
-                    ? 'Mở cấu hình bên dưới để kiểm tra kết nối.'
-                    : 'Liên hệ quản trị dự án để kiểm tra kết nối và quyền gửi nguồn.'}
-                </p>
-              </details>
-            )}
-            {canConfigure && (
-              <details
-                onToggle={(event) => {
-                  if (!event.currentTarget.open) setSettings(undefined);
-                  else
-                    void call<{
-                      models: ModelChoice[];
-                      connections?: { llama_cloud?: DocumentConnection };
-                    }>('/settings')
-                      .then((result) => {
-                        setSettings(result.models);
-                        setConnections(result.connections ?? {});
-                      })
-                      .catch((cause) => {
-                        setSettings(undefined);
-                        setError(
-                          aiStatusLabel(
-                            (cause as Error).message,
-                            (cause as Error).message,
-                          ),
-                        );
-                      });
-                }}
-              >
-                <summary>Cấu hình nhà cung cấp và hạn mức</summary>
-                <p>
-                  Khóa được API đọc từ env riêng; terminal là tiện ích tùy chọn.
-                  Chỉ hồ sơ và phiên bản nguồn giả/công khai được quản trị duyệt
-                  mới được gửi.
-                </p>
-                {connections.llama_cloud && (
-                  <p>
-                    LlamaCloud · kết nối tài liệu/tri thức ·{' '}
-                    {connections.llama_cloud.credentialConfigured
-                      ? 'Đã cấu hình khóa'
-                      : 'Chưa cấu hình khóa'}{' '}
-                    · Chưa kiểm chứng kết nối; chưa xử lý tài liệu.
-                  </p>
-                )}
-                {settings?.map((item) => (
-                  <div
-                    key={item.id}
-                    className="my-3 rounded border p-3 text-xs"
-                  >
-                    <strong>{item.label}</strong> · {item.host}
-                    <p>
-                      {modelStatusLabel(item)} · revision{' '}
-                      {item.revision ?? 'chưa có'}
-                    </p>
-                    {item.credentialPresent && (
-                      <p>
-                        Đã thấy giá trị khóa trong file; quyền model cần kiểm
-                        thử riêng.
-                      </p>
-                    )}
-                    <p>
-                      {item.textLiveVerified
-                        ? 'Văn bản đã kiểm chứng live'
-                        : 'Văn bản chưa kiểm chứng live'}{' '}
-                      · {item.limits.concurrent} lượt đồng thời ·{' '}
-                      {item.limits.requestsPerDay === null
-                        ? 'Không giới hạn lượt/ngày ở ứng dụng'
-                        : `${item.limits.requestsPerDay} lượt/ngày`}
-                    </p>
-                    <p>
-                      {item.sourcePolicy === 'DENIED'
-                        ? 'Project chưa được duyệt gửi dữ liệu ra nhà cung cấp.'
-                        : 'Project được duyệt; từng source/version vẫn được kiểm tra riêng.'}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {(['APPROVE', 'REVOKE'] as const).map((action) => (
-                        <button
-                          type="button"
-                          key={action}
-                          disabled={
-                            busy ||
-                            (action === 'APPROVE' && !item.providerReady)
-                          }
-                          onClick={() =>
-                            void act(async () => {
-                              if (
-                                !window.confirm(
-                                  action === 'APPROVE'
-                                    ? `Duyệt phạm vi Project chỉ gồm dữ liệu giả/công khai được phép cho ${item.label}? Từng nguồn và nội dung nhập vẫn phải duyệt riêng. Không duyệt dữ liệu mật/cá nhân khi tier chưa được xác minh.`
-                                    : `Thu hồi quyền gửi Project tới ${item.label}? Dữ liệu đã gửi trước đó không thể thu hồi từ vendor bằng thao tác này.`,
-                                )
-                              )
-                                return;
-                              await call('/settings/egress', {
-                                model: item.id,
-                                kind: 'PROJECT',
-                                action,
-                                confirmed: true,
-                              });
-                            })
-                          }
-                        >
-                          {action === 'APPROVE'
-                            ? 'Duyệt phạm vi Project'
-                            : 'Thu hồi Project'}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="my-2">
-                      Kiểm thử quản trị chỉ gửi nguồn tổng hợp cố định: văn bản
-                      tối đa 3 câu; ảnh/PDF 1 câu. Không đọc hồ sơ dự án.
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {(
-                        [
-                          'text',
-                          ...(item.capabilities.nativeMediaImplemented
-                            ? ['image', 'pdf']
-                            : []),
-                        ] as ('text' | 'image' | 'pdf')[]
-                      ).map((capability) => (
-                        <button
-                          key={capability}
-                          disabled={busy || !item.providerReady}
-                          onClick={() =>
-                            void act(async () => {
-                              const name = `${item.id}/${capability}`;
-                              let clientKey = activationKeys.current.get(name);
-                              if (!clientKey) {
-                                clientKey = createCommandKey();
-                                activationKeys.current.set(name, clientKey);
-                              }
-                              const result = await call<
-                                NonNullable<typeof activation>
-                              >('/settings/test', {
-                                model: item.id,
-                                capability,
-                                clientKey,
-                              });
-                              setActivation(result);
-                              if (
-                                [
-                                  'COMPLETED',
-                                  'FAILED',
-                                  'FAILED_UNKNOWN',
-                                ].includes(result.status)
-                              )
-                                activationKeys.current.delete(name);
-                              const latest = await call<{
-                                models: ModelChoice[];
-                              }>('/settings');
-                              setSettings(latest.models);
-                              setModels(latest.models);
-                            })
-                          }
-                        >
-                          Kiểm thử{' '}
-                          {capability === 'text'
-                            ? 'văn bản'
-                            : capability === 'image'
-                              ? 'ảnh'
-                              : 'PDF'}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                {activation && (
-                  <p role="status" className="text-xs">
-                    Lượt {activation.requestId} ·{' '}
-                    {activation.evidence?.result === 'PASS'
-                      ? 'Đạt kiểm thử nguồn tổng hợp'
-                      : aiStatusLabel(
-                          activation.errorCode ?? activation.status,
-                        )}{' '}
-                    · {activation.evidence?.requestedModel} · model trả về:{' '}
-                    {activation.evidence?.returnedModel ??
-                      'vendor không cung cấp metadata'}{' '}
-                    · revision {activation.evidence?.revision ?? 'chưa có'}
-                  </p>
-                )}
-              </details>
-            )}
             {error && <p role="alert">{error}</p>}
             {loadError && <p role="alert">{loadError}</p>}
             <div className="flex flex-wrap gap-3">
@@ -1518,15 +1373,16 @@ export function ProjectAi({
                 <ul>
                   {index.sources.map((item) => (
                     <li key={item.id}>
-                      {item.nativeFile && (
+                      {(item.status === 'READY' || item.nativeFile) && (
                         <input
                           type="checkbox"
-                          aria-label={`Gửi native ${item.label}`}
+                          aria-label={`Chọn ${item.label}`}
                           disabled={
                             busy ||
-                            !(item.label.toLowerCase().endsWith('.pdf')
-                              ? chosenModel?.capabilities.pdfInput
-                              : chosenModel?.capabilities.imageInput)
+                            (item.status !== 'READY' &&
+                              !(item.label.toLowerCase().endsWith('.pdf')
+                                ? chosenModel?.capabilities.pdfInput
+                                : chosenModel?.capabilities.imageInput))
                           }
                           checked={sourceIds.includes(item.id)}
                           onChange={(e) =>
@@ -1539,46 +1395,6 @@ export function ProjectAi({
                         />
                       )}
                       {item.label}: {aiStatusLabel(item.status)}
-                      {canConfigure && item.version && (
-                        <span>
-                          {(['APPROVE', 'REVOKE'] as const).map((action) => (
-                            <button
-                              type="button"
-                              key={action}
-                              disabled={
-                                busy ||
-                                !model ||
-                                (action === 'APPROVE' &&
-                                  !chosenModel?.providerReady)
-                              }
-                              onClick={() =>
-                                void act(async () => {
-                                  if (
-                                    !window.confirm(
-                                      action === 'APPROVE'
-                                        ? `Xác nhận phiên bản này là dữ liệu giả/công khai được phép gửi tới ${chosenModel?.label}?`
-                                        : 'Thu hồi quyền gửi phiên bản này? Không xóa nguồn hoặc hội thoại.',
-                                    )
-                                  )
-                                    return;
-                                  await call('/settings/egress', {
-                                    model,
-                                    kind: 'SOURCE',
-                                    action,
-                                    sourceId: item.id,
-                                    version: item.version,
-                                    confirmed: true,
-                                  });
-                                })
-                              }
-                            >
-                              {action === 'APPROVE'
-                                ? 'Duyệt phiên bản'
-                                : 'Thu hồi phiên bản'}
-                            </button>
-                          ))}
-                        </span>
-                      )}
                       {item.nativeFile
                         ? ' · Có thể chọn gửi native khi capability đã được bật; tối đa 3 file, PDF ngắn tối đa 10 trang/file.'
                         : ''}
@@ -1644,11 +1460,7 @@ export function ProjectAi({
                   · mức {retryPin.reasoning} · {retryPin.sourceIds.length} file.
                   Thử lại giữ nguyên câu hỏi, model và nguồn đã chốt.
                 </p>
-                <button
-                  type="button"
-                  disabled={!pilotConfirmed}
-                  onClick={() => void ask(true)}
-                >
+                <button type="button" onClick={() => void ask(true)}>
                   Thử lại lượt đã chốt
                 </button>
                 <button
@@ -1695,60 +1507,51 @@ export function ProjectAi({
                 onChange={setQuestion}
               />
             </label>
-            {canConfigure && (
-              <div className="flex flex-wrap gap-2">
-                {(['APPROVE', 'REVOKE'] as const).map((action) => (
-                  <button
-                    type="button"
-                    key={action}
-                    disabled={
-                      busy ||
-                      !question.trim() ||
-                      !model ||
-                      (action === 'APPROVE' &&
-                        (!chosenModel?.providerReady || !pilotConfirmed))
-                    }
-                    onClick={() =>
-                      void act(async () => {
-                        if (
-                          !window.confirm(
-                            action === 'APPROVE'
-                              ? `Phê duyệt đúng nội dung đang nhập là dữ liệu giả/công khai, gửi tới ${chosenModel?.label}? Áp dụng cho người có quyền AI trong Project; không duyệt file hay lịch sử khác.`
-                              : 'Thu hồi phê duyệt nội dung đang nhập đối với model này?',
-                          )
-                        )
-                          return;
-                        await call('/settings/egress', {
-                          model,
-                          kind: 'INPUT',
-                          action,
-                          question: question.trim(),
-                          confirmed: true,
-                        });
-                        setError(
-                          action === 'APPROVE'
-                            ? 'Đã phê duyệt nội dung này; bấm Hỏi AI để gửi.'
-                            : 'Đã thu hồi phê duyệt nội dung.',
+            <input
+              ref={fileInput}
+              type="file"
+              aria-label="Tải tệp từ máy"
+              accept=".txt,.md,.pdf,.png,.jpg,.jpeg,.xlsx"
+              multiple
+              hidden
+              onChange={(event) => {
+                chooseFiles(event.target.files);
+                event.target.value = '';
+              }}
+            />
+            {uploads.length > 0 && (
+              <ul className="ai-file-chips">
+                {uploads.map((item) => (
+                  <li key={item.key}>
+                    {item.file.name} · {Math.ceil(item.file.size / 1024)} KB ·{' '}
+                    {item.status}
+                    {item.error && <span role="alert"> · {item.error}</span>}
+                    {item.status === 'Lỗi' && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void uploadFile(item)}
+                      >
+                        Thử lại tệp
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      aria-label={`Bỏ ${item.file.name}`}
+                      disabled={busy}
+                      onClick={() => {
+                        uploadItems.current = uploadItems.current.filter(
+                          (entry) => entry !== item,
                         );
-                      })
-                    }
-                  >
-                    {action === 'APPROVE'
-                      ? 'Phê duyệt nội dung nhập'
-                      : 'Thu hồi nội dung nhập'}
-                  </button>
+                        setUploads([...uploadItems.current]);
+                      }}
+                    >
+                      ×
+                    </button>
+                  </li>
                 ))}
-              </div>
+              </ul>
             )}
-            <label className="ai-policy-confirm">
-              <input
-                type="checkbox"
-                checked={pilotConfirmed}
-                onChange={(e) => setPilotConfirmed(e.target.checked)}
-              />{' '}
-              Câu hỏi chỉ chứa dữ liệu giả hoặc công khai được phép; không có dữ
-              liệu mật/cá nhân.
-            </label>
             {sourceIds.length > 0 && (
               <ul className="ai-file-chips">
                 {sourceIds.map((id) => (
@@ -1772,14 +1575,39 @@ export function ProjectAi({
               </ul>
             )}
             <div className="ai-composer-actions">
-              <button
-                type="button"
-                disabled={busy || mode === 'GENERAL'}
-                onClick={updateSources}
-                title="Chọn nguồn đã có trong phạm vi được cấp"
-              >
-                Đính kèm nguồn
-              </button>
+              <div>
+                <button
+                  type="button"
+                  aria-label="Đính kèm tệp"
+                  aria-expanded={attachmentMenu}
+                  disabled={busy}
+                  onClick={() => setAttachmentMenu((value) => !value)}
+                >
+                  ＋
+                </button>
+                {attachmentMenu && (
+                  <div role="group" aria-label="Chọn cách đính kèm">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAttachmentMenu(false);
+                        fileInput.current?.click();
+                      }}
+                    >
+                      Tải tệp từ máy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAttachmentMenu(false);
+                        updateSources();
+                      }}
+                    >
+                      Chọn trong hồ sơ dự án
+                    </button>
+                  </div>
+                )}
+              </div>
               <span className="chat-metadata">
                 {chosenModel?.label ?? 'Chưa chọn model'} · Shift+Enter xuống
                 dòng
@@ -1790,12 +1618,11 @@ export function ProjectAi({
                 disabled={
                   busy ||
                   Boolean(retryPin) ||
-                  !question.trim() ||
-                  !chosenModel?.available ||
-                  !pilotConfirmed
+                  (!question.trim() && !uploads.length && !sourceIds.length) ||
+                  !chosenModel?.available
                 }
               >
-                {busy ? 'Đang tìm nguồn / xử lý…' : 'Hỏi AI'}
+                {busy ? 'Đang xử lý…' : 'Gửi'}
               </button>
               {history?.answers.some((answer) =>
                 pending.includes(answer.status),

@@ -255,7 +255,11 @@ export async function findProjectFiles(
       organizationId: actor.organizationId,
       deletedAt: null,
       attachments: { some: { projectId } },
-      NOT: { attachments: { some: { entityType: 'ChatRoom' } } },
+      NOT: {
+        attachments: {
+          some: { entityType: { in: ['ChatRoom', 'ChatAiConversation'] } },
+        },
+      },
     },
     select: projectFileMetadata,
   });
@@ -285,7 +289,11 @@ export async function findProjectFile(
       organizationId: actor.organizationId,
       deletedAt: null,
       attachments: { some: { projectId } },
-      NOT: { attachments: { some: { entityType: 'ChatRoom' } } },
+      NOT: {
+        attachments: {
+          some: { entityType: { in: ['ChatRoom', 'ChatAiConversation'] } },
+        },
+      },
     },
     select: projectFileMetadata,
   });

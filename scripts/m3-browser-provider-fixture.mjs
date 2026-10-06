@@ -11,12 +11,26 @@ const endpoints = new Set([
   'https://generativelanguage.googleapis.com/v1beta/interactions',
   'https://api.mistral.ai/v1/chat/completions',
   'https://kiraai.vn/api/v1/chat/completions',
+  'https://openrouter.ai/api/v1/chat/completions',
 ]);
 const localFetch = globalThis.fetch;
 globalThis.fetch = async (input, options) => {
   const url = new URL(
     typeof input === 'string' || input instanceof URL ? input : input.url,
   );
+  if (url.href === 'https://openrouter.ai/api/v1/models')
+    return Response.json({
+      data: [
+        {
+          id: 'openrouter/free',
+          architecture: {
+            input_modalities: ['text', 'image'],
+            output_modalities: ['text'],
+          },
+          pricing: { prompt: '0', completion: '0', request: '0' },
+        },
+      ],
+    });
   if (!endpoints.has(url.href)) {
     assert.ok(
       ['127.0.0.1', 'localhost'].includes(url.hostname),
@@ -32,9 +46,19 @@ globalThis.fetch = async (input, options) => {
   );
   const body = JSON.parse(String(options?.body));
   const data = JSON.parse(
-    body.input ? body.input[0].text : body.messages[1].content,
+    body.input ? body.input[0].text : body.messages.at(-1).content,
   );
-  assert.ok(data.sources.length > 0);
+  if (!data.sources?.length)
+    return Response.json({
+      model: 'fixture/free:free',
+      choices: [
+        {
+          finish_reason: 'stop',
+          message: { content: 'Lời chúc từ provider fixture.' },
+        },
+      ],
+      usage: { prompt_tokens: 10, completion_tokens: 10, cost: 0 },
+    });
   const text = JSON.stringify({
     answer: `Mô phỏng kiểm thử M3. Nguồn được cấp: ${data.sources[0].text}`,
     uncertainty:
@@ -53,6 +77,7 @@ globalThis.fetch = async (input, options) => {
           }
         : {
             model: body.model,
+            usage: { prompt_tokens: 20, completion_tokens: 20, cost: 0 },
             choices: [{ finish_reason: 'stop', message: { content: text } }],
           },
     ),

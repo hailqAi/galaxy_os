@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 export type TextSource = {
   organizationId: string;
   projectId: string;
-  roomId: string;
+  roomId: string | null;
   sourceId: string;
   version: string;
   text: string;
@@ -24,7 +24,10 @@ export function extractText(name: string, mime: string, bytes: Uint8Array) {
     )
   )
     return { status: 'FORBIDDEN' as const };
-  if (mime !== 'text/plain' || !/\.txt$/i.test(name))
+  if (
+    !['text/plain', 'text/markdown'].includes(mime) ||
+    !/\.(txt|md)$/i.test(name)
+  )
     return { status: 'UNSUPPORTED' as const };
   if (bytes.byteLength > 262_144) return { status: 'TOO_LARGE' as const };
   try {
@@ -122,7 +125,7 @@ export function retrieve(
   scope: {
     organizationId: string;
     projectId: string;
-    roomIds: string[];
+    roomIds: (string | null)[];
   },
 ): SourceChunk[] {
   const query = sourceTokens(question);

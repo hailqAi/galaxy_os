@@ -126,12 +126,57 @@ it('sends text with FREE_ONLY/privacy locks and preserves actual model, gateway,
   });
   expect(JSON.stringify(result)).not.toContain('DO_NOT_DISPLAY');
 });
-it('denies sources and non-router model overrides before transport', async () => {
+it('gửi nguồn Project và kiểm citation, giữ FREE_ONLY/privacy', async () => {
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    if (url.endsWith('/models')) return new Response(JSON.stringify(catalogue));
+    const body = JSON.parse(String(init.body));
+    expect(JSON.stringify(body.messages)).toContain('MATERIAL-A-682');
+    expect(body.provider).toEqual({
+      max_price: { prompt: 0, completion: 0, request: 0 },
+      data_collection: 'deny',
+      require_parameters: true,
+    });
+    expect(body.response_format).toMatchObject({
+      type: 'json_schema',
+      json_schema: {
+        name: 'project_answer',
+        strict: true,
+        schema: {
+          required: ['answer', 'citations', 'uncertainty'],
+          properties: {
+            answer: { minLength: 1, maxLength: 16000 },
+            citations: { minItems: 1, maxItems: 12, items: { enum: ['S1'] } },
+            uncertainty: { maxLength: 4000 },
+          },
+        },
+      },
+    });
+    return new Response(
+      JSON.stringify({
+        ...output,
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: {
+              content: JSON.stringify({
+                answer: 'MATERIAL-A-682',
+                citations: ['S1'],
+                uncertainty: '',
+              }),
+            },
+          },
+        ],
+      }),
+    );
+  });
+  expect(await ask([{ handle: 'S1', text: 'MATERIAL-A-682' }])).toMatchObject({
+    answer: 'MATERIAL-A-682',
+    citations: ['S1'],
+  });
+});
+it('denies non-router model overrides before transport', async () => {
   const transport = vi.fn();
   vi.stubGlobal('fetch', transport);
-  await expect(ask([{ handle: 'S1', text: 'Project data' }])).rejects.toThrow(
-    'GENERAL_ONLY',
-  );
   for (const model of [
     'openrouter/auto',
     'paid/model',
@@ -147,6 +192,55 @@ it('denies sources and non-router model overrides before transport', async () =>
     ).rejects.toThrow('INVALID_CONFIG');
   }
   expect(transport).not.toHaveBeenCalled();
+});
+it('ánh xạ PNG bytes thành image_url data URI, không bật plugin/PDF/paid', async () => {
+  const bytes = Buffer.from('png-fixture');
+  vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+    if (url.endsWith('/models'))
+      return new Response(
+        JSON.stringify({
+          data: [
+            {
+              ...catalogue.data[0],
+              architecture: {
+                input_modalities: ['text', 'image'],
+                output_modalities: ['text'],
+              },
+            },
+          ],
+        }),
+      );
+    const body = JSON.parse(String(init.body));
+    expect(body.messages.at(-1).content).toContainEqual({
+      type: 'image_url',
+      image_url: { url: `data:image/png;base64,${bytes.toString('base64')}` },
+    });
+    expect(body).not.toHaveProperty('plugins');
+    return new Response(
+      JSON.stringify({
+        ...output,
+        choices: [
+          {
+            finish_reason: 'stop',
+            message: {
+              content: JSON.stringify({
+                answer: 'Ảnh màu xanh.',
+                citations: ['S1'],
+                uncertainty: '',
+              }),
+            },
+          },
+        ],
+      }),
+    );
+  });
+  expect(
+    (
+      await ask([{ handle: 'S1', text: 'Ảnh người dùng' }], {
+        media: [{ handle: 'S1', mime: 'image/png', bytes }],
+      })
+    ).citations,
+  ).toEqual(['S1']);
 });
 it('fails closed on paid or missing text catalogue, then rechecks expired catalogue before a retry', async () => {
   vi.useFakeTimers();

@@ -1,9 +1,94 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { extname } from 'node:path';
+import { dirname, extname, join } from 'node:path';
 import { AiError } from './ai-registry';
 import { chunks, extractText, SourceChunk, TextSource } from './ai-source';
 import { validUploadHeader } from '../uploads/uploads.service';
+import ExcelJS from 'exceljs';
+import { assertBoundedWorkbook } from '../imports/imports.service';
+
+export const xlsxMime =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+export async function documentText(
+  source: TextSource,
+  name: string,
+  mime: string,
+  bytes: Buffer,
+  checksum: string,
+): Promise<{
+  status: string;
+  text?: string;
+  chunks?: SourceChunk[];
+  errorCode?: string;
+}> {
+  if (createHash('sha256').update(bytes).digest('hex') !== checksum)
+    throw new AiError('SOURCE_UNAVAILABLE');
+  if (mime === xlsxMime) {
+    if (
+      !/\.xlsx$/i.test(name) ||
+      bytes.length > 5_000_000 ||
+      !assertBoundedWorkbook(bytes)
+    )
+      throw new AiError('UNSUPPORTED_FILE');
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(bytes as never);
+    const lines: string[] = [];
+    let size = 0;
+    for (const sheet of workbook.worksheets)
+      sheet.eachRow((row) =>
+        row.eachCell((cell) => {
+          const formula = cell.type === ExcelJS.ValueType.Formula;
+          const line = `${sheet.name}!${cell.address}: ${cell.text}${formula ? ' [giá trị công thức lưu sẵn; không tính lại]' : ''}`;
+          size += Buffer.byteLength(line) + 1;
+          if (size > 262_144) throw new AiError('INPUT_TOO_LARGE');
+          lines.push(line);
+        }),
+      );
+    return { status: 'READY', text: lines.join('\n') };
+  }
+  if (mime !== 'application/pdf') return extractText(name, mime, bytes);
+  await nativeSource(source, name, mime, bytes, checksum);
+  const text = await new Promise<string>((resolve, reject) => {
+    const child = execFile(
+      join(
+        dirname(process.env.GALAXY_AI_PDFINFO ?? '/usr/bin/pdfinfo'),
+        'pdftotext',
+      ),
+      ['-layout', '-enc', 'UTF-8', '-', '-'],
+      {
+        timeout: 5000,
+        maxBuffer: 262144,
+        env: {
+          PATH: process.env.PATH,
+          LANG: 'C',
+          ...(process.env.GALAXY_AI_PDF_LIBRARY_PATH
+            ? { LD_LIBRARY_PATH: process.env.GALAXY_AI_PDF_LIBRARY_PATH }
+            : {}),
+        },
+      },
+      (error, output) =>
+        error ? reject(new AiError('PDF_TEXT_UNAVAILABLE')) : resolve(output),
+    );
+    child.stdin?.on('error', () => {});
+    child.stdin?.end(bytes);
+  });
+  if (!text.trim())
+    return { status: 'UNSUPPORTED', errorCode: 'PDF_SCAN_UNSUPPORTED' };
+  const indexed = text.split('\f').flatMap((page, offset) =>
+    chunks({ ...source, text: page }).map((chunk) => ({
+      ...chunk,
+      page: offset + 1,
+      handle:
+        'S_' +
+        createHash('sha256')
+          .update(`${chunk.handle}:page:${offset + 1}`)
+          .digest('hex')
+          .slice(0, 24),
+    })),
+  );
+  return { status: 'READY', text, chunks: indexed };
+}
 
 export async function nativeSource(
   source: TextSource,

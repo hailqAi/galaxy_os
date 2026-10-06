@@ -1,7 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { AI_MODELS } from '../../../api/src/project-chat/ai-registry';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { test } from './m2-chrome-fixture';
 import {
   createM2BrowserFixture,
@@ -47,6 +46,19 @@ test.beforeAll(async () => {
   await db.rolePermission.create({
     data: { roleId: role.roleId, permissionId: permission.id },
   });
+  const senderRole = await db.userRole.findFirstOrThrow({
+    where: { userId: fixture.users.sender!.id },
+  });
+  await db.rolePermission.upsert({
+    where: {
+      roleId_permissionId: {
+        roleId: senderRole.roleId,
+        permissionId: permission.id,
+      },
+    },
+    create: { roleId: senderRole.roleId, permissionId: permission.id },
+    update: {},
+  });
   await post(`/projects/${fixture.projectId}/authorities`, {
     userId: fixture.users.sender!.id,
     actions: ['INVOKE'],
@@ -60,56 +72,36 @@ test.beforeAll(async () => {
     },
     'sender',
   );
-  await approveSyntheticSources();
+  await configureProjectPolicy();
 });
-async function approveSyntheticSources() {
-  await post(
-    `/projects/${fixture.projectId}/ai/index`,
-    { scope: 'ALL' },
-    'sender',
-  );
-  const sources = await db.chatAiSourceIndex.findMany({
-    where: { projectId: fixture.projectId },
+async function configureProjectPolicy() {
+  const project = await db.project.findUniqueOrThrow({
+    where: { id: fixture.projectId },
   });
-  const providers = Object.fromEntries(
-    AI_MODELS.map((m) => [
-      m.provider,
-      {
-        revision: 'browser-r1',
-        dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
-        [m.keyName]: 'm3-browser-synthetic-only',
-        enabled: true,
-        replacementConfirmed: true,
-        approvedProjects: [
-          {
-            organizationId: sources[0]!.organizationId,
-            projectId: fixture.projectId,
-          },
-        ],
-        approvedSources: sources.map((s) => ({ id: s.id, version: s.version })),
-        approvedInputs: [
-          'GH-M3-42 kích thước?',
-          'GH-M3-42 tiếp theo?',
-          'GH-M3-42 retry A?',
-          'GH-M3-42 nguồn đã trao đổi?',
-          'SLOW-M3-42 nội dung?',
-          'SLOW-M3-42 thông tin?',
-          'T2 chuyển presentation giữ nguồn SLOW-M3-42?',
-          'T3 câu tiếp theo cùng nguồn?',
-          'ISOLATION-M3-200 kích thước?',
-          'ISOLATION-M3-403 kích thước?',
-        ].map((question) => ({
-          organizationId: sources[0]!.organizationId,
-          projectId: fixture.projectId,
-          ownerId: fixture.users.sender!.id,
-          questionHash: createHash('sha256').update(question).digest('hex'),
-        })),
-      },
-    ]),
-  );
+  const envPath = process.env.G00_TEST_ROOT + '/browser-policy-keys.env';
+  writeFileSync(envPath, 'OPENROUTER_API_KEY="m3-browser-synthetic-only"\n', {
+    mode: 0o600,
+  });
   writeFileSync(
     process.env.G00_TEST_ROOT + '/browser-ai.json',
-    JSON.stringify({ providers }),
+    JSON.stringify({
+      credentialSource: { mode: 'env', path: envPath },
+      providers: {
+        openrouter: {
+          revision: 'browser-r1',
+          enabled: true,
+          replacementConfirmed: true,
+          costMode: 'FREE_ONLY',
+          dataPolicy: 'PROJECT_AUTHORIZED',
+          projectPolicy: {
+            organizationId: project.organizationId,
+            revision: 'owner-20261006',
+            decisionReference: 'Kiểm thử chính sách thống nhất đã duyệt',
+            approvedAt: '2026-10-06T00:00:00Z',
+          },
+        },
+      },
+    }),
     { mode: 0o600 },
   );
 }
@@ -133,39 +125,22 @@ async function login(page: Page) {
   await page.goto(`/projects/${fixture.projectId}/work`);
 }
 
-test('open admin settings follows a later registry revision', async ({
+test('composer không còn control pilot hoặc cấu hình nhà cung cấp', async ({
   page,
 }) => {
-  await post(`/projects/${fixture.projectId}/authorities`, {
-    userId: fixture.users.sender!.id,
-    actions: ['ACCESS_ADMIN'],
-    roomCeiling: [],
-  });
-  let updated = false;
-  await page.route(
-    new RegExp(`/api/v1/project-chat/projects/${fixture.projectId}/ai$`),
-    async (route) => {
-      const response = await route.fetch();
-      const body = await response.json();
-      if (updated)
-        body.models = body.models.map((model: { revision: string }) => ({
-          ...model,
-          revision: 'browser-r2',
-        }));
-      await route.fulfill({ response, json: body });
-    },
-  );
   await login(page);
   const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
-  const settings = panel.locator('details').filter({
-    hasText: 'Cấu hình nhà cung cấp và hạn mức',
-  });
-  await settings.locator('summary').click();
-  await expect(settings.getByText(/revision browser-r1/).first()).toBeVisible();
-  updated = true;
-  await expect(settings.getByText(/revision browser-r2/).first()).toBeVisible({
-    timeout: 8000,
-  });
+  await expect(panel).toBeVisible();
+  for (const label of [
+    'Chế độ hỏi',
+    'Cấu hình nhà cung cấp và hạn mức',
+    'Phê duyệt nội dung nhập',
+    'Thu hồi nội dung nhập',
+  ])
+    await expect(panel.getByText(label, { exact: true })).toHaveCount(0);
+  await expect(
+    panel.getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ }),
+  ).toHaveCount(0);
 });
 test('private AI uses old sources, persists history and clears revoked derived content (mock provider only)', async ({
   page,
@@ -178,7 +153,6 @@ test('private AI uses old sources, persists history and clears revoked derived c
     new RegExp(`/projects/${fixture.projectId}/work$`),
   );
   const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
-  await panel.getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ }).check();
   await expect(panel).toBeVisible();
   await panel
     .getByLabel('Câu hỏi AI', { exact: true })
@@ -192,7 +166,7 @@ test('private AI uses old sources, persists history and clears revoked derived c
     });
     await page.unroute(deniedPattern);
   });
-  await panel.getByRole('button', { name: 'Hỏi AI', exact: true }).click();
+  await panel.getByRole('button', { name: 'Gửi', exact: true }).click();
   await expect(
     panel
       .getByRole('alert')
@@ -202,7 +176,7 @@ test('private AI uses old sources, persists history and clears revoked derived c
   await panel
     .getByRole('button', { name: 'Tạo lượt mới theo lựa chọn hiện tại' })
     .click();
-  await panel.getByRole('button', { name: 'Hỏi AI', exact: true }).dblclick();
+  await panel.getByRole('button', { name: 'Gửi', exact: true }).dblclick();
   await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
   await expect(
     panel.getByText(
@@ -225,17 +199,16 @@ test('private AI uses old sources, persists history and clears revoked derived c
   await page.reload();
   await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
   await expect(page).toHaveURL(/\?ai=[\da-f-]+/);
-  await panel.getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ }).check();
   const conversationId = new URL(page.url()).searchParams.get('ai');
   const sourceCount = await db.chatAiSourceIndex.count({
     where: { projectId: fixture.projectId },
   });
-  for (const model of ['kira-3.5-pro', 'mistral-medium-3-5']) {
+  for (const model of ['openrouter/free', 'openrouter/free']) {
     await panel.getByLabel('Model AI', { exact: true }).selectOption(model);
     await panel
       .getByLabel('Câu hỏi AI', { exact: true })
       .fill('GH-M3-42 tiếp theo?');
-    await panel.getByRole('button', { name: 'Hỏi AI', exact: true }).click();
+    await panel.getByRole('button', { name: 'Gửi', exact: true }).click();
     await expect(panel.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue(
       '',
     );
@@ -253,11 +226,11 @@ test('private AI uses old sources, persists history and clears revoked derived c
         orderBy: { createdAt: 'asc' },
       })
     ).map((a) => a.model),
-  ).toEqual(['gemini-3.8-flash', 'kira-3.5-pro', 'mistral-medium-3-5']);
+  ).toEqual(['openrouter/free', 'openrouter/free', 'openrouter/free']);
   // Lost POST response must retry the pinned model and preserve a different draft.
   await panel
     .getByLabel('Model AI', { exact: true })
-    .selectOption('gemini-3.8-flash');
+    .selectOption('openrouter/free');
   const pattern = /\/ai\/conversations\/[^/]+\/answers$/;
   await page.route(pattern, async (route) => {
     await route.fetch();
@@ -267,13 +240,13 @@ test('private AI uses old sources, persists history and clears revoked derived c
   await panel
     .getByLabel('Câu hỏi AI', { exact: true })
     .fill('GH-M3-42 retry A?');
-  await panel.getByRole('button', { name: 'Hỏi AI', exact: true }).click();
+  await panel.getByRole('button', { name: 'Gửi', exact: true }).click();
   await expect(
     panel.getByRole('button', { name: 'Thử lại lượt đã chốt' }),
   ).toBeVisible();
   await panel
     .getByLabel('Model AI', { exact: true })
-    .selectOption('kira-3.5-pro');
+    .selectOption('openrouter/free');
   await panel.getByLabel('Câu hỏi AI', { exact: true }).fill('Nháp B chưa gửi');
   await panel.getByRole('button', { name: 'Thử lại lượt đã chốt' }).click();
   await expect(
@@ -292,43 +265,39 @@ test('private AI uses old sources, persists history and clears revoked derived c
         },
       })
     ).model,
-  ).toBe('gemini-3.8-flash');
+  ).toBe('openrouter/free');
   const configPath = process.env.G00_TEST_ROOT + '/browser-ai.json';
   const configText = readFileSync(configPath, 'utf8'),
     config = JSON.parse(configText);
-  config.providers.kira.enabled = false;
+  config.providers.openrouter.enabled = false;
   writeFileSync(configPath, JSON.stringify(config));
   await page.reload();
-  await expect(panel.getByLabel('Model AI', { exact: true })).toHaveValue(
-    'kira-3.5-pro',
-  );
   await expect(
-    panel.getByRole('button', { name: 'Hỏi AI', exact: true }),
+    panel
+      .getByLabel('Model AI', { exact: true })
+      .locator('option[value="openrouter/free"]'),
+  ).toHaveCount(0);
+  await expect(
+    panel.getByRole('button', { name: 'Gửi', exact: true }),
   ).toBeDisabled();
   writeFileSync(configPath, configText);
   await panel
     .getByLabel('Model AI', { exact: true })
-    .selectOption('gemini-3.8-flash');
-  await panel.getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ }).check();
+    .selectOption('openrouter/free');
   await panel.getByRole('button', { name: 'Chat AI mới', exact: true }).click();
   await panel.getByLabel('Phạm vi AI', { exact: true }).selectOption('ALL');
   // Scope toàn dự án là phiên riêng trong popup; panel nhóm vẫn giữ đúng scope.
   const projectPopup = page.getByRole('dialog', { name: /Galaxy AI/ });
   await projectPopup
-    .getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ })
-    .check();
-  await projectPopup
     .getByLabel('Câu hỏi AI', { exact: true })
     .fill('GH-M3-42 nguồn đã trao đổi?');
-  await projectPopup
-    .getByRole('button', { name: 'Hỏi AI', exact: true })
-    .click();
+  await projectPopup.getByRole('button', { name: 'Gửi', exact: true }).click();
   await expect(projectPopup.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
   expect(
     await db.chatAiSourceIndex.count({
       where: { projectId: fixture.projectId, status: 'READY' },
     }),
-  ).toBe(1);
+  ).toBe(sourceCount);
   await post(
     `/rooms/${fixture.roomId}/grants/${fixture.senderGrantId}/revoke`,
     {},
@@ -356,14 +325,13 @@ test('slow denied polling removes old-account answers and drafts', async ({
     { clientKey: randomUUID(), body: 'SLOW-M3-42 nội dung riêng mới 900 mm.' },
     'sender',
   );
-  await approveSyntheticSources();
+  await configureProjectPolicy();
   await login(page);
   const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
-  await panel.getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ }).check();
   await panel
     .getByLabel('Câu hỏi AI', { exact: true })
     .fill('SLOW-M3-42 nội dung?');
-  await panel.getByRole('button', { name: 'Hỏi AI', exact: true }).click();
+  await panel.getByRole('button', { name: 'Gửi', exact: true }).click();
   await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
   await panel
     .getByLabel('Câu hỏi AI', { exact: true })
@@ -411,11 +379,10 @@ test('switching between AI-enabled actors discards the old private conversation 
   });
   await login(page);
   const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
-  await panel.getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ }).check();
   await panel
     .getByLabel('Câu hỏi AI', { exact: true })
     .fill('SLOW-M3-42 thông tin?');
-  await panel.getByRole('button', { name: 'Hỏi AI', exact: true }).click();
+  await panel.getByRole('button', { name: 'Gửi', exact: true }).click();
   await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
   await expect(page).toHaveURL(/\?ai=[\da-f-]+/);
   const cookie = fixture.users.viewer!.cookie,
@@ -454,11 +421,10 @@ test('T2 cùng request và hội thoại khi dock, floating, expanded và page',
     await route.fulfill({ response });
   });
   const panel = page.getByRole('region', { name: 'Hỏi AI', exact: true });
-  await panel.getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ }).check();
   await panel
     .getByLabel('Câu hỏi AI', { exact: true })
     .fill('T2 chuyển presentation giữ nguồn SLOW-M3-42?');
-  await panel.getByRole('button', { name: 'Hỏi AI', exact: true }).click();
+  await panel.getByRole('button', { name: 'Gửi', exact: true }).click();
   await expect.poll(() => runs).toBe(1);
   const id = new URL(page.url()).searchParams.get('ai');
   expect(id).toBeTruthy();
@@ -469,7 +435,7 @@ test('T2 cùng request và hội thoại khi dock, floating, expanded và page',
   await panel.getByRole('button', { name: 'Mở rộng AI', exact: true }).click();
   await panel
     .getByLabel('Model AI', { exact: true })
-    .selectOption('kira-3.5-pro');
+    .selectOption('openrouter/free');
   await panel.getByRole('button', { name: 'Thu nhỏ AI' }).click();
   await expect(popup).not.toBeVisible();
   await expect(panel).toHaveCount(1);
@@ -479,13 +445,13 @@ test('T2 cùng request và hội thoại khi dock, floating, expanded và page',
   await expect(panel.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue('');
   await expect(panel.getByText(/^Mô phỏng kiểm thử M3/)).toBeVisible();
   await expect(panel.getByLabel('Model AI', { exact: true })).toHaveValue(
-    'kira-3.5-pro',
+    'openrouter/free',
   );
   const answers = await db.chatAiAnswer.findMany({
     where: { conversationId: id! },
   });
   expect(answers).toHaveLength(1);
-  expect(answers[0]!.model).toBe('gemini-3.8-flash');
+  expect(answers[0]!.model).toBe('openrouter/free');
   expect(runs).toBe(1);
   await panel
     .getByLabel('Câu hỏi AI', { exact: true })
@@ -534,7 +500,7 @@ test('T2 cùng request và hội thoại khi dock, floating, expanded và page',
   await panel
     .getByLabel('Câu hỏi AI', { exact: true })
     .fill('T3 câu tiếp theo cùng nguồn?');
-  await panel.getByRole('button', { name: 'Hỏi AI', exact: true }).click();
+  await panel.getByRole('button', { name: 'Gửi', exact: true }).click();
   await expect(panel.getByLabel('Câu hỏi AI', { exact: true })).toHaveValue('');
   expect(await scroll.evaluate((element) => element.scrollTop)).toBe(0);
   await panel.getByRole('button', { name: /Có cập nhật/ }).click();
@@ -586,7 +552,7 @@ for (const lateStatus of [200, 403]) {
       },
       'sender',
     );
-    await approveSyntheticSources();
+    await configureProjectPolicy();
     await login(page);
     await page
       .getByRole('button', { name: 'Hỏi Galaxy AI', exact: true })
@@ -606,9 +572,8 @@ for (const lateStatus of [200, 403]) {
       else await route.fulfill({ response });
     });
     const question = `ISOLATION-M3-${lateStatus} kích thước?`;
-    await popup.getByRole('checkbox', { name: /Câu hỏi chỉ chứa/ }).check();
     await popup.getByLabel('Câu hỏi AI', { exact: true }).fill(question);
-    await popup.getByRole('button', { name: 'Hỏi AI', exact: true }).click();
+    await popup.getByRole('button', { name: 'Gửi', exact: true }).click();
     await expect.poll(() => runs).toBe(1);
     try {
       await popup.getByRole('button', { name: 'Đóng AI', exact: true }).click();

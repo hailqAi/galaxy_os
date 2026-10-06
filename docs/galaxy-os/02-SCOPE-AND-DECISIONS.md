@@ -1,5 +1,11 @@
 # Phạm vi, nguồn thẩm quyền và quyết định
 
+## 06/10/2026 — AI riêng thống nhất theo Project
+
+OWNER_APPROVED_CURRENT_PROMPT: chủ dự án phê duyệt trực tiếp “GALAXY OS — ĐƠN GIẢN HÓA AI THÀNH CHAT THEO DỰ ÁN”, thực thi INLINE. Phê duyệt này thay điều kiện pilot chung SYNTHETIC_PUBLIC_APPROVED, GENERAL_ONLY và duyệt từng câu đối với OpenRouter đang bật, đúng tenant Galaxy, actor có quyền AI và nguồn trong Project được phép. Không mở tenant/provider/model trả phí khác; không thay credential hoặc privacy vendor. Restriction/revocation riêng, IAM, quyền tài chính, nguồn riêng, version và mọi duyệt nghiệp vụ giữ nguyên.
+
+Luồng được duyệt: mở Project → Galaxy AI → nhập/chọn tệp → Gửi; server xác minh conversation/Project/nguồn, tự retrieval và lưu answer có nguồn. Không mode selector hoặc control approve/revoke/synthetic trong composer. File AI riêng dùng binary/version hiện hữu, không cần phòng công khai. Quyết định, kế hoạch và giới hạn kiểm chứng ở [Chat AI thống nhất](milestones/M3/UNIFIED-CHAT.md); các mục cũ bên dưới là lịch sử, không phủ định quyết định mới.
+
 Nguồn mới: [OWNER_BRIEF_2026-09-28](sources/OWNER_BRIEF_2026-09-28.md), nhãn OWNER_REQUIREMENT. Nguồn lịch sử: [sổ OD-01–OD-24](../audits/20260914-120217-galaxy-core/07-owner-decisions.md), [roadmap Sprint](../roadmap.md), [phương án realignment](../audits/20260914-120217-galaxy-core/06-realignment-plan.md). Các tài liệu cũ được giữ nguyên làm nguồn lịch sử; kế hoạch cũ không tự là lệnh đang có hiệu lực.
 
 ## Yêu cầu đã có nguồn và phần chưa được phê duyệt

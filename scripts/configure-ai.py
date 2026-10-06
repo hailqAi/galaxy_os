@@ -305,7 +305,7 @@ def valid_evidence(evidence, provider):
         not isinstance(evidence['revision'], str) or not 1 <= len(evidence['revision']) <= 100 or
         (evidence['returnedModel'] is not None and (not isinstance(evidence['returnedModel'], str) or len(evidence['returnedModel']) > 200)) or
         evidence['capability'] not in ['text', 'image', 'pdf'] or
-        (provider != 'google_gemini' and evidence['capability'] != 'text') or
+        (evidence['capability'] not in (['text', 'image', 'pdf'] if provider == 'google_gemini' else ['text', 'image'] if provider == 'openrouter' else ['text'])) or
         evidence['fixtureVersion'] != 'galaxy-ai-activation-v1' or
         not isinstance(evidence['result'], str) or
         not re.fullmatch(r'[A-Z_]{1,80}', evidence['result']) or
@@ -347,6 +347,23 @@ def hidden_key():
     except getpass.GetPassWarning as exc:
         raise ValueError('Terminal không bảo đảm input ẩn; chưa đọc khóa') from exc
 
+def record_project_policy(path, expected_digest, policy):
+    if not isinstance(policy, dict) or set(policy) != {'organizationId', 'revision', 'decisionReference', 'approvedAt'}:
+        raise ValueError('INVALID_EVIDENCE')
+    uuid.UUID(policy['organizationId'])
+    datetime.fromisoformat(policy['approvedAt'].replace('Z', '+00:00'))
+    if not all(isinstance(policy[k], str) and 1 <= len(policy[k]) <= limit for k, limit in [('revision', 100), ('decisionReference', 300)]):
+        raise ValueError('INVALID_EVIDENCE')
+    def change(providers):
+        state = providers['openrouter']
+        if state.get('costMode') != 'FREE_ONLY' or not state.get('enabled'):
+            raise ValueError('INVALID_CONFIG')
+        previous = state.get('projectPolicy')
+        if previous and previous != policy:
+            raise ValueError('POLICY_ALREADY_REVISED')
+        state.update(dataPolicy='PROJECT_AUTHORIZED', projectPolicy=policy, policyRevision=policy['revision'])
+    update(path, change, expected_digest)
+
 def record_policy(path, provider, expected_digest, event):
     required = {'id', 'actorId', 'organizationId', 'projectId', 'at', 'kind', 'action', 'target'}
     if not isinstance(event, dict) or not required <= set(event) or set(event) - required - {'version'} or event['kind'] not in ['INPUT', 'SOURCE', 'PROJECT'] or event['action'] not in ['APPROVE', 'REVOKE'] or not isinstance(event['target'], str) or len(event['target']) > 200:
@@ -358,7 +375,9 @@ def record_policy(path, provider, expected_digest, event):
         raise ValueError('INVALID_EVIDENCE')
     def change(providers):
         state = providers[provider]
-        if state.get('dataPolicy') != 'SYNTHETIC_PUBLIC_APPROVED':
+        if state.get('dataPolicy') not in ['SYNTHETIC_PUBLIC_APPROVED', 'PROJECT_AUTHORIZED']:
+            raise ValueError('INVALID_EVIDENCE')
+        if state.get('dataPolicy') == 'PROJECT_AUTHORIZED' and (provider != 'openrouter' or state.get('projectPolicy', {}).get('organizationId') != event['organizationId'] or event['kind'] == 'INPUT'):
             raise ValueError('INVALID_EVIDENCE')
         if event['kind'] == 'INPUT':
             field = 'approvedInputs'
@@ -383,7 +402,7 @@ def record_policy(path, provider, expected_digest, event):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['setup-missing', 'activate-existing', 'key', 'enable', 'disable', 'pause', 'resume', 'register', 'approve-source', 'approve-project', 'status', 'record-test', 'record-policy', 'migrate-env'])
+    parser.add_argument('action', choices=['setup-missing', 'activate-existing', 'key', 'enable', 'disable', 'pause', 'resume', 'register', 'approve-source', 'approve-project', 'status', 'record-test', 'record-policy', 'project-policy', 'migrate-env'])
     parser.add_argument('--provider', choices=PROVIDERS)
     parser.add_argument('--file', type=Path)
     parser.add_argument('--organization')
@@ -426,6 +445,13 @@ def main():
         update(args.file, register, whole_document=True)
         print('Đã đăng ký kết nối tài liệu; chờ credential, chưa gọi dịch vụ.')
         return
+    if args.action == 'project-policy':
+        if args.provider != 'openrouter':
+            raise ValueError('INVALID_CONFIG')
+        payload = json.loads(sys.stdin.read(16384))
+        record_project_policy(args.file, payload['expectedDigest'], payload['evidence'])
+        print('Đã ghi quyết định Project theo tenant; giữ audit và credential.')
+        return
     if args.action in ['record-test', 'record-policy']:
         payload = json.loads(sys.stdin.read(16385))
         if set(payload) != {'expectedDigest', 'evidence'}:
@@ -462,7 +488,7 @@ def main():
                 if isinstance(state, dict):
                     state = {**{k: v for k, v in state.items() if k not in [p[0] for p in PROVIDERS.values()]}, **({PROVIDERS[args.provider][0]: resolved['keys'][PROVIDERS[args.provider][0]]} if PROVIDERS[args.provider][0] in resolved['keys'] else {})}
             credential_present = isinstance(state, dict) and isinstance(state.get(PROVIDERS[args.provider][0]), str) and bool(state[PROVIDERS[args.provider][0]].strip())
-            allowed_fields = {'revision', 'GEMINI_API_KEY', 'MISTRAL_API_KEY', 'KIRA_API_KEY', 'OPENROUTER_API_KEY', 'LLAMA_CLOUD_API_KEY', 'replacementConfirmed', 'enabled', 'modelAccessVerified', 'textLiveVerified', 'imageLiveVerified', 'pdfLiveVerified', 'lastTest', 'tests', 'dataPolicy', 'maxRequestsPerDay', 'maxConcurrent', 'maxOutputTokens', 'approvedProjects', 'approvedSources', 'approvedInputs', 'policyRevision', 'policyAudit', 'paused', 'costMode', 'category'}
+            allowed_fields = {'revision', 'GEMINI_API_KEY', 'MISTRAL_API_KEY', 'KIRA_API_KEY', 'OPENROUTER_API_KEY', 'LLAMA_CLOUD_API_KEY', 'replacementConfirmed', 'enabled', 'modelAccessVerified', 'textLiveVerified', 'imageLiveVerified', 'pdfLiveVerified', 'lastTest', 'tests', 'dataPolicy', 'maxRequestsPerDay', 'maxConcurrent', 'maxOutputTokens', 'approvedProjects', 'approvedSources', 'approvedInputs', 'policyRevision', 'policyAudit', 'projectPolicy', 'paused', 'costMode', 'category'}
             limits = {'maxRequestsPerDay': (1, 100000, True), 'maxConcurrent': (1, 4, False), 'maxOutputTokens': (256, 65536, False)}
             if args.provider not in providers:
                 diagnostic = 'STORE_INVALID_FORMAT' if set(providers) - set(PROVIDERS) else 'PROVIDER_ENTRY_MISSING' if providers else 'EMPTY_STORE'
@@ -476,7 +502,7 @@ def main():
                   ('revision' in state and (not isinstance(state['revision'], str) or not 1 <= len(state['revision']) <= 100)) or
                   ('lastTest' in state and (not isinstance(state['lastTest'], str) or not re.fullmatch(r'[A-Z_]{1,80}', state['lastTest']))) or
                   any(isinstance(state.get(k), str) and state[k] == state.get(key_name) for k in ['revision', 'lastTest', 'dataPolicy'] for key_name, _ in PROVIDERS.values()) or
-                  ('dataPolicy' in state and state['dataPolicy'] != 'SYNTHETIC_PUBLIC_APPROVED') or
+                  ('dataPolicy' in state and state['dataPolicy'] not in ['SYNTHETIC_PUBLIC_APPROVED', 'PROJECT_AUTHORIZED']) or
                   not isinstance(state.get('tests', []), list) or
                   len(state.get('tests', [])) > 3 or
                   any(not valid_evidence(t, args.provider) or t['result'] in [state.get(key_name) for key_name, _ in PROVIDERS.values()] for t in state.get('tests', []))):

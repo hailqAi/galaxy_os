@@ -20,6 +20,22 @@ config = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(config)
 
 class SecretConfigTest(unittest.TestCase):
+    def test_project_policy_keeps_tenant_scope_audit_and_revocation(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'providers.json'
+            config.update(path, lambda providers: providers.update(openrouter=dict(revision='r1', costMode='FREE_ONLY', enabled=True, dataPolicy='SYNTHETIC_PUBLIC_APPROVED')))
+            organization = str(uuid.uuid4())
+            policy = dict(organizationId=organization, revision='owner-20261006', decisionReference='docs/galaxy-os/milestones/M3/UNIFIED-CHAT.md', approvedAt='2026-10-06T00:00:00Z')
+            config.record_project_policy(path, hashlib.sha256(path.read_bytes()).hexdigest(), policy)
+            state = config.read_private(path)['providers']['openrouter']
+            self.assertEqual(state['dataPolicy'], 'PROJECT_AUTHORIZED')
+            self.assertEqual(state['projectPolicy'], policy)
+            event = dict(id=str(uuid.uuid4()), actorId=str(uuid.uuid4()), organizationId=organization, projectId=str(uuid.uuid4()), at='2026-10-06T01:00:00Z', kind='SOURCE', action='REVOKE', target=str(uuid.uuid4()), version='1:hash')
+            config.record_policy(path, 'openrouter', hashlib.sha256(path.read_bytes()).hexdigest(), event)
+            self.assertEqual(config.read_private(path)['providers']['openrouter']['policyAudit'][-1], event)
+            event['organizationId'] = str(uuid.uuid4())
+            with self.assertRaises(ValueError):
+                config.record_policy(path, 'openrouter', hashlib.sha256(path.read_bytes()).hexdigest(), event)
     def test_new_credentials_are_env_only_and_document_connection_is_not_chat(self):
         with tempfile.TemporaryDirectory() as root:
             path, env_path = Path(root) / 'providers.json', Path(root) / 'providers.env'

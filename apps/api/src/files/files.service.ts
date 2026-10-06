@@ -24,6 +24,7 @@ import { isStageOneFinancialDocument } from '../projects/project-stage-one.rules
 import { FileStorage } from './file-storage';
 import { safeFilename } from './filename';
 import { hiddenProjectFileIds } from './project-file';
+import { assertBoundedWorkbook } from '../imports/imports.service';
 import {
   assertFileCapacity,
   fileStorageReservationExpiry,
@@ -36,6 +37,10 @@ const allowed = new Map([
   ['image/jpeg', '.jpg'],
   ['application/pdf', '.pdf'],
   ['text/plain', '.txt'],
+  [
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.xlsx',
+  ],
 ]);
 const previewMimeTypes = new Set([
   'application/pdf',
@@ -166,9 +171,10 @@ export class FilesService {
     id: string,
     includeDeleted = false,
     requiredPermissions: string | readonly string[] = 'file.read',
+    tx: Prisma.TransactionClient = this.prisma,
   ) {
-    const hiddenFileIds = await hiddenProjectFileIds(this.prisma, actor);
-    const file = await this.prisma.fileAsset.findFirst({
+    const hiddenFileIds = await hiddenProjectFileIds(tx, actor);
+    const file = await tx.fileAsset.findFirst({
       where: {
         id: { equals: id, notIn: hiddenFileIds },
         organizationId: actor.organizationId,
@@ -193,6 +199,7 @@ export class FilesService {
             ? attachment.projectId!
             : attachment.entityId,
           requiredPermissions,
+          tx,
         );
         attachments.push(attachment);
       } catch {
@@ -201,12 +208,54 @@ export class FilesService {
     if (!attachments.length) throw new NotFoundException('File not found');
     return { ...file, attachments };
   }
+  async projectAiFile(
+    actor: CurrentActor,
+    projectId: string,
+    id: string,
+    tx: Prisma.TransactionClient,
+  ) {
+    const file = await this.file(
+      actor,
+      id,
+      false,
+      ['file.read', 'file.download'],
+      tx,
+    );
+    if (
+      file.confidentiality !== 'INTERNAL' ||
+      !file.attachments.some((attachment) => attachment.projectId === projectId)
+    )
+      throw new NotFoundException();
+    return file;
+  }
+  async projectAiWhere(
+    actor: CurrentActor,
+    projectId: string,
+    tx: Prisma.TransactionClient,
+  ): Promise<Prisma.FileAssetWhereInput> {
+    return {
+      organizationId: actor.organizationId,
+      deletedAt: null,
+      confidentiality: 'INTERNAL',
+      id: { notIn: await hiddenProjectFileIds(tx, actor) },
+      AND: [this.projectAttachmentGuard(actor, ['file.read', 'file.download'])],
+      attachments: {
+        some: {
+          projectId,
+          project: projectWhereForPermissions(actor, [
+            'file.read',
+            'file.download',
+          ]),
+        },
+      },
+    };
+  }
   async upload(
     actor: CurrentActor,
     input:
       | UploadFileDto
       | {
-          entityType: 'ChatRoom';
+          entityType: 'ChatRoom' | 'ChatAiConversation';
           entityId: string;
           category: string;
           confidentiality?: 'INTERNAL';
@@ -221,31 +270,66 @@ export class FilesService {
       throw new BadRequestException(
         'Project documents must use a resumable upload session',
       );
+    const aiContext =
+      input.entityType === 'ChatAiConversation'
+        ? await this.aiUpload(actor, input.entityId, chatKey, this.prisma)
+        : null;
     const chatContext =
       input.entityType === 'ChatRoom'
         ? await this.chatUpload(actor, input.entityId, chatKey, this.prisma)
         : null;
-    const context = chatContext
-      ? { projectId: chatContext.room.projectId, customerId: undefined }
-      : await this.entities.assertView(
-          actor,
-          input.entityType,
-          input.entityId,
-          'file.upload',
-        );
+    const context = aiContext
+      ? { projectId: aiContext.projectId, customerId: undefined }
+      : chatContext
+        ? { projectId: chatContext.room.projectId, customerId: undefined }
+        : await this.entities.assertView(
+            actor,
+            input.entityType,
+            input.entityId,
+            'file.upload',
+          );
     const original = safeFilename(file.originalname);
     if (!original) throw new BadRequestException('Invalid filename');
-    const detected = this.detect(file.buffer);
+    const xlsx = aiContext && extname(original).toLowerCase() === '.xlsx';
+    if (xlsx && (file.size > 5_000_000 || !assertBoundedWorkbook(file.buffer)))
+      throw new BadRequestException('Tệp XLSX không hợp lệ hoặc quá lớn');
+    const detected = xlsx
+      ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      : this.detect(file.buffer);
     if (
       !detected ||
-      detected !== file.mimetype ||
-      extname(original).toLowerCase() !== allowed.get(detected)
+      (detected !== file.mimetype &&
+        !(
+          detected === 'text/plain' &&
+          ['.md', '.txt'].includes(extname(original).toLowerCase()) &&
+          ['text/markdown', 'application/octet-stream', ''].includes(
+            file.mimetype,
+          )
+        )) ||
+      ![
+        allowed.get(detected),
+        ...(detected === 'text/plain'
+          ? ['.md']
+          : detected === 'image/jpeg'
+            ? ['.jpeg']
+            : []),
+      ].includes(extname(original).toLowerCase())
     )
       throw new BadRequestException('File type or extension is not allowed');
     const checksum = createHash('sha256').update(file.buffer).digest('hex');
     const chatHash = createHash('sha256')
       .update(JSON.stringify([checksum, original, detected]))
       .digest('hex');
+    if (aiContext) {
+      const replay = await this.aiReplay(
+        actor,
+        input.entityId,
+        chatKey!,
+        chatHash,
+        this.prisma,
+      );
+      if (replay) return replay;
+    }
     if (chatContext) {
       const replay = await this.chat!.project(
         actor,
@@ -313,7 +397,9 @@ export class FilesService {
         `);
         if (!reservation.length)
           throw new ConflictException('File storage reservation expired');
-        if (chatContext)
+        if (aiContext)
+          await this.lockProjects(tx, actor, [aiContext.projectId]);
+        else if (chatContext)
           await this.lockProjects(tx, actor, [chatContext.room.projectId]);
         else if (context.projectId)
           await this.lockProjectFor(
@@ -322,6 +408,26 @@ export class FilesService {
             context.projectId,
             'file.upload',
           );
+        const aiCurrent = aiContext
+          ? await this.aiUpload(actor, input.entityId, chatKey, tx)
+          : null;
+        if (aiCurrent) {
+          const replay = await this.aiReplay(
+            actor,
+            input.entityId,
+            chatKey!,
+            chatHash,
+            tx,
+          );
+          if (replay) {
+            await this.storage.removePending(storageKey, reservationId);
+            await tx.fileStorageReservation.delete({
+              where: { id: reservationId },
+            });
+            await this.aiUpload(actor, input.entityId, chatKey, tx);
+            return replay;
+          }
+        }
         const chatCurrent = chatContext
           ? await this.chatUpload(actor, input.entityId, chatKey, tx)
           : null;
@@ -343,15 +449,17 @@ export class FilesService {
             return replay;
           }
         }
-        const currentContext = chatCurrent
-          ? { projectId: chatCurrent.room.projectId, customerId: undefined }
-          : await this.entities.assertView(
-              actor,
-              input.entityType,
-              input.entityId,
-              'file.upload',
-              tx,
-            );
+        const currentContext = aiCurrent
+          ? { projectId: aiCurrent.projectId, customerId: undefined }
+          : chatCurrent
+            ? { projectId: chatCurrent.room.projectId, customerId: undefined }
+            : await this.entities.assertView(
+                actor,
+                input.entityType,
+                input.entityId,
+                'file.upload',
+                tx,
+              );
         if (
           currentContext.projectId !== context.projectId ||
           currentContext.customerId !== context.customerId
@@ -382,6 +490,48 @@ export class FilesService {
             createdBy: actor.userId,
           },
         });
+        if (aiCurrent) {
+          const linked = await tx.chatAiSourceIndex.create({
+            data: {
+              organizationId: actor.organizationId,
+              projectId: aiCurrent.projectId,
+              ownerId: actor.userId,
+              conversationId: input.entityId,
+              clientKey: chatKey,
+              payloadHash: chatHash,
+              fileAssetId: asset.id,
+              version: `${asset.version}:${checksum}`,
+              label: original,
+              provenance: 'UNCONFIRMED',
+            },
+          });
+          await tx.activity.create({
+            data: {
+              organizationId: actor.organizationId,
+              actorId: actor.userId,
+              event: 'FILE_UPLOADED',
+              entityType: 'ChatAiConversation',
+              entityId: input.entityId,
+              metadata: {
+                fileId: asset.id,
+                sourceId: linked.id,
+                version: asset.version,
+              },
+            },
+          });
+          await tx.fileStorageReservation.delete({
+            where: { id: reservationId },
+          });
+          await this.aiUpload(actor, input.entityId, chatKey, tx);
+          return {
+            id: linked.id,
+            fileAssetId: asset.id,
+            version: linked.version,
+            status: linked.status,
+            label: original,
+            sizeBytes: file.size,
+          };
+        }
         if (chatCurrent) {
           const linked = await tx.chatFile.create({
             data: {
@@ -449,6 +599,71 @@ export class FilesService {
       }
       throw error;
     }
+  }
+  private async aiUpload(
+    actor: CurrentActor,
+    conversationId: string,
+    key: string | undefined,
+    tx: Prisma.TransactionClient,
+  ) {
+    if (
+      !this.chat ||
+      process.env.FEATURE_PROJECT_AI !== 'true' ||
+      !key ||
+      !/^[0-9a-f-]{36}$/i.test(key)
+    )
+      throw new NotFoundException();
+    const fresh = await this.chat.freshActor(tx, actor);
+    const conversation = await tx.chatAiConversation.findFirst({
+      where: {
+        id: conversationId,
+        organizationId: actor.organizationId,
+        ownerId: actor.userId,
+        project: projectWhereForPermissions(fresh, [
+          'ai.invoke',
+          'file.upload',
+        ]),
+        answers: { none: { usage: { path: ['kind'], equals: 'ADMIN_SMOKE' } } },
+      },
+    });
+    if (!conversation) throw new NotFoundException();
+    await this.chat.authority(tx, actor, conversation.projectId, 'INVOKE');
+    return conversation;
+  }
+  private async aiReplay(
+    actor: CurrentActor,
+    conversationId: string,
+    clientKey: string,
+    payloadHash: string,
+    tx: Prisma.TransactionClient,
+  ) {
+    const source = await tx.chatAiSourceIndex.findFirst({
+      where: {
+        conversationId,
+        clientKey,
+        ownerId: actor.userId,
+        organizationId: actor.organizationId,
+      },
+      include: { file: true },
+    });
+    if (!source) return null;
+    if (source.payloadHash !== payloadHash)
+      throw new ConflictException('Khóa upload đã dùng cho file khác');
+    if (
+      !source.file ||
+      source.file.deletedAt ||
+      source.version !== `${source.file.version}:${source.file.checksum}`
+    )
+      throw new NotFoundException();
+    await this.aiUpload(actor, conversationId, clientKey, tx);
+    return {
+      id: source.id,
+      fileAssetId: source.file.id,
+      version: source.version,
+      status: source.status,
+      label: source.label,
+      sizeBytes: Number(source.file.sizeBytes),
+    };
   }
   private async chatUpload(
     actor: CurrentActor,
@@ -614,6 +829,7 @@ export class FilesService {
     requiredPermissions: string | readonly string[],
   ): Prisma.EntityAttachmentWhereInput {
     return {
+      NOT: { entityType: 'ChatAiConversation' },
       OR: [
         {
           projectId: { not: null },
@@ -852,7 +1068,11 @@ export class FilesService {
     requiredPermissions: string | readonly string[],
   ): Prisma.FileAssetWhereInput {
     return {
-      NOT: { attachments: { some: { entityType: 'ChatRoom' } } },
+      NOT: {
+        attachments: {
+          some: { entityType: { in: ['ChatRoom', 'ChatAiConversation'] } },
+        },
+      },
       OR: [
         { attachments: { none: { projectId: { not: null } } } },
         {

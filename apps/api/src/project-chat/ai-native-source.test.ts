@@ -1,7 +1,9 @@
 import { existsSync } from 'node:fs';
 import { expect, it } from 'vitest';
-import { nativeSource } from './ai-native-source';
+import { nativeSource, documentText } from './ai-native-source';
+import { activationFixture } from './ai-activation';
 import { createHash } from 'node:crypto';
+import ExcelJS from 'exceljs';
 const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhGQAAAAASUVORK5CYII=',
   'base64',
@@ -14,6 +16,48 @@ const source = {
   version: '1',
   text: '',
 };
+it('đọc XLSX bằng parser hiện hữu, giữ sheet/cell và giá trị lưu sẵn, không tính công thức', async () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Vật liệu');
+  sheet.getCell('A1').value = 'VT-X928';
+  sheet.getCell('B2').value = { formula: '21*2', result: 42 };
+  const bytes = Buffer.from(await workbook.xlsx.writeBuffer());
+  const result = await documentText(
+    source,
+    'Vat-lieu.xlsx',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    bytes,
+    createHash('sha256').update(bytes).digest('hex'),
+  );
+  expect(result).toMatchObject({ status: 'READY' });
+  expect(result.text).toContain('Vật liệu!A1: VT-X928');
+  expect(result.text).toContain(
+    'Vật liệu!B2: 42 [giá trị công thức lưu sẵn; không tính lại]',
+  );
+});
+it('đọc PDF text cục bộ với locator trang và MD UTF-8, không gọi vendor', async () => {
+  const pdf = activationFixture('pdf').media[0]!.bytes;
+  const result = await documentText(
+    source,
+    'Kiem-chung-AI.pdf',
+    'application/pdf',
+    pdf,
+    createHash('sha256').update(pdf).digest('hex'),
+  );
+  expect(result.status).toBe('READY');
+  expect(result.text).toContain('625');
+  expect(result.chunks?.[0]).toMatchObject({ page: 1, version: '1' });
+  const md = Buffer.from('# Nội dung thật\nMã A-431');
+  expect(
+    await documentText(
+      source,
+      'ghi-chu.md',
+      'text/plain',
+      md,
+      createHash('sha256').update(md).digest('hex'),
+    ),
+  ).toMatchObject({ status: 'READY', text: md.toString() });
+});
 it('keeps original version and locator for verified image bytes and rejects mismatch', async () => {
   const checksum = createHash('sha256').update(png).digest('hex');
   const result = await nativeSource(

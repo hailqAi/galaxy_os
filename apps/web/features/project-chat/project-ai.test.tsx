@@ -160,7 +160,7 @@ it('renders model identity and actionable errors without hiding provider differe
   expect(aiStatusLabel('INVALID_KEY')).toContain('khóa');
 });
 
-it('keeps unavailable models visible and disabled with reasons', () => {
+it('không đưa model chưa bật vào composer', () => {
   const model = {
     id: 'kira-3.5-pro',
     provider: 'kira',
@@ -195,11 +195,11 @@ it('keeps unavailable models visible and disabled with reasons', () => {
       onChange: () => {},
     }),
   );
-  expect(html).toMatch(/<option[^>]*value="kira-3.5-pro"[^>]*disabled=""/);
-  expect(html).toContain('Chưa có khóa thay thế');
+  expect(html).not.toContain('kira-3.5-pro');
+  expect(html).not.toContain('Chưa có khóa thay thế');
 });
 
-it('shows credential diagnostics before a legacy provider reason', () => {
+it('giữ chẩn đoán khóa ngoài danh sách model composer', () => {
   const model = {
     id: 'kira-3.5-pro',
     provider: 'kira',
@@ -234,7 +234,7 @@ it('shows credential diagnostics before a legacy provider reason', () => {
       onChange: () => {},
     }),
   );
-  expect(html).toContain('Không đọc được kho khóa');
+  expect(html).not.toContain('Không đọc được kho khóa');
   expect(html).not.toContain('Chưa có khóa thay thế');
   expect(aiStatusLabel('CREDENTIAL_NOT_CONFIRMED')).toContain('đã có khóa');
 });
@@ -337,8 +337,8 @@ it.each(['TEMPORARY_ERROR', 'RATE_LIMITED_UNKNOWN'])(
         onChange: () => {},
       }),
     );
-    expect(html).toContain('Nhà cung cấp đang tạm dừng');
+    expect(html).not.toContain('Nhà cung cấp đang tạm dừng');
     expect(html).not.toContain(aiStatusLabel(healthCode));
-    expect(html).toMatch(/<option[^>]*value="paused-model"[^>]*disabled=""/);
+    expect(html).not.toContain('paused-model');
   },
 );

@@ -87,6 +87,49 @@ export class ProjectChatController {
     @Inject(ProjectChatService) private readonly service: ProjectChatService,
     @Inject(FilesService) private readonly files: FilesService,
   ) {}
+  @Post('projects/:id/ai/conversations/:conversationId/files')
+  @UseInterceptors(
+    MultipartAdmissionInterceptor,
+    FileInterceptor('file', {
+      limits: genericFileUploadLimits,
+      fileFilter: (_req, file, done) => {
+        file.originalname = multipartFilename(file.originalname);
+        done(null, true);
+      },
+    }),
+  )
+  async aiUpload(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Body(input(ChatUploadDto)) value: ChatUploadDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    await this.ai.history(actor, id, conversationId);
+    return this.files.upload(
+      actor,
+      {
+        entityType: 'ChatAiConversation',
+        entityId: conversationId,
+        category: 'AI_ATTACHMENT',
+      },
+      file,
+      value.clientKey,
+    );
+  }
+  @Get('projects/:id/ai/files/:sourceId/download')
+  async aiDownload(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('sourceId', ParseUUIDPipe) sourceId: string,
+    @Res({ passthrough: true })
+    response: { setHeader(name: string, value: string): void },
+  ) {
+    return this.fileResponse(
+      await this.ai.downloadFile(actor, id, sourceId),
+      response,
+    );
+  }
   @Get('projects/:id/ai/settings') aiSettings(
     @Actor() actor: CurrentActor,
     @Param('id', ParseUUIDPipe) id: string,

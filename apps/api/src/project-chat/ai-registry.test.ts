@@ -1,5 +1,6 @@
 import { afterEach, expect, it } from 'vitest';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -27,6 +28,71 @@ const provider = {
   approvedSources: [{ id: 'source', version: 'v1' }],
 };
 const fixture = () => ({ google_gemini: { ...provider } });
+it('policy Project cho tenant cụ thể không cần duyệt câu hoặc từng nguồn, vẫn giữ revoke và tenant khác', () => {
+  const state = {
+    ...provider,
+    OPENROUTER_API_KEY: 'test-router',
+    costMode: 'FREE_ONLY',
+    dataPolicy: 'PROJECT_AUTHORIZED',
+    projectPolicy: {
+      organizationId: '11111111-1111-4111-8111-111111111111',
+      revision: 'owner-20261006',
+      decisionReference: 'docs/galaxy-os/milestones/M3/UNIFIED-CHAT.md',
+      approvedAt: '2026-10-06T00:00:00Z',
+    },
+  };
+  const config = configuredModel(
+    {
+      openrouter: state,
+      credentialSource: 'env',
+      credentialStates: { openrouter: 'LOADED' },
+    },
+    'openrouter/free',
+  );
+  const org = state.projectPolicy.organizationId;
+  expect(() =>
+    assertInput(config, org, 'project', 'actor', 'Câu hỏi mới chưa từng duyệt'),
+  ).not.toThrow();
+  expect(() =>
+    assertEgress(config, org, 'project', undefined, [
+      { id: 'new-file', version: '2' },
+    ]),
+  ).not.toThrow();
+  expect(() =>
+    assertEgress(config, 'other-org', 'project', undefined, []),
+  ).toThrow('EGRESS_POLICY_DENIED');
+  expect(() =>
+    assertInput(config, 'other-org', 'project', 'actor', 'Câu mới'),
+  ).toThrow('INPUT_POLICY_DENIED');
+  config.approvedInputs.push({
+    organizationId: 'other-org',
+    projectId: 'project',
+    questionHash: createHash('sha256').update('Câu cũ').digest('hex'),
+  });
+  expect(() =>
+    assertInput(config, 'other-org', 'project', 'actor', 'Câu cũ'),
+  ).toThrow('INPUT_POLICY_DENIED');
+  config.policyAudit.push({
+    id: '22222222-2222-4222-8222-222222222222',
+    actorId: '33333333-3333-4333-8333-333333333333',
+    organizationId: org,
+    projectId: '44444444-4444-4444-8444-444444444444',
+    at: '2026-10-06T01:00:00Z',
+    kind: 'SOURCE',
+    action: 'REVOKE',
+    target: 'new-file',
+    version: '2',
+  });
+  expect(() =>
+    assertEgress(
+      config,
+      org,
+      '44444444-4444-4444-8444-444444444444',
+      undefined,
+      [{ id: 'new-file', version: '2' }],
+    ),
+  ).toThrow('EGRESS_POLICY_DENIED');
+});
 it('không coi cờ client hoặc quyền Project là phê duyệt nội dung nhập GENERAL', () => {
   const config = configuredModel(fixture(), 'gemini-3.8-flash');
   expect(() =>

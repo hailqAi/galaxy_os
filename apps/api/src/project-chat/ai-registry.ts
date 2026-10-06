@@ -60,7 +60,7 @@ export const AI_MODELS = [
     reasoning: ['default'],
     contextLimit: null,
     outputLimit: 8192,
-    nativeMedia: false,
+    nativeMedia: true,
   },
 ] as const;
 export type AiProvider = (typeof AI_MODELS)[number]['provider'];
@@ -138,7 +138,16 @@ const settings = z
       .regex(/^[A-Z_]{1,80}$/)
       .default('NOT_RUN'),
     tests: z.array(activationEvidence).max(3).default([]),
-    dataPolicy: z.literal('SYNTHETIC_PUBLIC_APPROVED'),
+    dataPolicy: z.enum(['SYNTHETIC_PUBLIC_APPROVED', 'PROJECT_AUTHORIZED']),
+    projectPolicy: z
+      .object({
+        organizationId: z.string().uuid(),
+        revision: z.string().min(1).max(100),
+        decisionReference: z.string().min(1).max(300),
+        approvedAt: z.string().datetime(),
+      })
+      .strict()
+      .optional(),
     maxRequestsPerDay: z
       .number()
       .int()
@@ -471,6 +480,37 @@ export function configuredModel(
   };
 }
 export type ConfiguredModel = ReturnType<typeof configuredModel>;
+export function projectPolicy(
+  config: Pick<ConfiguredModel, 'provider' | 'dataPolicy' | 'projectPolicy'>,
+  organizationId: string,
+) {
+  return (
+    config.provider === 'openrouter' &&
+    config.dataPolicy === 'PROJECT_AUTHORIZED' &&
+    config.projectPolicy?.organizationId === organizationId
+  );
+}
+function revoked(
+  config: ConfiguredModel,
+  organizationId: string,
+  projectId: string,
+  kind: 'PROJECT' | 'SOURCE',
+  target: string,
+  version?: string,
+) {
+  return (
+    config.policyAudit
+      .filter(
+        (row) =>
+          row.organizationId === organizationId &&
+          row.projectId === projectId &&
+          row.kind === kind &&
+          row.target === target &&
+          (kind === 'PROJECT' || row.version === version),
+      )
+      .at(-1)?.action === 'REVOKE'
+  );
+}
 export function assertInput(
   config: ConfiguredModel,
   organizationId: string,
@@ -478,6 +518,12 @@ export function assertInput(
   ownerId: string,
   question: string,
 ) {
+  if (projectPolicy(config, organizationId)) {
+    assertEgress(config, organizationId, projectId, undefined, []);
+    return;
+  }
+  if (config.dataPolicy === 'PROJECT_AUTHORIZED')
+    throw new AiError('INPUT_POLICY_DENIED');
   const questionHash = createHash('sha256').update(question).digest('hex');
   if (
     !config.approvedInputs.some(
@@ -497,6 +543,25 @@ export function assertEgress(
   classification: string | undefined,
   sources: { id: string; version: string }[],
 ) {
+  if (projectPolicy(config, organizationId)) {
+    if (
+      revoked(config, organizationId, projectId, 'PROJECT', projectId) ||
+      sources.some((source) =>
+        revoked(
+          config,
+          organizationId,
+          projectId,
+          'SOURCE',
+          source.id,
+          source.version,
+        ),
+      )
+    )
+      throw new AiError('EGRESS_POLICY_DENIED');
+    return;
+  }
+  if (config.dataPolicy === 'PROJECT_AUTHORIZED')
+    throw new AiError('EGRESS_POLICY_DENIED');
   if (
     classification !== config.dataPolicy ||
     !config.approvedProjects.some(
@@ -526,14 +591,21 @@ export function modelChoices(
     } catch (error) {
       providerReason = error instanceof AiError ? error.code : 'INVALID_CONFIG';
     }
-    const sourcePolicy = state?.approvedProjects.some(
-      (p) => p.organizationId === organizationId && p.projectId === projectId,
-    )
-      ? 'APPROVED_PROJECT'
-      : 'DENIED';
+    let sourcePolicy = 'DENIED';
+    if (ready) {
+      try {
+        assertEgress(ready, organizationId, projectId, ready.dataPolicy, []);
+        sourcePolicy = 'APPROVED_PROJECT';
+      } catch {
+        /* Không nới quyền theo trạng thái provider. */
+      }
+    }
     const reason =
       providerReason ??
-      (model.provider === 'openrouter' ? 'GENERAL_ONLY' : null) ??
+      (model.provider === 'openrouter' &&
+      !(ready && projectPolicy(ready, organizationId))
+        ? 'GENERAL_ONLY'
+        : null) ??
       (sourcePolicy === 'DENIED' ? 'EGRESS_POLICY_DENIED' : null);
     return {
       id: model.id,
@@ -567,7 +639,7 @@ export function modelChoices(
         state?.[model.keyName]?.trim() && state.replacementConfirmed,
       ),
       revision: state?.revision ?? null,
-      dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+      dataPolicy: state?.dataPolicy ?? 'SYNTHETIC_PUBLIC_APPROVED',
       textLiveVerified: ready?.textLiveVerified ?? false,
       lastTest:
         state?.tests
@@ -578,9 +650,17 @@ export function modelChoices(
           .at(-1)?.result ?? 'NOT_RUN',
       capabilities: {
         text: true,
-        documentTextFallback: ['text/plain'],
+        documentTextFallback: [
+          'text/plain',
+          'text/markdown',
+          'application/pdf',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ],
         imageInput: model.nativeMedia && Boolean(ready?.imageLiveVerified),
-        pdfInput: model.nativeMedia && Boolean(ready?.pdfLiveVerified),
+        pdfInput:
+          model.provider === 'openrouter'
+            ? Boolean(ready)
+            : model.nativeMedia && Boolean(ready?.pdfLiveVerified),
         nativeMediaImplemented: model.nativeMedia,
         structuredOutput:
           model.provider !== 'kira' ? 'DOCUMENTED' : 'PROMPT_AND_VALIDATION',
@@ -618,14 +698,17 @@ export const aiContextSchema = z
 export type AiContext = z.infer<typeof aiContextSchema>;
 
 const requestSchema = z.object({
-  mode: z.enum(['GENERAL', 'PROJECT']).default('PROJECT'),
+  mode: z.enum(['GENERAL', 'PROJECT', 'UNIFIED']).default('PROJECT'),
   version: z.literal(1),
   provider: z.enum(['google_gemini', 'mistral', 'kira', 'openrouter']),
   model: z.string(),
   revision: z.string(),
   configDigest: z.string(),
   reasoning: z.string(),
-  dataClassification: z.literal('SYNTHETIC_PUBLIC_APPROVED'),
+  dataClassification: z.enum([
+    'SYNTHETIC_PUBLIC_APPROVED',
+    'PROJECT_AUTHORIZED',
+  ]),
   sourceIds: z.array(z.string()).default([]),
   context: aiContextSchema.optional(),
 });

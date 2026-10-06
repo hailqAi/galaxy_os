@@ -659,6 +659,7 @@ describe('FilesService', () => {
       'Project',
       'project',
       'file.download',
+      prisma,
     );
   });
   it('does not expose storage and checksum internals from file metadata', async () => {
