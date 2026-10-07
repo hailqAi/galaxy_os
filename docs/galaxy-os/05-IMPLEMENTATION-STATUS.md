@@ -1,5 +1,11 @@
 # Trạng thái triển khai và điểm tiếp tục
 
+## 08/10 — ChatGPT plan only đang triển khai, main chưa cutover
+
+Handoff hiện hành: [08/10 ChatGPT plan only](handoffs/2026-10-08-chatgpt-plan-only.md), kế hoạch hợp nhất [master + addendum](../superpowers/plans/2026-10-08-chatgpt-plan-only.md). Đã pause4provider API key bằng config live; không có job QUEUED/RUNNING tại lúc kiểm. Main localhost/LAN vẫn `local-a0429faf5733`, APP_SERVING nhưng CONTROL_PLANE_UNAVAILABLE. Chưa phục hồi D-Bus hoặc vượt rejection cũ.
+
+Code checkpoint sửa controller/template, yêu cầu policy khi tạo candidate, chặn fetch API key, contract SIWC và UI eligibility chưa xác nhận, count/pagination Task từ domain thật. SIWC **ELIGIBILITY_UNCONFIRMED**, chưa callback/connection/model/tool live; lifecycle/work tools/tracker đầy đủ vẫn còn việc. CODE_SHA9a02b4c, TESTED_SHA232c4f7/tree d3bd974189faa24b176eb230c074573e926da7fe. Regression mới PASS API1386/Web568/Edge5/document1, runtime64, lint/types/format/build. Candidate local-63652e4cc6d8 đã kiểm exact artifact Chrome2test/5widths và template trong runtime validator cô lập. Main vẫn cũ; maintenance draft REVIEW_BLOCKED vì chưa đủ ingress/drain, chưa xin duyệt thực thi. Không dùng kết quả các mục lịch sử bên dưới làm evidence của bản08/10.
+
 ## Năm PDF mới + công cụ Project-only — code đạt, phát hành đang bị chặn
 
 Code T0–T6 đã commit local, CODE_SHA=TESTED_SHA `0738358ed153195a8b68927945875e703eb3ae41`, TESTED_TREE `f51d35d735efd236ce751f18fdb332f5d7e76892`. Full regression mới đạt API1370/Web567/Edge5/document1; lint/typecheck/format/build và59test scripts đạt. Chrome artifact r2 đạt các hành trình file/artifact, private/revoke/late response và popup viewport; có đối chiếu đủ năm PDF. Không gọi pixel-perfect hoặc keyboard thiết bị thật PASS.

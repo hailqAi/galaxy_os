@@ -1,5 +1,11 @@
 # Project status
 
+## 08/10 — ChatGPT plan only: checkpoint chưa phát hành
+
+Đang thực hiện [kế hoạch hợp nhất](docs/superpowers/plans/2026-10-08-chatgpt-plan-only.md). Đã pause4provider API key trên config main, bảo toàn secret/history. Main localhost/LAN vẫn `local-a0429faf5733`: app phục vụ, user control plane không truy cập được. Không phục hồi D-Bus hoặc bypass automatic approval rejection.
+
+Code mới: runtime diagnostics/template source/preflight; policy chặn API key; SIWC wire contract + trạng thái UI chưa xác nhận quyền; Task counts/snapshot/pagination từ DB. CODE_SHA9a02b4c, TESTED_SHA232c4f7/tree d3bd974189faa24b176eb230c074573e926da7fe; regression mới PASS API1386/Web568/Edge5/document1, runtime64, lint/types/format/build. Candidate local-63652e4cc6d8 đạt2hành trình Chrome fixture/5viewport trên exact artifact, chưa main. Maintenance draft REVIEW_BLOCKED vì chưa đủ ingress/drain; SIWC lifecycle, task tools/tracker đầy đủ và main/live acceptance chưa hoàn tất. [Handoff08/10](docs/galaxy-os/handoffs/2026-10-08-chatgpt-plan-only.md) ghi evidence/giới hạn/bước còn thiếu; không dùng kiểm thử lịch sử bên dưới chứng minh release hiện hành.
+
 ## Năm PDF mới + công cụ Project-only — code đạt, phát hành đang bị chặn
 
 Code T0–T6 đã commit local, CODE_SHA=TESTED_SHA `0738358ed153195a8b68927945875e703eb3ae41`, TESTED_TREE `f51d35d735efd236ce751f18fdb332f5d7e76892`. Full regression mới đạt API1370/Web567/Edge5/document1; lint/typecheck/format/build và59test scripts đạt. Chrome artifact r2 đạt các hành trình file/artifact, private/revoke/late response và popup viewport; có đối chiếu đủ năm PDF. Không gọi pixel-perfect hoặc keyboard thiết bị thật PASS.
