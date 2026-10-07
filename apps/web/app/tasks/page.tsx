@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 const statuses = [
   ['TODO', 'Cần làm'],
@@ -9,6 +9,7 @@ const statuses = [
   ['BLOCKED', 'Bị chặn'],
   ['IN_REVIEW', 'Đang duyệt'],
   ['DONE', 'Hoàn thành'],
+  ['CANCELLED', 'Đã hủy'],
 ] as const;
 type Task = {
   id: string;
@@ -27,6 +28,8 @@ type Page = {
   page: number;
   pageSize: number;
   totalPages: number;
+  statusCounts: Record<string, number>;
+  computedAt: string;
 };
 type Project = { id: string; name: string };
 export default function TasksPage() {
@@ -36,31 +39,53 @@ export default function TasksPage() {
   const requestedTab = params.get('tab') ?? 'mine';
   const projectId = params.get('projectId');
   const onlyOpen = params.get('open') === 'true';
+  const requestedPage = Number(params.get('page') ?? '1');
+  const page =
+    Number.isSafeInteger(requestedPage) && requestedPage > 0
+      ? requestedPage
+      : 1;
   const tab = ['mine', 'all', 'board', 'overdue'].includes(requestedTab)
     ? requestedTab
     : 'mine';
   const setTab = (value: string) => {
     const url = new URL(location.href);
     url.searchParams.set('tab', value);
+    url.searchParams.delete('page');
     window.history.pushState(null, '', url);
   };
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState('');
+  const reading = useRef<AbortController | null>(null);
+  const setPage = (value: number) => {
+    const url = new URL(location.href);
+    url.searchParams.set('page', String(value));
+    window.history.pushState(null, '', url);
+  };
   const load = useCallback(async () => {
+    reading.current?.abort();
+    const controller = new AbortController();
+    reading.current = controller;
+    setData(undefined);
+    setMessage('');
     try {
-      setData(
-        await api<Page>(
-          `/tasks?${new URLSearchParams({ page: '1', pageSize: '100', ...(projectId && { projectId }), ...(onlyOpen && { open: 'true' }), ...(search && { search }), ...(tab === 'mine' && { mine: 'true' }), ...(tab === 'overdue' && { overdue: 'true' }) })}`,
-        ),
+      const result = await api<Page>(
+        `/tasks?${new URLSearchParams({ page: String(page), pageSize: '50', ...(projectId && { projectId }), ...(onlyOpen && { open: 'true' }), ...(search && { search }), ...(tab === 'mine' && { mine: 'true' }), ...(tab === 'overdue' && { overdue: 'true' }) })}`,
+        { signal: controller.signal },
       );
+      if (!controller.signal.aborted) setData(result);
     } catch (error) {
-      setMessage((error as Error).message);
+      if (!controller.signal.aborted) setMessage((error as Error).message);
     }
-  }, [search, tab, projectId, onlyOpen]);
+  }, [search, tab, projectId, onlyOpen, page]);
+  const currentLoad = useRef(load);
   useEffect(() => {
+    currentLoad.current = load;
     const timeout = setTimeout(() => void load(), 0);
-    return () => clearTimeout(timeout);
+    return () => {
+      clearTimeout(timeout);
+      reading.current?.abort();
+    };
   }, [load]);
   useEffect(() => {
     api<{ items: Project[] }>('/projects?pageSize=100')
@@ -80,13 +105,13 @@ export default function TasksPage() {
         ),
       });
       setOpen(false);
-      await load();
+      await currentLoad.current();
     } catch (error) {
       setMessage((error as Error).message);
     }
   }
   const count = (status: string) =>
-    data?.items.filter((task) => task.status === status).length ?? 0;
+    data ? (data.statusCounts[status] ?? 0) : '…';
   return (
     <div className="grid gap-5">
       <p className="text-sm text-black/55">Trang chủ / Công việc</p>
@@ -101,7 +126,10 @@ export default function TasksPage() {
           + Thêm công việc
         </button>
       </header>
-      <section className="grid gap-3 sm:grid-cols-5">
+      <section
+        className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6"
+        aria-label="Tổng số công việc theo bộ lọc"
+      >
         {statuses.map(([value, label]) => (
           <div className="panel" key={value}>
             <p className="text-sm">{label}</p>
@@ -130,11 +158,48 @@ export default function TasksPage() {
           aria-label="Tìm công việc"
           placeholder="Tìm công việc…"
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={(event) => {
+            setSearch(event.target.value);
+            setPage(1);
+          }}
         />
-        {message && <p role="alert">{message}</p>}
+        {message && (
+          <div role="alert">
+            <p>{message}</p>
+            <button onClick={() => void load()}>Thử tải lại</button>
+          </div>
+        )}
+        {data && (
+          <nav
+            className="flex flex-wrap items-center gap-3"
+            aria-label="Phân trang công việc"
+          >
+            <button disabled={page <= 1} onClick={() => setPage(page - 1)}>
+              Trang trước
+            </button>
+            <span>
+              Trang {data.page}/{Math.max(1, data.totalPages)} · {data.total}{' '}
+              việc phù hợp
+            </span>
+            <button
+              disabled={page >= data.totalPages}
+              onClick={() => setPage(page + 1)}
+            >
+              Trang sau
+            </button>
+            <button onClick={() => void load()}>Làm mới</button>
+            <small>
+              Cập nhật{' '}
+              {new Date(data.computedAt).toLocaleString('vi-VN', {
+                timeZone: 'Asia/Ho_Chi_Minh',
+              })}{' '}
+              (giờ Việt Nam). Bảng hiển thị {data.items.length} việc của trang
+              này.
+            </small>
+          </nav>
+        )}
         {!data ? (
-          <p role="status">Đang tải công việc…</p>
+          !message && <p role="status">Đang tải công việc…</p>
         ) : !data.items.length ? (
           <p>Chưa có công việc phù hợp.</p>
         ) : tab === 'board' ? (
@@ -181,15 +246,24 @@ export default function TasksPage() {
                     <td>
                       {task.assignees
                         .map((item) => item.user.displayName)
-                        .join(', ') || '—'}
+                        .join(', ') || 'Chưa giao'}
                     </td>
                     <td>{task.department?.name ?? '—'}</td>
                     <td>{task.priority}</td>
                     <td>{task.status}</td>
                     <td>
                       {task.dueDate
-                        ? new Date(task.dueDate).toLocaleDateString('vi-VN')
-                        : '—'}
+                        ? new Date(task.dueDate).toLocaleDateString('vi-VN', {
+                            timeZone: 'Asia/Ho_Chi_Minh',
+                          })
+                        : 'Chưa có hạn'}
+                      {task.dueDate &&
+                        data.computedAt > task.dueDate &&
+                        !['DONE', 'CANCELLED'].includes(task.status) && (
+                          <strong className="block text-red-700">
+                            Quá hạn
+                          </strong>
+                        )}
                     </td>
                     <td>
                       {task.checklist.filter((item) => item.completedAt).length}

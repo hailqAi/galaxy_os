@@ -10,6 +10,7 @@ import {
   AI_MODELS,
   ConfiguredModel,
   ProviderEvidence,
+  assertLegacyProviderAllowed,
 } from './ai-registry';
 
 export type ProviderConfig = {
@@ -21,6 +22,11 @@ export type ProviderConfig = {
 export function providerConfig(
   env: Record<string, string | undefined>,
 ): ProviderConfig | null {
+  try {
+    assertLegacyProviderAllowed(env);
+  } catch {
+    return null;
+  }
   const key = env.GALAXY_AI_API_KEY;
   const model = env.GALAXY_AI_MODEL;
   const allowed = (env.GALAXY_AI_ALLOWED_MODELS ?? '')
@@ -52,6 +58,7 @@ export async function answerFromProvider(
   signal: AbortSignal,
   options: ProviderOptions = {},
 ) {
+  assertLegacyProviderAllowed();
   if ('provider' in config)
     return answerFromSelectedProvider(
       config,
@@ -78,6 +85,7 @@ export async function answerFromProvider(
   )
     throw new Error('Context không hợp lệ hoặc chưa có nguồn');
   const combined = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
+  assertLegacyProviderAllowed();
   const response = await fetch(`${config.baseUrl}/responses`, {
     method: 'POST',
     redirect: 'error',
@@ -406,6 +414,7 @@ async function routerMetadata(
   signal: AbortSignal,
   key?: string,
 ) {
+  assertLegacyProviderAllowed();
   const combined = AbortSignal.any([signal, AbortSignal.timeout(5000)]);
   const response = await fetch(`https://openrouter.ai/api/v1/${endpoint}`, {
     method: 'GET',
@@ -758,6 +767,7 @@ async function answerFromSelectedProvider(
         );
       await options.beforeAttempt?.();
       combined.throwIfAborted();
+      assertLegacyProviderAllowed();
       const started = performance.now();
       dispatchCount++;
       try {

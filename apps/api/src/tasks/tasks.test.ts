@@ -16,11 +16,47 @@ const actor = {
   administrationTier: 1,
 } satisfies CurrentActor;
 describe('TasksService', () => {
+  it('counts every matching task, pages in stable order and uses one consistent snapshot', async () => {
+    const findMany = vi.fn().mockResolvedValue([{ id: 'last-visible-task' }]);
+    const count = vi.fn().mockResolvedValue(125);
+    const groupBy = vi
+      .fn()
+      .mockResolvedValue([{ status: 'TODO', _count: { _all: 125 } }]);
+    const transaction = vi.fn<
+      (queries: Promise<unknown>[], options?: unknown) => Promise<unknown[]>
+    >((queries) => Promise.all(queries));
+    const service = new TasksService({
+      task: { findMany, count, groupBy },
+      $transaction: transaction,
+    } as unknown as PrismaService);
+    const result = await service.list(actor, {
+      page: 3,
+      pageSize: 50,
+      projectId: 'project',
+    });
+    expect(result).toMatchObject({
+      total: 125,
+      totalPages: 3,
+      statusCounts: { TODO: 125 },
+      computedAt: expect.any(String),
+    });
+    expect(findMany.mock.calls[0]![0]).toMatchObject({
+      skip: 100,
+      take: 50,
+      orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
+    });
+    expect(groupBy.mock.calls[0]![0].where).toEqual(
+      count.mock.calls[0]![0].where,
+    );
+    expect(transaction.mock.calls[0]![1]).toEqual({
+      isolationLevel: 'RepeatableRead',
+    });
+  });
   it('lọc việc chưa kết thúc trước phân trang để P03 không suy ưu tiên từ top N đã đóng', async () => {
     const findMany = vi.fn().mockResolvedValue([]),
       count = vi.fn().mockResolvedValue(0);
     const prisma = {
-      task: { findMany, count },
+      task: { findMany, count, groupBy: vi.fn().mockResolvedValue([]) },
       $transaction: vi.fn((queries) => Promise.all(queries)),
     } as unknown as PrismaService;
     await new TasksService(prisma).list(actor, {
@@ -40,7 +76,11 @@ describe('TasksService', () => {
   it('omits allocated budget from generic Task lists without estimate.read', async () => {
     const findMany = vi.fn().mockResolvedValue([{ id: 'task' }]);
     const prisma = {
-      task: { findMany, count: vi.fn().mockResolvedValue(1) },
+      task: {
+        findMany,
+        count: vi.fn().mockResolvedValue(1),
+        groupBy: vi.fn().mockResolvedValue([]),
+      },
       $transaction: vi.fn((queries: Promise<unknown>[]) =>
         Promise.all(queries),
       ),

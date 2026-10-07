@@ -12,6 +12,7 @@ import {
   vi,
 } from 'vitest';
 import { AppModule } from '../src/app.module';
+import { TasksService } from '../src/tasks/tasks.service';
 import { assertG00Isolation } from '../scripts/g00-isolated-environment.mjs';
 
 assertG00Isolation();
@@ -167,6 +168,55 @@ describe.sequential('Sprint 1 API integration', () => {
     await request(app.getHttpServer())
       .get('/api/v1/organization')
       .set('x-galaxy-dev-auth', process.env.DEV_AUTH_USER_EMAIL!);
+  });
+
+  it('reads paged tasks and complete status totals from the same domain query', async () => {
+    const title = `tracker-${crypto.randomUUID()}`;
+    try {
+      await prisma.task.createMany({
+        data: Array.from({ length: 125 }, (_, i) => ({
+          organizationId,
+          title,
+          createdBy: adminId,
+          updatedBy: adminId,
+          status: i < 110 ? ('TODO' as const) : ('DONE' as const),
+        })),
+      });
+      const actor = await request(app.getHttpServer())
+        .get('/api/v1/me')
+        .set('x-galaxy-dev-auth', 'admin@galaxy.local')
+        .expect(200);
+      // Vitest/esbuild does not emit DTO design metadata. Exercise the real
+      // domain + database here; browser acceptance uses the compiled HTTP route.
+      const service = app.get(TasksService);
+      const response = await service.list(actor.body, {
+        search: title,
+        page: 3,
+        pageSize: 50,
+      });
+      expect(response).toMatchObject({
+        total: 125,
+        totalPages: 3,
+        statusCounts: { TODO: 110, DONE: 15 },
+        computedAt: expect.any(String),
+      });
+      expect(response.items).toHaveLength(25);
+      const open = await service.list(actor.body, {
+        search: title,
+        open: true,
+        page: 1,
+        pageSize: 50,
+      });
+      expect(open).toMatchObject({
+        total: 110,
+        statusCounts: { TODO: 110 },
+      });
+      expect(open.items).toHaveLength(50);
+    } finally {
+      await prisma.task.deleteMany({
+        where: { organizationId, title, createdBy: adminId },
+      });
+    }
   });
 
   it('denies organization update and department creation without permission', async () => {

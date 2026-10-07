@@ -1756,6 +1756,14 @@ export class ProjectAiService {
     return this.authorized(actor, projectId, async (tx) => {
       const models = await this.operationalModels(tx, actor, projectId);
       return {
+        executionPolicy:
+          process.env.GALAXY_AI_EXECUTION_POLICY ?? 'LEGACY_API_KEY',
+        ...(process.env.GALAXY_AI_EXECUTION_POLICY === 'CHATGPT_PLAN_ONLY' && {
+          chatGptConnection: {
+            status: 'ELIGIBILITY_UNCONFIRMED',
+            canConnect: false,
+          },
+        }),
         provider: models.some((m) => m.providerReady)
           ? 'CONFIGURED'
           : 'NOT_CONFIGURED',

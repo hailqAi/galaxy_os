@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
@@ -61,14 +62,19 @@ def prepare(root, output, active):
     return metadata
 
 def stage_units(root, release, private_envs, output, manifest_path):
-    output.mkdir(parents=True, exist_ok=False, mode=0o700)
+    units = {}
     for name in ['api', 'web']:
         env_file = private_envs[name].resolve(strict=True)
         if env_file.is_relative_to(release.resolve()):
             raise RuntimeError('Private environment must remain outside artifact')
-        template = (root / f'infra/systemd/galaxy-os-{name}.service.example').read_text()
-        (output / f'galaxy-os-{name}.service').write_text(template.replace('<RUNTIME_ROOT>', str(root)).replace('<CONTROLLER_PATH>', str(release / 'scripts/local-runtime.py')).replace('<PRIVATE_MANIFEST_PATH>', str(manifest_path)).replace(f'<PRIVATE_{name.upper()}_ENV_FILE>', str(env_file)))
-    shutil.copy2(root / 'infra/systemd/galaxy-os.target.example', output / 'galaxy-os.target')
+        template = (release / f'infra/systemd/galaxy-os-{name}.service.example').read_text()
+        units[f'galaxy-os-{name}.service'] = template.replace('<RUNTIME_ROOT>', str(root)).replace('<CONTROLLER_PATH>', str(release / 'scripts/local-runtime.py')).replace('<PRIVATE_MANIFEST_PATH>', str(manifest_path)).replace(f'<PRIVATE_{name.upper()}_ENV_FILE>', str(env_file))
+    units['galaxy-os.target'] = (release / 'infra/systemd/galaxy-os.target.example').read_text()
+    if any(re.search(r'<[A-Z_]+>', text) for text in units.values()):
+        raise RuntimeError('Unresolved systemd template placeholder; no units staged')
+    output.mkdir(parents=True, exist_ok=False, mode=0o700)
+    for name, text in units.items():
+        (output / name).write_text(text)
 
 def candidate_manifest(root, release, private_envs, active):
     metadata = json.loads((release / 'release.json').read_text())
@@ -80,6 +86,8 @@ def candidate_manifest(root, release, private_envs, active):
         environment = runtime.Runtime(active, release / '.runtime-preflight').environment({'envFile': str(env_file), 'environment': {}})
         if not environment.get('GALAXY_LOCAL_RUNTIME_TOKEN') or environment.get('GALAXY_RELEASE_ID') != metadata['releaseId']:
             raise RuntimeError('Private env requires matching release marker and managed token')
+        if name == 'api' and environment.get('GALAXY_AI_EXECUTION_POLICY') != 'CHATGPT_PLAN_ONLY':
+            raise RuntimeError('Candidate API requires GALAXY_AI_EXECUTION_POLICY=CHATGPT_PLAN_ONLY')
         cwd = release / 'apps' / name
         command = ['/usr/bin/node', str(cwd / 'dist/main.js')] if name == 'api' else ['/usr/bin/node', str(cwd / 'node_modules/next/dist/bin/next'), 'start', '--hostname', '0.0.0.0', '--port', '3000']
         artifacts = [cwd / 'dist'] if name == 'api' else [cwd / '.next' / part for part in ['BUILD_ID', 'server', 'static', 'build-manifest.json', 'required-server-files.json', 'prerender-manifest.json', 'routes-manifest.json']]

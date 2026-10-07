@@ -103,6 +103,11 @@ def listeners(port):
     return pids
 
 
+class ControlPlaneUnavailable(RuntimeError):
+    def __init__(self):
+        super().__init__('CONTROL_PLANE_UNAVAILABLE: không nối được user manager của UID hiện tại; kiểm owner/session và socket. Không tự phục hồi D-Bus hoặc khởi chạy stack khác.')
+
+
 class Runtime:
     def __init__(self, config, folder, timeout=40):
         self.config, self.folder, self.timeout = config, Path(folder), timeout
@@ -116,7 +121,14 @@ class Runtime:
         return unit
 
     def unit_state(self, spec):
-        output = subprocess.check_output(['systemctl', '--user', 'show', self.unit(spec), '--property=ActiveState,MainPID,ControlGroup', '--no-pager'], text=True)
+        try:
+            output = subprocess.check_output(['systemctl', '--user', 'show', self.unit(spec), '--property=ActiveState,MainPID,ControlGroup', '--no-pager'], text=True, stderr=subprocess.PIPE, timeout=5, env={**os.environ, 'LC_ALL': 'C'})
+        except subprocess.TimeoutExpired as error:
+            raise ControlPlaneUnavailable() from error
+        except subprocess.CalledProcessError as error:
+            if 'Failed to connect to bus' in (error.stderr or ''):
+                raise ControlPlaneUnavailable() from error
+            raise RuntimeError(f'systemctl {self.unit(spec)}: {(error.stderr or str(error)).strip()[:2000]}') from error
         return dict(line.split('=', 1) for line in output.splitlines() if '=' in line)
 
     def unit_owned(self, pid, spec, state):
@@ -268,7 +280,11 @@ class Runtime:
 
     def inspect(self, name, spec):
         pids = listeners(spec["port"])
-        unit_state = self.unit_state(spec) if spec.get('systemdUnit') else None
+        control_error = None
+        try:
+            unit_state = self.unit_state(spec) if spec.get('systemdUnit') else None
+        except ControlPlaneUnavailable as error:
+            unit_state, control_error = None, str(error)
         result = {
             "port": spec["port"],
             "pid": None,
@@ -276,7 +292,11 @@ class Runtime:
             "state": "STOPPED",
             "managed": False,
         }
+        if control_error:
+            result.update(controlPlane='CONTROL_PLANE_UNAVAILABLE', diagnostic=control_error)
         if not pids:
+            if control_error:
+                result['state'] = 'APP_DOWN'
             if unit_state and unit_state.get('ActiveState') in ['active', 'activating', 'deactivating']:
                 result['state'] = 'NOT_READY'
             return result
@@ -284,6 +304,9 @@ class Runtime:
             raise RuntimeError(
                 f"{name}: cổng {spec['port']} thuộc PID {pids}; identity/config không khớp, không dừng hoặc spawn"
             )
+        if control_error:
+            result.update(pid=pids[0], state='APP_SERVING' if self.healthy(spec) else 'APP_NOT_READY')
+            return result
         record = self.load().get(name, {})
         current = identity(pids[0])
         if unit_state is not None:
@@ -311,7 +334,9 @@ class Runtime:
             "runtimeRoot": self.config["runtimeRoot"],
             "identity": self.config.get("identity", {}),
             "databaseReadOnlyCheck": self.check_database(),
-            "state": "READY"
+            "state": "CONTROL_PLANE_UNAVAILABLE"
+            if any(s.get('controlPlane') == 'CONTROL_PLANE_UNAVAILABLE' for s in services.values())
+            else "READY"
             if all(s["state"] == "READY" for s in services.values())
             else "PARTIAL",
             "services": services,
@@ -402,6 +427,8 @@ class Runtime:
                 name: self.inspect(name, spec)
                 for name, spec in self.config["services"].items()
             }
+            if any(s.get('controlPlane') == 'CONTROL_PLANE_UNAVAILABLE' for s in before.values()):
+                raise ControlPlaneUnavailable()
             self.check_database()
             if any(s["state"] == "NOT_READY" for s in before.values()):
                 raise RuntimeError("Runtime hiện hữu chưa ready; không spawn thêm")
@@ -501,6 +528,10 @@ class Runtime:
 
     def stop(self):
         with self.lock():
+            # Verify every control connection before stopping either service.
+            for spec in self.config['services'].values():
+                if spec.get('systemdUnit'):
+                    self.unit_state(spec)
             for name, spec in reversed(list(self.config['services'].items())):
                 if spec.get('systemdUnit'):
                     self.stop_unit(name, spec)

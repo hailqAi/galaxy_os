@@ -6,7 +6,17 @@ import {
   aiStatusLabel,
   ModelSelector,
   aiSessionKey,
+  ChatGptConnection,
 } from './project-ai';
+
+it('shows blocked ChatGPT eligibility without models, a login redirect or key fallback', () => {
+  const html = renderToStaticMarkup(createElement(ChatGptConnection));
+  expect(html).toContain('Kết nối ChatGPT');
+  expect(html).toContain('disabled=""');
+  expect(html).toContain('chưa được xác nhận');
+  expect(html).not.toContain('href=');
+  expect(html).not.toContain('CONNECTED');
+});
 
 it('thông báo GENERAL không đọc hồ sơ và phân biệt quota với credential', () => {
   const html = renderToStaticMarkup(

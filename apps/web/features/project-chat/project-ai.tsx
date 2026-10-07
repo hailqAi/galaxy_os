@@ -5,6 +5,7 @@ import React, {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useId,
   useRef,
   useState,
 } from 'react';
@@ -444,6 +445,26 @@ export function AiAnswer({
   );
 }
 
+export function ChatGptConnection() {
+  const description = useId();
+  return (
+    <section aria-label="Kết nối ChatGPT" className="ai-capability-state">
+      <button type="button" disabled aria-describedby={description}>
+        Kết nối ChatGPT
+      </button>
+      <p id={description}>
+        Quyền kết nối ChatGPT của ứng dụng Galaxy OS chưa được xác nhận. Chưa có
+        tài khoản kết nối hoặc model được cấp. Bạn vẫn có thể xem hồ sơ, công
+        việc và lịch sử còn quyền.
+      </p>
+      <p>
+        Các dịch vụ dùng API key đang tạm dừng. Không tự chuyển sang dịch vụ
+        tính phí.
+      </p>
+    </section>
+  );
+}
+
 export function ModelSelector({
   models,
   value,
@@ -531,6 +552,7 @@ export function ProjectAi({
   const [mobileHistory, setMobileHistory] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [models, setModels] = useState<ModelChoice[]>([]);
+  const [planOnly, setPlanOnly] = useState(false);
   const choices = models.filter((item) => item.available);
   const [model, setModel] = useState('');
   const [reasoning, setReasoning] = useState('default');
@@ -772,6 +794,7 @@ export function ProjectAi({
           [
             call<{
               provider: string;
+              executionPolicy?: string;
               conversations: Conversation[];
               models: ModelChoice[];
             }>(),
@@ -825,6 +848,7 @@ export function ProjectAi({
           return;
         }
         setVerified(true);
+        setPlanOnly(result.executionPolicy === 'CHATGPT_PLAN_ONLY');
         setModels(result.models ?? []);
         if (!modelInitialized.current && result.models) {
           modelInitialized.current = true;
@@ -1239,6 +1263,7 @@ export function ProjectAi({
   };
   const modelControls = (
     <div className="ai-context-bar">
+      {planOnly && <ChatGptConnection />}
       <p className="ai-privacy">
         Ngữ cảnh: {projectName ?? 'Dự án'} · Chỉ dự án này
       </p>
@@ -1704,6 +1729,12 @@ export function ProjectAi({
                 >
                   <label>
                     Câu hỏi AI
+                    {planOnly && (
+                      <span role="status" className="block text-sm">
+                        Chưa kết nối ChatGPT · Quyền ứng dụng chưa được xác
+                        nhận.
+                      </span>
+                    )}
                     <ChatComposerInput
                       aria-label="Câu hỏi AI"
                       value={question}

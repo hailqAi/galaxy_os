@@ -6,7 +6,7 @@ import https from 'node:https';
 import ipaddr from 'ipaddr.js';
 import { parse, type DefaultTreeAdapterMap } from 'parse5';
 import { z } from 'zod';
-import { AiError } from './ai-registry';
+import { AiError, assertLegacyProviderAllowed } from './ai-registry';
 
 export type WebPolicy = {
   enabled: boolean;
@@ -223,6 +223,7 @@ export async function webSearch(
     credits: number | null;
   }) => Promise<void>,
 ) {
+  assertLegacyProviderAllowed();
   if (
     !policy.enabled ||
     !policy.key ||
@@ -237,6 +238,7 @@ export async function webSearch(
   const combined = AbortSignal.any([signal, AbortSignal.timeout(10000)]);
   await beforeRequest();
   combined.throwIfAborted();
+  assertLegacyProviderAllowed();
   let recorded = false;
   try {
     const response = await fetch('https://api.tavily.com/search', {

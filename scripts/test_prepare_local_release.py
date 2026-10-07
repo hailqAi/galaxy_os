@@ -10,6 +10,27 @@ release = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(release)
 
 class ReleaseTests(unittest.TestCase):
+    def test_units_use_candidate_templates_and_reject_unresolved_placeholders(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root, candidate = Path(folder) / 'old-checkout', Path(folder) / 'candidate'
+            templates = candidate / 'infra/systemd'
+            templates.mkdir(parents=True)
+            envs = {name: Path(folder) / f'{name}.env' for name in ['api', 'web']}
+            for name, path in envs.items():
+                path.touch()
+                (templates / f'galaxy-os-{name}.service.example').write_text(f'[Service]\nWorkingDirectory=<RUNTIME_ROOT>\nEnvironmentFile=<PRIVATE_{name.upper()}_ENV_FILE>\nExecStart=/usr/bin/python3 <CONTROLLER_PATH> serve {name}\nEnvironment=GALAXY_LOCAL_RUNTIME_MANIFEST=<PRIVATE_MANIFEST_PATH>\n')
+            (templates / 'galaxy-os.target.example').write_text('[Unit]\nDescription=Candidate target\n')
+            output = Path(folder) / 'units'
+            release.stage_units(root, candidate, envs, output, Path(folder) / 'manifest.json')
+            api = (output / 'galaxy-os-api.service').read_text()
+            self.assertIn(f'WorkingDirectory={root}', api)
+            self.assertIn(f'{candidate}/scripts/local-runtime.py serve api', api)
+            self.assertNotIn('<', api)
+            (templates / 'galaxy-os-web.service.example').write_text('[Service]\nWorkingDirectory=<REPOSITORY_PATH>\n')
+            rejected = Path(folder) / 'rejected'
+            with self.assertRaisesRegex(RuntimeError, 'placeholder'):
+                release.stage_units(root, candidate, envs, rejected, Path(folder) / 'manifest.json')
+            self.assertFalse(rejected.exists())
     def test_candidate_identity_reports_current_artifacts_and_keeps_database_evidence(self):
         with tempfile.TemporaryDirectory() as folder:
             root, candidate = Path(folder) / 'source', Path(folder) / 'release'
@@ -22,7 +43,7 @@ class ReleaseTests(unittest.TestCase):
                 path.write_text(value)
             for name in ['node_modules', 'apps/web/.next/server', 'apps/web/.next/static']: (candidate / name).mkdir(parents=True)
             envs = {name: Path(folder) / f'{name}.env' for name in ['api', 'web']}
-            for path in envs.values(): path.write_text('GALAXY_LOCAL_RUNTIME_TOKEN=synthetic-token\nGALAXY_RELEASE_ID=new-release\n')
+            for path in envs.values(): path.write_text('GALAXY_LOCAL_RUNTIME_TOKEN=synthetic-token\nGALAXY_RELEASE_ID=new-release\nGALAXY_AI_EXECUTION_POLICY=CHATGPT_PLAN_ONLY\n')
             active = {'expectedSchema': {'migrations': []}, 'identity': {'webSource': 'old-source', 'webBuild': 'old-dev-build', 'apiSource': 'old-source', 'apiBuildSha256': 'old-digest', 'apiArtifact': '/old-artifact', 'envFile': '/old-env', 'compatibility': 'old-artifact compatibility', 'database': {'name': 'galaxy_os'}, 'fileStorage': '/existing/storage', 'm2SchemaReady': True, 'm3SchemaReady': True}}
             identity = release.candidate_manifest(root, candidate, envs, active)['identity']
             self.assertEqual('snapshot-sha256:' + 'b' * 64, identity['webSource'])
@@ -36,6 +57,9 @@ class ReleaseTests(unittest.TestCase):
             metadata['verifiedCodeSha'] = 'c' * 40
             (candidate / 'release.json').write_text(json.dumps(metadata))
             self.assertEqual('c' * 40, release.candidate_manifest(root, candidate, envs, active)['identity']['apiSource'])
+            envs['api'].write_text('GALAXY_LOCAL_RUNTIME_TOKEN=synthetic-token\nGALAXY_RELEASE_ID=new-release\n')
+            with self.assertRaisesRegex(RuntimeError, 'CHATGPT_PLAN_ONLY'):
+                release.candidate_manifest(root, candidate, envs, active)
     def test_snapshot_captures_dirty_source_and_excludes_private_environment(self):
         with tempfile.TemporaryDirectory() as folder:
             root, output = Path(folder) / 'source', Path(folder) / 'snapshot'

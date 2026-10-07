@@ -11,6 +11,174 @@ import {
 
 let fixture: Awaited<ReturnType<typeof createM2BrowserFixture>>;
 let productId: string;
+test('ChatGPT plan-only gate shows no granted models or working login redirect', async ({
+  page,
+}, info) => {
+  test.skip(
+    process.env.GALAXY_AI_EXECUTION_POLICY !== 'CHATGPT_PLAN_ONLY',
+    'Requires the plan-only fixture API',
+  );
+  const cookie = fixture.users.sender!.cookie,
+    split = cookie.indexOf('=');
+  await page.context().addCookies([
+    {
+      name: cookie.slice(0, split),
+      value: cookie.slice(split + 1),
+      url: process.env.APP_PUBLIC_ORIGIN!,
+      httpOnly: true,
+      sameSite: 'Lax',
+    },
+  ]);
+  const metadata = page.waitForResponse(
+    (response) =>
+      response
+        .url()
+        .endsWith(`/api/v1/project-chat/projects/${fixture.projectId}/ai`) &&
+      response.request().method() === 'GET',
+  );
+  await page.goto(`/projects/${fixture.projectId}/ai`);
+  expect(await (await metadata).json()).toMatchObject({
+    executionPolicy: 'CHATGPT_PLAN_ONLY',
+    models: [],
+    chatGptConnection: { status: 'ELIGIBILITY_UNCONFIRMED', canConnect: false },
+  });
+  await expect(
+    page.getByRole('button', { name: 'Kết nối ChatGPT', exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByText(
+      /Quyền kết nối ChatGPT của ứng dụng Galaxy OS chưa được xác nhận/,
+    ),
+  ).toBeVisible();
+  for (const width of [1440, 1495, 720, 375, 390]) {
+    await page.setViewportSize({ width, height: 1024 });
+    await expect(
+      page.getByText(
+        'Chưa kết nối ChatGPT · Quyền ứng dụng chưa được xác nhận.',
+        { exact: true },
+      ),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
+    await page.screenshot({
+      path: info.outputPath(`chatgpt-gate-${width}.png`),
+      fullPage: true,
+    });
+  }
+});
+test('Task pagination uses domain totals, retries failed reads and keeps the current query after a delayed create', async ({
+  page,
+}) => {
+  const db = new PrismaClient();
+  const marker = `tracker-${randomUUID()}`;
+  const project = await db.project.findUniqueOrThrow({
+    where: { id: fixture.projectId },
+  });
+  try {
+    await db.task.createMany({
+      data: Array.from({ length: 125 }, (_, i) => ({
+        organizationId: project.organizationId,
+        projectId: project.id,
+        title: marker,
+        createdBy: fixture.users.sender!.id,
+        updatedBy: fixture.users.sender!.id,
+        status: i < 110 ? ('TODO' as const) : ('DONE' as const),
+      })),
+    });
+    const cookie = fixture.users.sender!.cookie,
+      split = cookie.indexOf('=');
+    await page.context().addCookies([
+      {
+        name: cookie.slice(0, split),
+        value: cookie.slice(split + 1),
+        url: process.env.APP_PUBLIC_ORIGIN!,
+        httpOnly: true,
+        sameSite: 'Lax',
+      },
+    ]);
+    await page.goto(`/tasks?tab=all&projectId=${project.id}`);
+    await page.getByLabel('Tìm công việc').fill(marker);
+    const pagination = page.getByRole('navigation', {
+      name: 'Phân trang công việc',
+    });
+    await expect(pagination).toContainText('125 việc phù hợp');
+    await expect(
+      page.getByRole('region', { name: 'Tổng số công việc theo bộ lọc' }),
+    ).toContainText('110');
+    await page.getByRole('button', { name: 'Trang sau' }).click();
+    await expect(pagination).toContainText('Trang 2/3');
+    let failOnce = true;
+    await page.route('**/api/v1/tasks?**', async (route) => {
+      if (failOnce) {
+        failOnce = false;
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: '{"message":"Fixture tạm gián đoạn"}',
+        });
+      } else await route.continue();
+    });
+    await page.getByRole('button', { name: 'Trang sau' }).click();
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'Fixture tạm gián đoạn' }),
+    ).toContainText('Fixture tạm gián đoạn');
+    await expect(page.getByText('Đang tải công việc…')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Thử tải lại' }).click();
+    await expect(pagination).toContainText('Trang 3/3');
+    await expect(page.locator('tbody tr')).toHaveCount(25);
+    await page.unroute('**/api/v1/tasks?**');
+
+    // Browser race fixture only: no fake task is written to the domain database.
+    let release!: () => void;
+    const delayed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started!: () => void;
+    const requested = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    await page.route('**/api/v1/tasks', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      started();
+      await delayed;
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: '{}',
+      });
+    });
+    await page.getByRole('button', { name: '+ Thêm công việc' }).click();
+    await page
+      .getByLabel('Tiêu đề', { exact: true })
+      .fill('Delayed UI fixture');
+    await page.getByRole('button', { name: 'Tạo', exact: true }).click();
+    await requested;
+    await page.evaluate(() => {
+      const url = new URL(location.href);
+      url.searchParams.set('page', '2');
+      history.pushState(null, '', url);
+    });
+    await expect(pagination).toContainText('Trang 2/3');
+    const refreshed = page.waitForResponse(
+      (response) =>
+        response.url().includes('/api/v1/tasks?') &&
+        response.request().method() === 'GET',
+    );
+    release();
+    expect(new URL((await refreshed).url()).searchParams.get('page')).toBe('2');
+    await expect(pagination).toContainText('Trang 2/3');
+  } finally {
+    await db.task.deleteMany({
+      where: {
+        organizationId: project.organizationId,
+        projectId: project.id,
+        title: marker,
+      },
+    });
+    await db.$disconnect();
+  }
+});
 test.beforeAll(async () => {
   fixture = await createM2BrowserFixture();
   const db = new PrismaClient();

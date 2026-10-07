@@ -26,6 +26,38 @@ class SystemdTests(unittest.TestCase):
         self.manager = runtime.Runtime({'services': {'api': self.spec}}, self.temp.name)
     def tearDown(self):
         self.temp.cleanup()
+    def test_bus_unavailable_preserves_serving_evidence_without_claiming_management(self):
+        self.manager.config['runtimeRoot'] = self.temp.name
+        self.spec['fingerprints'] = {}
+        failure = subprocess.CalledProcessError(1, ['systemctl'], stderr='Failed to connect to bus: No such file or directory')
+        with patch.object(runtime, 'listeners', return_value=[124]), patch.object(self.manager, 'matches', return_value=True), patch.object(runtime.subprocess, 'check_output', side_effect=failure), patch.object(self.manager, 'healthy', return_value=True):
+            result = self.manager.status()
+            self.assertEqual('CONTROL_PLANE_UNAVAILABLE', result['state'])
+            self.assertEqual('APP_SERVING', result['services']['api']['state'])
+            self.assertFalse(result['services']['api']['managed'])
+            self.assertEqual(124, result['services']['api']['pid'])
+    def test_bus_unavailable_without_listener_reports_down_and_blocks_mutations(self):
+        self.manager.config['runtimeRoot'] = self.temp.name
+        self.spec['fingerprints'] = {}
+        failure = subprocess.CalledProcessError(1, ['systemctl'], stderr='Failed to connect to bus: No such file or directory')
+        with patch.object(runtime, 'listeners', return_value=[]), patch.object(runtime.subprocess, 'check_output', side_effect=failure), patch.object(runtime.subprocess, 'run') as run:
+            result = self.manager.status()
+            self.assertEqual('CONTROL_PLANE_UNAVAILABLE', result['state'])
+            self.assertEqual('APP_DOWN', result['services']['api']['state'])
+            for command in [self.manager.up, self.manager.stop]:
+                with self.assertRaisesRegex(RuntimeError, 'CONTROL_PLANE_UNAVAILABLE'):
+                    command()
+            run.assert_not_called()
+    def test_bus_failure_does_not_mask_unrelated_listener(self):
+        failure = subprocess.CalledProcessError(1, ['systemctl'], stderr='Failed to connect to bus: No such file or directory')
+        with patch.object(runtime, 'listeners', return_value=[124]), patch.object(self.manager, 'matches', return_value=False), patch.object(runtime.subprocess, 'check_output', side_effect=failure):
+            with self.assertRaisesRegex(RuntimeError, 'identity/config'):
+                self.manager.inspect('api', self.spec)
+    def test_non_bus_systemctl_failure_keeps_actionable_diagnostic(self):
+        failure = subprocess.CalledProcessError(1, ['systemctl'], stderr='Unit galaxy-os-api.service could not be found.')
+        with patch.object(runtime.subprocess, 'check_output', side_effect=failure):
+            with self.assertRaisesRegex(RuntimeError, 'could not be found'):
+                self.manager.unit_state(self.spec)
     def test_active_unit_without_listener_is_not_ready(self):
         with patch.object(runtime, 'listeners', return_value=[]), patch.object(runtime.subprocess, 'check_output', return_value='ActiveState=active\nMainPID=123\nControlGroup=/user.slice/galaxy-os-api.service\n'):
             self.assertEqual('NOT_READY', self.manager.inspect('api', self.spec)['state'])

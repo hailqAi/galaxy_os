@@ -106,23 +106,39 @@ export class TasksService {
           ? { status: { in: ['DONE', 'CANCELLED'] } }
           : undefined,
     };
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.task.findMany({
-        where,
-        include: this.include(),
-        omit: this.financialOmit(actor),
-        orderBy: { [q.sort ?? 'updatedAt']: q.direction ?? 'desc' },
-        skip: (q.page - 1) * q.pageSize,
-        take: q.pageSize,
-      }),
-      this.prisma.task.count({ where }),
-    ]);
+    const grouped = this.prisma.task.groupBy({
+      by: ['status'],
+      where,
+      _count: { _all: true },
+    });
+    const [items, total, counts] = await this.prisma.$transaction(
+      [
+        this.prisma.task.findMany({
+          where,
+          include: this.include(),
+          omit: this.financialOmit(actor),
+          orderBy: [
+            { [q.sort ?? 'updatedAt']: q.direction ?? 'desc' },
+            { id: 'asc' },
+          ],
+          skip: (q.page - 1) * q.pageSize,
+          take: q.pageSize,
+        }),
+        this.prisma.task.count({ where }),
+        grouped,
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
     return {
       items,
       page: q.page,
       pageSize: q.pageSize,
       total,
       totalPages: Math.ceil(total / q.pageSize),
+      statusCounts: Object.fromEntries(
+        counts.map((row) => [row.status, row._count._all]),
+      ),
+      computedAt: now.toISOString(),
     };
   }
   async get(actor: CurrentActor, id: string) {

@@ -82,6 +82,8 @@ export class AiError extends Error {
     readonly httpStatus: number | null = null,
     readonly upstream: {
       code?: string;
+      requestId?: string;
+      param?: string;
       retryAfterMs?: number;
       limitSource?: 'OPENROUTER' | 'UPSTREAM' | 'UNKNOWN';
       rateLimit?: {
@@ -447,6 +449,7 @@ export function configuredModel(
   id: string,
   historical = false,
 ) {
+  if (!historical) assertLegacyProviderAllowed();
   const model = AI_MODELS.find((m) => m.id === id);
   if (!model) throw new AiError('MODEL_NOT_AVAILABLE');
   if (config.loadStatus === 'CREDENTIAL_NOT_LOADED')
@@ -514,6 +517,19 @@ export function configuredModel(
   };
 }
 export type ConfiguredModel = ReturnType<typeof configuredModel>;
+
+// Deployment policy is independent of provider credentials and Project egress ACL.
+// An omitted value preserves old releases; new plan-only releases pin this env
+// in their private manifest. Re-enabling keys requires an explicit policy change.
+export function assertLegacyProviderAllowed(env = process.env) {
+  if (env.GALAXY_AI_EXECUTION_POLICY === 'CHATGPT_PLAN_ONLY')
+    throw new AiError('PAUSED_BY_USER');
+  if (
+    env.GALAXY_AI_EXECUTION_POLICY &&
+    env.GALAXY_AI_EXECUTION_POLICY !== 'LEGACY_API_KEY'
+  )
+    throw new AiError('INVALID_EXECUTION_POLICY');
+}
 export function projectPolicy(
   config: Pick<ConfiguredModel, 'provider' | 'dataPolicy' | 'projectPolicy'>,
   organizationId: string,
@@ -615,6 +631,7 @@ export function modelChoices(
   organizationId: string,
   projectId: string,
 ) {
+  if (process.env.GALAXY_AI_EXECUTION_POLICY === 'CHATGPT_PLAN_ONLY') return [];
   return AI_MODELS.map((model) => {
     const parsed = settings.safeParse(config[model.provider]);
     const state = parsed.success ? parsed.data : undefined;
