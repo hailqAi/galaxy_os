@@ -2757,37 +2757,17 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       otherProjectId: snapshotProjectId,
     };
   };
-  it('prepares customer contract, payment schedule and installation snapshots through real domain writers without business side effects', async () => {
-    const {
-      actor,
-      contracts,
-      contract,
-      schedules,
-      payment,
-      room,
-      role,
-      run,
-      otherProjectId,
-    } = await customerSnapshotFixture();
-    const installation = app.get(InstallationService);
-    const plan = await installation.createPlan(actor, {
-      projectId: otherProjectId,
-      planNumber: `I-${run}`,
-      name: 'Lịch dự kiến',
-      siteReady: false,
-      customerCoordination: false,
-      plannedStartDate: new Date('2027-01-02Z'),
-    });
-    await installation.createWorkOrder(actor, plan.id, {
-      workOrderNumber: `W-${run}`,
-      title: 'Lắp hạng mục A',
-      requiredInventory: false,
-      approvedDrawing: false,
-      checklist: [{ title: 'Kiểm tra', required: true }],
-    });
-    const sourceRows = (
-      await get('sender', `/rooms/${room.id}/release-sources`).expect(200)
-    ).body;
+  describe.sequential('customer domain snapshots through real writers', () => {
+    // Keep each security/business assertion within the normal 5s test deadline.
+    // This is one ordered publication journey; setup and phases have distinct failures.
+    let fixture: Awaited<ReturnType<typeof customerSnapshotFixture>>;
+    let installation: InstallationService;
+    let plan: Awaited<ReturnType<InstallationService['createPlan']>>;
+    let sourceRows: {
+      sourceType: string;
+      sourceId: string;
+      sourceFingerprint: string;
+    }[];
     const completed: {
       id: string;
       bytes: Buffer;
@@ -2798,249 +2778,301 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
         clientKey: string;
       };
     }[] = [];
-    for (const [sourceType, sourceId, word] of [
-      ['CONTRACT', contract.id, 'Khách đúng hồ sơ'],
-      ['PAYMENT', schedules[0]!.id, '120000'],
-      ['CUSTOMER_PAYMENT_RECORD', payment.id, '120000'],
-      ['DELIVERY_INSTALL', plan.id, 'Lắp hạng mục A'],
-    ] as const) {
-      const source = sourceRows.find(
-        (s: { sourceType: string; sourceId: string }) =>
-          s.sourceType === sourceType && s.sourceId === sourceId,
-      );
-      expect(
-        source,
-        `Nguồn ${sourceType} phải có đường chuẩn bị thật`,
-      ).toBeDefined();
-      const input = {
-        sourceType,
-        sourceId,
-        sourceFingerprint: source.sourceFingerprint,
-        clientKey: randomUUID(),
-      };
-      await post('sender', `/rooms/${room.id}/releases`, {
-        ...input,
-        sourceFingerprint: '0'.repeat(64),
-      }).expect(409);
-      const prepared = (
-        await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+    beforeAll(async () => {
+      fixture = await customerSnapshotFixture();
+      const { actor, otherProjectId, run, room } = fixture;
+      installation = app.get(InstallationService);
+      plan = await installation.createPlan(actor, {
+        projectId: otherProjectId,
+        planNumber: `I-${run}`,
+        name: 'Lịch dự kiến',
+        siteReady: false,
+        customerCoordination: false,
+        plannedStartDate: new Date('2027-01-02Z'),
+      });
+      await installation.createWorkOrder(actor, plan.id, {
+        workOrderNumber: `W-${run}`,
+        title: 'Lắp hạng mục A',
+        requiredInventory: false,
+        approvedDrawing: false,
+        checklist: [{ title: 'Kiểm tra', required: true }],
+      });
+      sourceRows = (
+        await get('sender', `/rooms/${room.id}/release-sources`).expect(200)
       ).body;
+    });
+    it.each([
+      'CONTRACT',
+      'PAYMENT',
+      'CUSTOMER_PAYMENT_RECORD',
+      'DELIVERY_INSTALL',
+    ] as const)(
+      'publishes %s idempotently with fresh fingerprints, publisher authority and redacted bytes',
+      async (sourceType) => {
+        const { contract, schedules, payment, room } = fixture;
+        const [sourceId, word] = (
+          {
+            CONTRACT: [contract.id, 'Khách đúng hồ sơ'],
+            PAYMENT: [schedules[0]!.id, '120000'],
+            CUSTOMER_PAYMENT_RECORD: [payment.id, '120000'],
+            DELIVERY_INSTALL: [plan.id, 'Lắp hạng mục A'],
+          } as const
+        )[sourceType];
+        const source = sourceRows.find(
+          (s: { sourceType: string; sourceId: string }) =>
+            s.sourceType === sourceType && s.sourceId === sourceId,
+        );
+        expect(
+          source,
+          `Nguồn ${sourceType} phải có đường chuẩn bị thật`,
+        ).toBeDefined();
+        const input = {
+          sourceType,
+          sourceId,
+          sourceFingerprint: source!.sourceFingerprint,
+          clientKey: randomUUID(),
+        };
+        await post('sender', `/rooms/${room.id}/releases`, {
+          ...input,
+          sourceFingerprint: '0'.repeat(64),
+        }).expect(409);
+        const prepared = (
+          await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
+        ).body;
+        expect(
+          (
+            await post('sender', `/rooms/${room.id}/releases`, input).expect(
+              201,
+            )
+          ).body.id,
+        ).toBe(prepared.id);
+        await post('sender', `/rooms/${room.id}/releases`, {
+          ...input,
+          sourceFingerprint: 'f'.repeat(64),
+        }).expect(409);
+        const preview = (
+          await getBinary(
+            'publisher',
+            `/releases/${prepared.id}/preview`,
+          ).expect(200)
+        ).body as Buffer;
+        expect(preview.toString()).toContain(word);
+        expect(preview.toString()).not.toMatch(
+          /bankReference|exchangeRate|internalNote|overrideReason|PRIVATE-|INTERNAL-/,
+        );
+        const review = (
+          await get('publisher', `/releases/${prepared.id}/review`).expect(200)
+        ).body;
+        await post('sender', `/releases/${prepared.id}/publish`, {
+          confirmed: true,
+          recipientHash: review.recipientHash,
+        }).expect(403);
+        await post('publisher', `/releases/${prepared.id}/publish`, {
+          confirmed: true,
+          recipientHash: review.recipientHash,
+        }).expect(201);
+        expect(
+          (
+            await getBinary(
+              'guest',
+              `/releases/${prepared.id}/download`,
+            ).expect(200)
+          ).body,
+        ).toEqual(preview);
+        await get('tenantB', `/releases/${prepared.id}/download`).expect(404);
+        completed.push({ id: prepared.id, bytes: preview, input });
+      },
+    );
+    it('rejects changed contracts and in-flight revocation, cleans owned bytes and retries without duplicates', async () => {
+      const { actor, contracts, contract, room, role, otherProjectId } =
+        fixture;
       expect(
-        (await post('sender', `/rooms/${room.id}/releases`, input).expect(201))
-          .body.id,
-      ).toBe(prepared.id);
-      await post('sender', `/rooms/${room.id}/releases`, {
-        ...input,
-        sourceFingerprint: 'f'.repeat(64),
-      }).expect(409);
-      const preview = (
-        await getBinary('publisher', `/releases/${prepared.id}/preview`).expect(
-          200,
-        )
-      ).body as Buffer;
-      expect(preview.toString()).toContain(word);
-      expect(preview.toString()).not.toMatch(
-        /bankReference|exchangeRate|internalNote|overrideReason|PRIVATE-|INTERNAL-/,
-      );
-      const review = (
-        await get('publisher', `/releases/${prepared.id}/review`).expect(200)
+        (await db.contract.findUniqueOrThrow({ where: { id: contract.id } }))
+          .status,
+      ).toBe('DRAFT');
+      const original = completed[0]!;
+      const pending = (
+        await post('sender', `/rooms/${room.id}/releases`, {
+          ...original.input,
+          clientKey: randomUUID(),
+        }).expect(201)
       ).body;
-      await post('sender', `/releases/${prepared.id}/publish`, {
-        confirmed: true,
-        recipientHash: review.recipientHash,
-      }).expect(403);
-      await post('publisher', `/releases/${prepared.id}/publish`, {
-        confirmed: true,
-        recipientHash: review.recipientHash,
-      }).expect(201);
+      const storage = app.get(FileStorage),
+        put = storage.putStream.bind(storage);
+      const change = vi
+        .spyOn(storage, 'putStream')
+        .mockImplementationOnce(async (...args) => {
+          await contracts.transition(actor, otherProjectId, contract.id, {
+            status: 'INTERNAL_REVIEW',
+          });
+          return put(...args);
+        });
+      try {
+        await post('sender', `/rooms/${room.id}/releases`, {
+          ...original.input,
+          clientKey: randomUUID(),
+        }).expect(409);
+      } finally {
+        change.mockRestore();
+      }
+      await get('publisher', `/releases/${pending.id}/preview`).expect(409);
       expect(
         (
-          await getBinary('guest', `/releases/${prepared.id}/download`).expect(
+          await getBinary('guest', `/releases/${original.id}/download`).expect(
             200,
           )
         ).body,
-      ).toEqual(preview);
-      await get('tenantB', `/releases/${prepared.id}/download`).expect(404);
-      completed.push({ id: prepared.id, bytes: preview, input });
-    }
-    expect(
-      (await db.contract.findUniqueOrThrow({ where: { id: contract.id } }))
-        .status,
-    ).toBe('DRAFT');
-    const original = completed[0]!;
-    const pending = (
-      await post('sender', `/rooms/${room.id}/releases`, {
-        ...original.input,
+      ).toEqual(original.bytes);
+      const fresh = (
+        await get('sender', `/rooms/${room.id}/release-sources`).expect(200)
+      ).body.find(
+        (r: { sourceType: string; sourceId: string }) =>
+          r.sourceType === 'CONTRACT' && r.sourceId === contract.id,
+      );
+      const input = {
+        sourceType: 'CONTRACT',
+        sourceId: contract.id,
+        sourceFingerprint: fresh.sourceFingerprint,
         clientKey: randomUUID(),
-      }).expect(201)
-    ).body;
-    const storage = app.get(FileStorage),
-      put = storage.putStream.bind(storage);
-    const change = vi
-      .spyOn(storage, 'putStream')
-      .mockImplementationOnce(async (...args) => {
-        await contracts.transition(actor, otherProjectId, contract.id, {
-          status: 'INTERNAL_REVIEW',
+      };
+      const finalize = storage.publishPending.bind(storage);
+      let ownedKey = '';
+      const revoked = vi
+        .spyOn(storage, 'publishPending')
+        .mockImplementationOnce(async (key, claim) => {
+          ownedKey = key;
+          await finalize(key, claim);
+          const revokedRoles = await db.userRole.updateMany({
+            where: { roleId: role.id, userId: actor.userId },
+            data: { status: 'archived' },
+          });
+          expect(revokedRoles.count).toBe(1);
         });
-        return put(...args);
-      });
-    try {
-      await post('sender', `/rooms/${room.id}/releases`, {
-        ...original.input,
-        clientKey: randomUUID(),
-      }).expect(409);
-    } finally {
-      change.mockRestore();
-    }
-    await get('publisher', `/releases/${pending.id}/preview`).expect(409);
-    expect(
-      (
-        await getBinary('guest', `/releases/${original.id}/download`).expect(
-          200,
-        )
-      ).body,
-    ).toEqual(original.bytes);
-    const fresh = (
-      await get('sender', `/rooms/${room.id}/release-sources`).expect(200)
-    ).body.find(
-      (r: { sourceType: string; sourceId: string }) =>
-        r.sourceType === 'CONTRACT' && r.sourceId === contract.id,
-    );
-    const input = {
-      sourceType: 'CONTRACT',
-      sourceId: contract.id,
-      sourceFingerprint: fresh.sourceFingerprint,
-      clientKey: randomUUID(),
-    };
-    const finalize = storage.publishPending.bind(storage);
-    let ownedKey = '';
-    const revoked = vi
-      .spyOn(storage, 'publishPending')
-      .mockImplementationOnce(async (key, claim) => {
-        ownedKey = key;
-        await finalize(key, claim);
-        const revokedRoles = await db.userRole.updateMany({
+      try {
+        await post('sender', `/rooms/${room.id}/releases`, input).expect(404);
+      } finally {
+        revoked.mockRestore();
+        await db.userRole.updateMany({
           where: { roleId: role.id, userId: actor.userId },
-          data: { status: 'archived' },
+          data: { status: 'active' },
         });
-        expect(revokedRoles.count).toBe(1);
-      });
-    try {
-      await post('sender', `/rooms/${room.id}/releases`, input).expect(404);
-    } finally {
-      revoked.mockRestore();
-      await db.userRole.updateMany({
-        where: { roleId: role.id, userId: actor.userId },
-        data: { status: 'active' },
-      });
-    }
-    expect(ownedKey).not.toBe('');
-    expect(await db.fileAsset.count({ where: { storageKey: ownedKey } })).toBe(
-      0,
-    );
-    expect(
-      await db.contractDocument.count({ where: { storageKey: ownedKey } }),
-    ).toBe(0);
-    expect(
-      await db.chatDocumentRelease.count({
-        where: { roomId: room.id, prepareKey: input.clientKey },
-      }),
-    ).toBe(0);
-    await expect(storage.read(ownedKey)).rejects.toThrow();
-    const parallel = await Promise.all([
-      post('sender', `/rooms/${room.id}/releases`, input),
-      post('sender', `/rooms/${room.id}/releases`, input),
-    ]);
-    expect(parallel.map((r) => r.status)).toEqual([201, 201]);
-    expect(parallel[0]!.body.id).toBe(parallel[1]!.body.id);
-    await contracts.transition(actor, otherProjectId, contract.id, {
-      status: 'SIGNED',
+      }
+      expect(ownedKey).not.toBe('');
+      expect(
+        await db.fileAsset.count({ where: { storageKey: ownedKey } }),
+      ).toBe(0);
+      expect(
+        await db.contractDocument.count({ where: { storageKey: ownedKey } }),
+      ).toBe(0);
+      expect(
+        await db.chatDocumentRelease.count({
+          where: { roomId: room.id, prepareKey: input.clientKey },
+        }),
+      ).toBe(0);
+      await expect(storage.read(ownedKey)).rejects.toThrow();
+      const parallel = await Promise.all([
+        post('sender', `/rooms/${room.id}/releases`, input),
+        post('sender', `/rooms/${room.id}/releases`, input),
+      ]);
+      expect(parallel.map((r) => r.status)).toEqual([201, 201]);
+      expect(parallel[0]!.body.id).toBe(parallel[1]!.body.id);
     });
-    const appendix = await contracts.createAppendix(
-      actor,
-      otherProjectId,
-      contract.id,
-      {
-        appendixNumber: 'PL-1',
-        type: 'SCHEDULE_CHANGE',
-        title: 'Điều chỉnh lịch dự kiến',
-        valueChange: '0',
-        currency: 'VND',
-        idempotencyKey: randomUUID(),
-      },
-    );
-    const appendixSource = (
-      await get('sender', `/rooms/${room.id}/release-sources`).expect(200)
-    ).body.find((r: { appendixId?: string }) => r.appendixId === appendix.id);
-    expect(appendixSource).toBeDefined();
-    await post('sender', `/rooms/${room.id}/releases`, {
-      sourceType: 'CONTRACT',
-      sourceId: contract.id,
-      appendixId: randomUUID(),
-      sourceFingerprint: appendixSource.sourceFingerprint,
-      clientKey: randomUUID(),
-    }).expect(409);
-    const appendixRelease = (
+    it('publishes the matching appendix while rejecting a foreign appendix identity', async () => {
+      const { actor, contracts, contract, room, otherProjectId } = fixture;
+      await contracts.transition(actor, otherProjectId, contract.id, {
+        status: 'SIGNED',
+      });
+      const appendix = await contracts.createAppendix(
+        actor,
+        otherProjectId,
+        contract.id,
+        {
+          appendixNumber: 'PL-1',
+          type: 'SCHEDULE_CHANGE',
+          title: 'Điều chỉnh lịch dự kiến',
+          valueChange: '0',
+          currency: 'VND',
+          idempotencyKey: randomUUID(),
+        },
+      );
+      const appendixSource = (
+        await get('sender', `/rooms/${room.id}/release-sources`).expect(200)
+      ).body.find((r: { appendixId?: string }) => r.appendixId === appendix.id);
+      expect(appendixSource).toBeDefined();
       await post('sender', `/rooms/${room.id}/releases`, {
         sourceType: 'CONTRACT',
         sourceId: contract.id,
-        appendixId: appendix.id,
+        appendixId: randomUUID(),
         sourceFingerprint: appendixSource.sourceFingerprint,
         clientKey: randomUUID(),
-      }).expect(201)
-    ).body;
-    expect(
-      (
-        await getBinary(
-          'publisher',
-          `/releases/${appendixRelease.id}/preview`,
-        ).expect(200)
-      ).body.toString(),
-    ).toContain('Điều chỉnh lịch dự kiến');
-    const installInput = { ...completed[3]!.input, clientKey: randomUUID() };
-    const staleInstall = (
-      await post('sender', `/rooms/${room.id}/releases`, installInput).expect(
-        201,
-      )
-    ).body;
-    await installation.createWorkOrder(actor, plan.id, {
-      workOrderNumber: `W2-${run}`,
-      title: 'Hạng mục phát sinh',
-      requiredInventory: false,
-      approvedDrawing: false,
-      checklist: [{ title: 'Kiểm tra' }],
+      }).expect(409);
+      const appendixRelease = (
+        await post('sender', `/rooms/${room.id}/releases`, {
+          sourceType: 'CONTRACT',
+          sourceId: contract.id,
+          appendixId: appendix.id,
+          sourceFingerprint: appendixSource.sourceFingerprint,
+          clientKey: randomUUID(),
+        }).expect(201)
+      ).body;
+      expect(
+        (
+          await getBinary(
+            'publisher',
+            `/releases/${appendixRelease.id}/preview`,
+          ).expect(200)
+        ).body.toString(),
+      ).toContain('Điều chỉnh lịch dự kiến');
     });
-    await get('publisher', `/releases/${staleInstall.id}/preview`).expect(409);
-    expect(
-      (
-        await getBinary(
-          'guest',
-          `/releases/${completed[3]!.id}/download`,
-        ).expect(200)
-      ).body,
-    ).toEqual(completed[3]!.bytes);
-    expect(
-      (await db.contract.findUniqueOrThrow({ where: { id: contract.id } }))
-        .status,
-    ).toBe('SIGNED');
-    expect(
-      await db.customerPayment.count({
-        where: { organizationId: orgId, projectId: otherProjectId },
-      }),
-    ).toBe(1);
-    const recordedPayment = await db.customerPayment.findUniqueOrThrow({
-      where: { id: payment.id },
+    it('keeps published installation bytes immutable and business records unchanged', async () => {
+      const { actor, contract, payment, room, run, otherProjectId } = fixture;
+      const installInput = { ...completed[3]!.input, clientKey: randomUUID() };
+      const staleInstall = (
+        await post('sender', `/rooms/${room.id}/releases`, installInput).expect(
+          201,
+        )
+      ).body;
+      await installation.createWorkOrder(actor, plan.id, {
+        workOrderNumber: `W2-${run}`,
+        title: 'Hạng mục phát sinh',
+        requiredInventory: false,
+        approvedDrawing: false,
+        checklist: [{ title: 'Kiểm tra' }],
+      });
+      await get('publisher', `/releases/${staleInstall.id}/preview`).expect(
+        409,
+      );
+      expect(
+        (
+          await getBinary(
+            'guest',
+            `/releases/${completed[3]!.id}/download`,
+          ).expect(200)
+        ).body,
+      ).toEqual(completed[3]!.bytes);
+      expect(
+        (await db.contract.findUniqueOrThrow({ where: { id: contract.id } }))
+          .status,
+      ).toBe('SIGNED');
+      expect(
+        await db.customerPayment.count({
+          where: { organizationId: orgId, projectId: otherProjectId },
+        }),
+      ).toBe(1);
+      const recordedPayment = await db.customerPayment.findUniqueOrThrow({
+        where: { id: payment.id },
+      });
+      expect(recordedPayment.amount.toString()).toBe('120000');
+      expect(recordedPayment.bankReference).toBe(`PRIVATE-${run}`);
+      expect(recordedPayment.notes).toBe(`INTERNAL-${run}`);
+      expect(
+        (
+          await db.installationWorkOrder.findFirstOrThrow({
+            where: { planId: plan.id },
+          })
+        ).status,
+      ).toBe('DRAFT');
     });
-    expect(recordedPayment.amount.toString()).toBe('120000');
-    expect(recordedPayment.bankReference).toBe(`PRIVATE-${run}`);
-    expect(recordedPayment.notes).toBe(`INTERNAL-${run}`);
-    expect(
-      (
-        await db.installationWorkOrder.findFirstOrThrow({
-          where: { planId: plan.id },
-        })
-      ).status,
-    ).toBe('DRAFT');
   });
   const customerFileFixture = async (
     paymentFile = false,
