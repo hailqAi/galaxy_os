@@ -1256,8 +1256,13 @@ describe.sequential(
           ).body.status,
         ).toBe('COMPLETED');
         expect(payloads.at(-1)).toContain('DOC-8264');
+        // The owner can also retain archived finance grants from earlier cases.
         const role = await db.userRole.findFirstOrThrow({
-          where: { userId: users.owner!.id },
+          where: {
+            userId: users.owner!.id,
+            status: 'active',
+            role: { organizationId, code: `ai-${run}` },
+          },
         });
         const readerRole = await db.userRole.create({
           data: {

@@ -207,20 +207,47 @@ export class TasksService {
     this.requireGenericMutation(data);
     await this.assertProject(actor, data.projectId);
     const { assigneeIds, ...values } = data;
-    const task = await this.prisma.task.update({
-      where: { id },
-      data: {
-        ...values,
-        startDate: values.startDate ? new Date(values.startDate) : undefined,
-        dueDate: values.dueDate ? new Date(values.dueDate) : undefined,
-        updatedBy: actor.userId,
-        version: { increment: 1 },
-      },
-      include: this.include(),
-      omit: this.financialOmit(actor),
+    if (assigneeIds) {
+      if (!actor.permissions.includes('task.assign'))
+        throw new ForbiddenException('Task assignment permission is required');
+      await this.assertUsers(
+        actor,
+        assigneeIds,
+        data.departmentId ?? current.departmentId ?? undefined,
+      );
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const task = await tx.task.update({
+        where: { id },
+        data: {
+          ...values,
+          startDate: values.startDate ? new Date(values.startDate) : undefined,
+          dueDate: values.dueDate ? new Date(values.dueDate) : undefined,
+          updatedBy: actor.userId,
+          version: { increment: 1 },
+        },
+      });
+      if (assigneeIds) await this.assignWithin(tx, actor, task, assigneeIds);
+      await tx.activity.create({
+        data: {
+          organizationId: actor.organizationId,
+          actorId: actor.userId,
+          event: 'TASK_UPDATED',
+          entityType: 'Task',
+          entityId: id,
+          metadata: {
+            fields: Object.keys(data),
+            fromVersion: task.version - 1,
+            toVersion: task.version,
+          },
+        },
+      });
+      return tx.task.findUniqueOrThrow({
+        where: { id },
+        include: this.include(),
+        omit: this.financialOmit(actor),
+      });
     });
-    if (assigneeIds) await this.assign(actor, id, assigneeIds);
-    return task;
   }
   async remove(actor: CurrentActor, id: string) {
     const current = await this.get(actor, id);
@@ -239,46 +266,55 @@ export class TasksService {
     const task = await this.get(actor, id);
     await this.assertUsers(actor, userIds, task.departmentId ?? undefined);
     return this.prisma.$transaction(async (tx) => {
-      await tx.taskAssignee.deleteMany({
-        where: { taskId: id, userId: { notIn: userIds } },
-      });
-      await tx.taskAssignee.createMany({
-        data: userIds.map((userId) => ({
-          organizationId: actor.organizationId,
-          taskId: id,
-          userId,
-          assignedBy: actor.userId,
-        })),
-        skipDuplicates: true,
-      });
-      await tx.activity.create({
-        data: {
-          organizationId: actor.organizationId,
-          actorId: actor.userId,
-          event: 'TASK_ASSIGNED',
-          entityType: 'Task',
-          entityId: id,
-          metadata: { userIds },
-        },
-      });
-      if (userIds.length)
-        await tx.notification.createMany({
-          data: userIds.map((recipientId) => ({
-            organizationId: actor.organizationId,
-            recipientId,
-            type: 'TASK_ASSIGNED',
-            title: `Bạn được giao công việc ${task.title}`,
-            entityType: 'Task',
-            entityId: id,
-            href: `/tasks/${id}`,
-          })),
-        });
+      await this.assignWithin(tx, actor, task, userIds);
       return tx.task.findUniqueOrThrow({
         where: { id },
         include: this.include(),
         omit: this.financialOmit(actor),
       });
     });
+  }
+  private async assignWithin(
+    tx: Prisma.TransactionClient,
+    actor: CurrentActor,
+    task: { id: string; title: string },
+    userIds: string[],
+  ) {
+    const id = task.id;
+    await tx.taskAssignee.deleteMany({
+      where: { taskId: id, userId: { notIn: userIds } },
+    });
+    await tx.taskAssignee.createMany({
+      data: userIds.map((userId) => ({
+        organizationId: actor.organizationId,
+        taskId: id,
+        userId,
+        assignedBy: actor.userId,
+      })),
+      skipDuplicates: true,
+    });
+    await tx.activity.create({
+      data: {
+        organizationId: actor.organizationId,
+        actorId: actor.userId,
+        event: 'TASK_ASSIGNED',
+        entityType: 'Task',
+        entityId: id,
+        metadata: { userIds },
+      },
+    });
+    if (userIds.length)
+      await tx.notification.createMany({
+        data: userIds.map((recipientId) => ({
+          organizationId: actor.organizationId,
+          recipientId,
+          type: 'TASK_ASSIGNED',
+          title: `Bạn được giao công việc ${task.title}`,
+          entityType: 'Task',
+          entityId: id,
+          href: `/tasks/${id}`,
+        })),
+      });
   }
   async watchers(actor: CurrentActor, id: string, userIds: string[]) {
     await this.get(actor, id);

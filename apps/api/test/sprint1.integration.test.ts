@@ -12,6 +12,7 @@ import {
   vi,
 } from 'vitest';
 import { AppModule } from '../src/app.module';
+import { PrismaService } from '../src/prisma.service';
 import { TasksService } from '../src/tasks/tasks.service';
 import { assertG00Isolation } from '../scripts/g00-isolated-environment.mjs';
 
@@ -216,6 +217,113 @@ describe.sequential('Sprint 1 API integration', () => {
       await prisma.task.deleteMany({
         where: { organizationId, title, createdBy: adminId },
       });
+    }
+  });
+
+  it('updates task content, assignees and history together without partial writes', async () => {
+    const task = await prisma.task.create({
+      data: {
+        organizationId,
+        title: 'Atomic task update',
+        createdBy: adminId,
+        updatedBy: adminId,
+      },
+    });
+    try {
+      const actor = await request(app.getHttpServer())
+        .get('/api/v1/me')
+        .set('x-galaxy-dev-auth', 'admin@galaxy.local')
+        .expect(200);
+      const service = app.get(TasksService);
+      await expect(
+        service.update(
+          { ...actor.body, permissions: ['task.read', 'task.update'] },
+          task.id,
+          { title: 'Must not bypass assignment permission', assigneeIds: [] },
+        ),
+      ).rejects.toThrow('Task assignment permission is required');
+      await expect(
+        service.update(actor.body, task.id, {
+          title: 'Must not persist',
+          assigneeIds: [crypto.randomUUID()],
+        }),
+      ).rejects.toThrow('Assignable user not found');
+      expect(
+        await prisma.task.findUniqueOrThrow({ where: { id: task.id } }),
+      ).toMatchObject({ title: task.title, version: task.version });
+
+      const updated = await service.update(actor.body, task.id, {
+        title: 'Saved with assignment',
+        assigneeIds: [restrictedId],
+      });
+      expect(updated).toMatchObject({
+        title: 'Saved with assignment',
+        version: task.version + 1,
+        assignees: [{ userId: restrictedId }],
+      });
+      expect(
+        await prisma.activity.findMany({
+          where: { organizationId, entityType: 'Task', entityId: task.id },
+          orderBy: { createdAt: 'asc' },
+        }),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ event: 'TASK_ASSIGNED' }),
+          expect.objectContaining({
+            event: 'TASK_UPDATED',
+            actorId: adminId,
+            metadata: {
+              fields: ['title', 'assigneeIds'],
+              fromVersion: task.version,
+              toVersion: task.version + 1,
+            },
+          }),
+        ]),
+      );
+      const failingAudit = new TasksService(
+        prisma.$extends({
+          query: {
+            activity: {
+              create({ args, query }) {
+                if (args.data.event === 'TASK_UPDATED')
+                  throw new Error('Injected audit failure');
+                return query(args);
+              },
+            },
+          },
+        }) as unknown as PrismaService,
+      );
+      await expect(
+        failingAudit.update(actor.body, task.id, {
+          title: 'Must roll back',
+          assigneeIds: [adminId],
+        }),
+      ).rejects.toThrow('Injected audit failure');
+      expect(await service.get(actor.body, task.id)).toMatchObject({
+        title: updated.title,
+        version: updated.version,
+        assignees: [{ userId: restrictedId }],
+        activity: expect.any(Array),
+      });
+      expect(
+        await prisma.activity.count({
+          where: { organizationId, entityType: 'Task', entityId: task.id },
+        }),
+      ).toBe(2);
+      expect(
+        await prisma.notification.findMany({
+          where: { organizationId, entityType: 'Task', entityId: task.id },
+        }),
+      ).toMatchObject([{ recipientId: restrictedId }]);
+    } finally {
+      await prisma.notification.deleteMany({
+        where: { organizationId, entityType: 'Task', entityId: task.id },
+      });
+      await prisma.activity.deleteMany({
+        where: { organizationId, entityType: 'Task', entityId: task.id },
+      });
+      await prisma.taskAssignee.deleteMany({ where: { taskId: task.id } });
+      await prisma.task.delete({ where: { id: task.id } });
     }
   });
 
