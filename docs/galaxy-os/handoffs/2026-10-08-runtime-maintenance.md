@@ -1,38 +1,44 @@
-# Đề nghị bảo trì control plane — chưa thực hiện
+# Phục hồi control plane — đề nghị phê duyệt riêng, chưa thực hiện
 
-**REVIEW_BLOCKED — chưa đủ điều kiện xin duyệt thực thi.** Review độc lập phát hiện bước restart trước barrier ngăn request mới có thể đua với write đang chạy, trong khi manager có TimeoutStopSec5s. Inventory/jobs0 chỉ là ảnh chụp, không chứng minh đã drain upload/finalize/cleanup và mọi request. Không chạy kế hoạch bên dưới; đây là bản nháp phải hoàn thiện ingress barrier, drain/abort/reopen và executor ngoài manager trước khi xin duyệt. API có shutdown hooks nhưng chưa có active-request counter; không suy từ đó rằng restart hiện tại an toàn.
+**Chỉ nhánh INSPECT_ONLY đã chạy.** Không tạo bus, gửi signal, reexec/restart manager hoặc đổi service/main. Phương án restart `user@1000.service` trước đó bị review bác vì thiếu barrier/drain; không thực hiện phương án đó. Đề nghị dưới đây quay lại đúng phạm vi phục hồi D-Bus tạm từng bị automatic approval review từ chối, chỉ được thực hiện sau chấp thuận rõ ràng của người dùng và approval môi trường. Không coi cách triển khai này là ngoại lệ hoặc đường vòng cho rejection.
 
-## Bản chuẩn bị để review
+**READONLY_REVIEW_PASSED / USER_APPROVAL_PENDING / MUTATION_NOT_RUN.** Reviewer không còn blocker để trình đúng đề nghị này; review không cấp quyền thực thi.
 
-- CODE_SHA `9a02b4cdfadccc4810362931625247bdbd2625ac`; TESTED_SHA `232c4f703abf712cc5d772ffc344d35716902552`, TESTED_TREE `d3bd974189faa24b176eb230c074573e926da7fe`. Delta chỉ tách test, không đổi production code.
-- Candidate `/home/galaxy_os/.runtime/releases/chatgpt-plan-20261008-r1`, release `local-63652e4cc6d8`, build API/Web/Edge đạt. Đối soát toàn bộ tracked code với commit đạt; dirty snapshot chỉ gồm tài liệu chưa commit. Không dùng candidate cũ làm bản mới.
-- Private env/staged units/manifest: `/home/galaxy_os/.runtime/chatgpt-plan-20261008/`. API chỉ đổi release marker và thêm `GALAXY_AI_EXECUTION_POLICY=CHATGPT_PLAN_ONLY`; Web chỉ đổi marker. Secret giữ nguyên, env0600 ngoài artifact.
-- Template lấy từ artifact; `systemd-analyze --user verify` đạt trong XDG_RUNTIME_DIR tạm đã xóa. PID470/inode/mtime socket manager thực không đổi. Candidate fingerprint và schema86 đạt; không migration.
-- Lint/typecheck/format, Python runtime64, focused API18/Web17, Chrome2 trên exact candidate đạt. Full regression API1386/Web568/Edge5/document1 PASS. Test baseline timeout đã tách7pha giữ nguyên assertion/timeout, được review; không còn là blocker regression.
-- Chưa cài unit, đổi manifest active, sửa/restart bus/user manager hoặc cutover.
+## Artifact và bằng chứng đã chuẩn bị
 
-## Thao tác cần phê duyệt riêng
+- CODE_SHA `9a02b4cdfadccc4810362931625247bdbd2625ac`; TESTED_SHA `232c4f703abf712cc5d772ffc344d35716902552`; TESTED_TREE `d3bd974189faa24b176eb230c074573e926da7fe`. Delta chỉ tách test, không đổi production code.
+- Candidate `/home/galaxy_os/.runtime/releases/chatgpt-plan-20261008-r1`, marker `local-63652e4cc6d8`. API/Web/Edge build, code comparison, schema86, staged units và isolated-XDG unit validator đạt. Hash artifact/dependencies sau Chrome giữ nguyên.
+- Full regression API1386/Web568/Edge5/document1,64script, lint/type/format/build PASS. Chrome exact candidate2test/5viewport PASS_FIXTURE; chưa main/live.
+- Private env/staged/rollback/receipt tại `/home/galaxy_os/.runtime/chatgpt-plan-20261008/`. API chỉ đổi release marker và thêm `CHATGPT_PLAN_ONLY`; Web chỉ đổi marker. Secret/env0600/storage/schema giữ. Chưa cài unit hoặc đổi active manifest.
+- INSPECT_ONLY mới xác minh UID1000, manager470, API643395/Web643396, Edge308598; executor ngoài user manager. Main vẫn `local-a0429faf5733`. `/run/user/1000/bus` không tồn tại, pathname private socket không nối được. Nguồn gốc socket hỏng chưa chứng minh.
 
-Đề xuất **một lần** `sudo systemctl restart user@1000.service` thông qua system manager của WSL Ubuntu-22.04. Không chạy trước khi người dùng chấp thuận rõ thao tác này. Không tạo D-Bus riêng, thay socket, cặp unit tạm hoặc tự thử lại cách phục hồi cũ.
+## Thao tác đề nghị
 
-Mục đích: systemd tạo lại manager và socket private qua cơ chế unit hiện hữu. Dấu hiệu đã xác minh là manager470 còn sống nhưng pathname socket private không nối được; `/run/user/1000/bus` và user `dbus.service/socket` không tồn tại. Không kết luận riêng việc thiếu D-Bus là nguyên nhân. Restart chưa được thử và chưa bảo đảm thành công.
+Script có thể review: `/home/galaxy_os/.runtime/chatgpt-plan-20261008/recover-user-manager.py`; cấu hình `/home/galaxy_os/.runtime/chatgpt-plan-20261008/recovery-bus.conf`. Nhánh mặc định chỉ đọc. Lệnh sau **chưa được phép chạy**:
 
-Phạm vi: toàn bộ user manager UID1000. Inventory lúc kiểm thấy API643395/Web643396 và manager/sd-pam; các socket user mặc định như GPG/dirmngr/pk-debconf vẫn thuộc phạm vi có thể bị ảnh hưởng. Không chỉ hai app Galaxy. API/Web sẽ gián đoạn; unit manager hiện có TimeoutStopSec5s, nên phải kiểm không có request/job đang ghi trước maintenance. Edge thuộc system service ngoài manager, giữ nguyên. Không restart WSL, Windows, Codex, Docker/DB, sửa PAM hoặc linger.
+```sh
+python3 /home/galaxy_os/.runtime/chatgpt-plan-20261008/recover-user-manager.py --execute-approved
+```
 
-## Trình tự sau khi được chấp thuận
+`--execute-approved` chỉ là guard thao tác, không tự cấp quyền. Phạm vi là **toàn bộ manager của UID1000**, vượt hai service Galaxy; có rủi ro ảnh hưởng các client đang dùng manager. Không yêu cầu restart app/WSL/Windows/Codex, cài package, thay PAM/linger hoặc sửa unit hệ thống.
 
-1. Kiểm lại UID, distro, unit/PID/cgroup, listener, request/job đang chạy, marker localhost/LAN, inode socket; hủy maintenance nếu inventory thay đổi hoặc chưa xác nhận các write đã drain. Lưu hashes/backup mới của active manifest và đúng hai unit, không dùng backup cũ nếu có thay đổi mới hơn.
-2. Giữ manifest/unit cũ trong lúc restart manager. Thực hiện đúng lệnh trên một lần; xác minh control plane kết nối lại được đúng UID và release cũ trở về READY. Nếu không phục hồi, dừng và báo lỗi; không tự tạo bus/socket hoặc chạy app thay main.
-3. Chỉ khi manager khỏe: lock runtime hiện hữu, kiểm candidate fingerprint/schema/env delta/owner, kiểm active AI jobs0, dừng ingress Web rồi drain API trước khi dừng API. Cài đúng hai unit đã stage, atomic replace manifest bằng candidate; `systemctl --user daemon-reload`; khởi động đúng API/Web qua cơ chế runtime.
-4. Readiness phải cùng marker `local-63652e4cc6d8`, database connected, exact PID/cgroup/command/artifact; kiểm localhost và LAN hiện tại. Chrome main cần session Galaxy có quyền để nghiệm thu UI; không lấy credential từ browser/Codex. Kiểm nguồn/file/task và policy không có model API-key khả dụng. Chưa gọi ChatGPT khi registration/grant chưa có.
-5. Lưu receipt, identity/hash, kết quả, duy trì policy pause. Không gọi phát hành hoàn tất nếu bất kỳ acceptance bắt buộc chưa đạt.
+1. Kiểm lại owner/directory, manager PID/exe/cgroup, executor ngoài subtree, bus chưa tồn tại, exact process/health/fingerprint của API/Web và Edge. Giữ lock runtime hiện hữu; kiểm active manifest không đổi và app identities chưa đổi. Nếu khác baseline, dừng trước mutation.
+2. Khởi động đúng một child `/usr/bin/dbus-daemon --nofork --nopidfile --nosyslog --config-file=<file đã review>` tại địa chỉ session bus hiện còn trống. Config chỉ EXTERNAL/UID1000, không service directories/autoactivation; socket0600. Không tạo hoặc thay bất kỳ unit/socket hiện hữu nào.
+3. Dùng pidfd đã pin gửi đúng `SIGUSR1` tới manager đã xác minh để yêu cầu reconnect theo contract systemd249. Kiểm D-Bus name `org.freedesktop.systemd1` thuộc đúng manager PID rồi gọi đúng `Manager.Reexecute` một lần. Không gọi Stop/Restart/Exit hoặc dùng signal có nghĩa exit với user manager.
+4. Kiểm pathname private socket bằng AF_UNIX + SO_PEERCRED đúng PID/UID; sau đó kiểm unit state. `systemctl --user` riêng lẻ có thể fallback qua session bus ở249 nên không được coi là đủ bằng chứng. API/Web/Edge phải giữ PID/startTicks/cwd/exe/cgroup và health.
+5. Receipt0600 atomic được ghi trước mutation, sau khi có child PID/start identity và socket inode/UID, trước khi gửi signal tới manager. Policy có quyền trả lời method_return/error được yêu cầu, không nhập session config bên ngoài. SIGTERM/SIGHUP/SIGINT ở executor được chuyển thành exception để chạy cleanup; trong cleanup bỏ qua lặp lại các signal đó. Terminate/wait đúng child bus; nếu nó không thoát trong10s, kill chỉ child đó rồi wait5s. Chỉ unlink socket khi inode/UID còn khớp và không là symlink. Không xóa socket/process không thuộc operation; không có unit tạm. Lỗi operation và lỗi cleanup đều ghi receipt; chỉ finalize RECOVERY_READY sau kiểm cuối.
+6. Sau cleanup phải chứng minh bus path không còn, private socket đúng peer và control plane READY khi bus tạm đã mất; main vẫn release/PID cũ. Nếu không đạt thì báo FAILED/cleanup chưa đủ, dừng; không tự restart manager/app, tạo bus khác hay cutover.
 
-## Rollback ứng dụng
+Mỗi lệnh con giới hạn10s (busctl5s); mỗi bước chờ15s cộng thời gian tối đa một probe. File log mở exclusive để không lặp operation vô tình; không tự retry reexec. Python/XML đã parse và nhánh INSPECT_ONLY đã chạy; **nhánh mutation chưa chạy và không có bằng chứng live recovery**.
 
-Backup chuẩn bị: `/home/galaxy_os/.runtime/chatgpt-plan-20261008/rollback-prepared/` gồm `local-runtime.json`, `galaxy-os-api.service`, `galaxy-os-web.service`; artifact cũ và env vẫn nguyên vẹn. Trước khi ghi phải đối chiếu với backup mới tại thời điểm maintenance.
+Nguồn đối chiếu phiên bản249: [private socket và reexec FD lifecycle](https://raw.githubusercontent.com/systemd/systemd/v249/src/core/dbus.c), [systemctl user/private fallback](https://raw.githubusercontent.com/systemd/systemd/v249/src/shared/bus-util.c); man systemd249 trên máy xác nhận SIGUSR1 reconnect. Đây là căn cứ kỹ thuật cho đề nghị, không bảo đảm phục hồi thành công hay thay quyền người dùng.
 
-Nếu candidate lỗi sau cutover: xác minh owner/PID của candidate, dừng đúng Web/API của Galaxy; phục hồi hai unit và atomic replace manifest từ backup được xác nhận; daemon-reload/start đúng hai service; kiểm old release `local-a0429faf5733` localhost/LAN. Không rollback DB vì schema không đổi; không khôi phục provider JSON trước pause. Giữ credential/storage/Edge và receipt.
+## Giới hạn và rollback
 
-Restart manager không có rollback để khôi phục trạng thái process trong RAM. Nếu control plane vẫn hỏng thì rollback file không khởi động lại được app; phải dừng tại đó và xin phương án bảo trì tiếp theo, không chạy workaround. Đây là rủi ro riêng cần người dùng chấp thuận.
+Không thể rollback trạng thái RAM của manager nếu reexec thất bại. Script không đổi DB/storage/active manifest/units/provider config, không cố dừng app; cleanup chỉ tài nguyên bus tự tạo. Nếu manager vẫn không điều khiển được hoặc app identity/health đổi, lưu receipt và dừng để owner quyết định bước tiếp. Không che khả năng vẫn cần maintenance có downtime.
 
-Automatic approval review ở phiên trước đã từ chối phục hồi D-Bus tạm vì tác động vượt hai service và cleanup chưa rõ; xem [handoff06/10](2026-10-06-five-pdfs-project-tools.md). Bản đề nghị này không phải quyền thực hiện và không xóa rejection đó.
+SIGKILL, executor/host crash hoặc filesystem không ghi được có thể ngăn cleanup/receipt cuối; không bảo đảm ngược lại. Nếu gặp trường hợp đó, không chạy lại recovery: đọc receipt gần nhất, so boot ID, child PID/startTicks/UID/exe/command và socket inode/UID với hiện trạng. Chỉ sau đối soát mới cleanup đúng daemon qua pidfd (SIGTERM, chờ10s; SIGKILL chỉ đúng daemon đó nếu cần), rồi unlink socket còn đúng inode/UID, và kiểm main/private control. Nếu thiếu identity vì chết giữa spawn và ghi receipt, boot ID đổi, hoặc bất cứ identity nào lệch: dừng và xin review riêng; không đoán PID hoặc xóa `/run/user/1000/bus`. Không có automatic re-entry; command mặc định vẫn chỉ inspect và execute từ chối khi đã có receipt cũ.
+
+Sau khi recovery riêng đạt, **cutover là bước kế tiếp**, không nằm trong script này. Cần kiểm/drain qua control plane đã khỏe trước dừng đúng Web/API, kiểm candidate, install đúng2unit và atomic manifest swap; thất bại thì phục hồi app qua backup mới. Backup đã chuẩn bị `rollback-prepared/local-runtime.json`, `galaxy-os-api.service`, `galaxy-os-web.service`; phải đối chiếu/refresh nếu main thay đổi. Artifact/env cũ giữ nguyên, rollback không khôi phục provider JSON trước pause và không rollback DB schema.
+
+Automatic approval review ở phiên trước đã từ chối phục hồi D-Bus tạm vì tác động vượt hai service và cleanup chưa rõ; [handoff06/10](2026-10-06-five-pdfs-project-tools.md). Cần chấp thuận riêng đúng thao tác/phạm vi trên; không dùng yêu cầu triển khai chung làm approval.
