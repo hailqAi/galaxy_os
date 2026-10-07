@@ -80,7 +80,7 @@
 
 ### Task 5: R1/S3/S5 release and acceptance
 
-- [ ] Prepare immutable candidate, source/test identity, validated templates and exact rollback; finish all safe preparation before requesting any rejected control-plane repair.
+- [x] Prepare immutable candidate, source/test identity, validated templates and exact rollback; finish all safe preparation before requesting any rejected control-plane repair.
 - [ ] Once separately authorized control plane is available, cut over only Galaxy API/Web through existing mechanism; preserve Edge/keeper/data.
 - [ ] Verify fresh localhost/LAN/API/Web identity; five PDF states at 1440/1495/narrow/375/390; main source/task/export journeys in permitted acceptance Project.
 - [ ] Only after main connection UI/callback is ready and app route eligible, request user login/MFA/consent on OpenAI.
@@ -96,3 +96,5 @@
 2026-10-08 final verification checkpoint: CODE_SHA9a02b4c; TESTED_SHA232c4f7/tree d3bd974189faa24b176eb230c074573e926da7fe. Baseline timeout was split into7ordered phases with unchanged assertions/timeouts; review and full regression PASS API1386/Web568/Edge5/document1, runtime64, lint/types/format/build. Candidate local-63652e4cc6d8 production matches code commit; exact artifact Chrome2PASS/5widths. Main remains local-a0429faf5733. Maintenance restart draft REVIEW_BLOCKED (pre-restart admission/drain not established), not executed or presented as ready for approval. SIWC eligibility/callback/lifecycle, full Task tools/tracker/resume/registry and main/live acceptance remain unfinished; see current handoff.
 
 2026-10-08 recovery preparation follow-up: rejected restart draft remains unexecuted. Original temporary-bus + Manager.Reexecute proposal now has pinned process/socket ownership, atomic pre-mutation receipts, signal-safe bounded cleanup, direct private-socket peer verification and explicit host-loss limitations. Read-only independent review found no remaining blocker to presenting exact operation for separate user/environment approval. INSPECT_ONLY PASS; mutation NOT_RUN; no bus/signal/manager/service change. See current maintenance packet.
+
+2026-10-08 Task follow-up: CODE_SHA=TESTED_SHAe9a15df/tree8e46baf0677838a1de02a65e460bfbd09b3a0afd. Reproduced and fixed partial Task update when assignee validation fails; content/assignment/notification/update activity now atomic, assignment permission checked, real PostgreSQL audit-failure rollback PASS. M3 fixture selected archived finance role nondeterministically; pinned intended active AI role, preserved assertions. Full fresh PASS API1387/Web568/Edge5/document1, observed clock clean. Candidate r2 local-773c89f14d04 built from clean source, exact artifact Chrome7PASS; main remains old. Generic audit is not full Task CAS/idempotency/source-aware tooling. No recovery mutation; explicit approval pending.

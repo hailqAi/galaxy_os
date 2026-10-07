@@ -6,10 +6,10 @@
 
 ## Artifact và bằng chứng đã chuẩn bị
 
-- CODE_SHA `9a02b4cdfadccc4810362931625247bdbd2625ac`; TESTED_SHA `232c4f703abf712cc5d772ffc344d35716902552`; TESTED_TREE `d3bd974189faa24b176eb230c074573e926da7fe`. Delta chỉ tách test, không đổi production code.
-- Candidate `/home/galaxy_os/.runtime/releases/chatgpt-plan-20261008-r1`, marker `local-63652e4cc6d8`. API/Web/Edge build, code comparison, schema86, staged units và isolated-XDG unit validator đạt. Hash artifact/dependencies sau Chrome giữ nguyên.
-- Full regression API1386/Web568/Edge5/document1,64script, lint/type/format/build PASS. Chrome exact candidate2test/5viewport PASS_FIXTURE; chưa main/live.
-- Private env/staged/rollback/receipt tại `/home/galaxy_os/.runtime/chatgpt-plan-20261008/`. API chỉ đổi release marker và thêm `CHATGPT_PLAN_ONLY`; Web chỉ đổi marker. Secret/env0600/storage/schema giữ. Chưa cài unit hoặc đổi active manifest.
+- CODE_SHA=TESTED_SHA `e9a15df26903e806fc14dd23fd291a146756a273`; TESTED_TREE `8e46baf0677838a1de02a65e460bfbd09b3a0afd`. Candidate mới gồm sửa Task atomic; không đổi script/config phục hồi đã review.
+- Candidate `/home/galaxy_os/.runtime/releases/chatgpt-plan-20261008-r2`, marker `local-773c89f14d04`, clean-source. API/Web/Edge build, code comparison, schema86, staged units và isolated-XDG validator đạt; hashes sau Chrome giữ nguyên.
+- Full regression API1387/Web568/Edge5/document1; lint/type/format/build PASS. Chrome exact candidate7test PASS_FIXTURE; không phải toàn bộ5PDF/main/live.64script cùng source runtime không đổi đã PASS.
+- Private env `candidate-r2-env/`, units/manifest `staged-r2/`, rollback/receipt tại `/home/galaxy_os/.runtime/chatgpt-plan-20261008/`. API chỉ đổi release marker và thêm CHATGPT_PLAN_ONLY; Web chỉ đổi marker. Chưa cài unit hoặc đổi active manifest. Các artifact/evidence r1 vẫn giữ.
 - INSPECT_ONLY mới xác minh UID1000, manager470, API643395/Web643396, Edge308598; executor ngoài user manager. Main vẫn `local-a0429faf5733`. `/run/user/1000/bus` không tồn tại, pathname private socket không nối được. Nguồn gốc socket hỏng chưa chứng minh.
 
 ## Thao tác đề nghị
