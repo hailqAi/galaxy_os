@@ -1,5 +1,11 @@
 # Project status
 
+## 08/10 — CONNECT_FIRST: trace hoàn tất, OAuth architecture chờ review spec
+
+[Handoff hiện hành](docs/galaxy-os/handoffs/2026-10-08-chatgpt-connect-first.md), [written spec](docs/superpowers/specs/2026-10-08-chatgpt-owner-connection-design.md). Main chưa đổi local-a3eb571a7fcc; CODE_SHA/TESTED_SHAa5e82d80129cc698860c501683b844b404c7f33b/TREE3e04b19306cece71605018e419ee87caab221922. Fresh health localhost/LAN/API200 cùng release; Chrome Windows probe API loopback3001 đạt, Galaxy session401/login, chưa admin acceptance mới. Discovery OpenAI200; authorize/token/catalog/inference/revoke chưa gọi. Existing contract/pause unit8/8 mới PASS, không model live.
+
+Nguyên nhân nút khóa là disabled literal/canConnect:false và thiếu OAuth/lifecycle/dispatcher, không provider refusal. Route dynamic local được trình theo danh tính private/local thật, không yêu cầu issued ID hoặc member serving grant trước begin-auth; quyền owner inference/member tách riêng. WRITTEN_SPEC_REVIEW_PENDING bắt buộc AGENTS/Superpowers đã trình; chưa source implementation hoặc release mới. CONNECT_FIRST ưu tiên, không mở runtime recovery/CAS/plugins;4key provider PAUSED/no fallback giữ. Cây product không đổi; chỉ spec/handoff/memory. Handoff có S0–S4, L01–L20 và evidence main/provider tách đúng lớp.
+
 ## 08/10 — UI admin/P04 và tracker READ/registry đã phát hành main
 
 Handoff hiện hành: [recovery/UI/admin](docs/galaxy-os/handoffs/2026-10-08-recovery-ui-admin-maintenance.md). Release đang phục vụ `local-a3eb571a7fcc` tại http://localhost:3000 và http://192.168.1.80:3000; API736608/Web736609/control plane READY. Root `pnpm dev` exit0 ALREADY_RUNNING_VERIFIED, không spawn/restart. Menu Hệ thống → Kết nối ChatGPT `/settings/chatgpt-connection`; frontend/backend yêu cầu permission từ assignment SYSTEM. Owner SYSTEM main200; registry thật12contract, gồm task_list/get/history READ/PROJECT_AND_TASK, tất cả DISABLED vì CHATGPT_NOT_CONFIGURED. Check local có audit, checkedAt giữ qua reload.

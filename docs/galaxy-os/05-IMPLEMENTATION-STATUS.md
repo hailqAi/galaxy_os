@@ -1,5 +1,13 @@
 # Trạng thái triển khai và điểm tiếp tục
 
+## 08/10 — CONNECT_FIRST: source trace xong, spec kết nối host chờ review
+
+Handoff hiện hành: [CONNECT_FIRST](handoffs/2026-10-08-chatgpt-connect-first.md), [written spec](../superpowers/specs/2026-10-08-chatgpt-owner-connection-design.md). CONNECT_FIRST ưu tiên phạm vi owner pilot tại host; runtime/CAS/Graphify/plugin không mở lại. Source chứng minh canConnect:false + disabled literal, chưa begin/OAuth/callback/store/refresh/revoke/catalog HTTP/Project dispatcher; frontend unified cũng filter OpenRouter. Chưa provider refusal. Dynamic route chính thức nhận issued client ID sau callback, không pre-issued ID/partner key; Galaxy private/local admission và owner inference phải xác minh bằng kết quả thật, member scope kiểm riêng.
+
+Main giữ local-a3eb571a7fcc; CODE_SHA=TESTED_SHAa5e82d80129cc698860c501683b844b404c7f33b/TREE3e04b19306cece71605018e419ee87caab221922. VERIFIED_THIS_RUN localhost/LAN/API200/cùng release; Chrome Windows tới existing API127.0.0.1:3001 được200, nhưng phiên Galaxy401/login, chưa fresh admin acceptance. Callback14555 chưa có (cổng trống), OAuth NOT_STARTED; discovery OpenAI200, chưa authorize/token/models/responses/revoke. Fresh existing-contract8/8 PASS, không lifecycle hoặc model live. Evidence private `.runtime/connect-first-20261008/s0/`; ảnh mới là login main, không fixture/admin.
+
+WRITTEN_SPEC_REVIEW_PENDING theo AGENTS/Superpowers, đã gửi câu hỏi review spec cụ thể; chưa implementation hoặc release mới, không gọi USER_AUTH_PENDING trước main-ready. Cây product không đổi từ a5e82d8, chỉ docs commit449435a + cập nhật checkpoint. API-key providers pause/no fallback giữ. Bước kế: duyệt spec → written plan/review INLINE → S1 code/test/main callback → owner auth/MFA → real catalog/chat/task_list loop; member UNCONFIRMED riêng. Mục dưới là checkpoint lịch sử, không giữ điều kiện “phải có hồ sơ/grant trước OAuth” làm blocker hiện tại.
+
 ## 08/10 — UI admin/P04 và tracker READ/registry đã phát hành main
 
 Handoff hiện hành: [recovery/UI/admin](handoffs/2026-10-08-recovery-ui-admin-maintenance.md). Release đang phục vụ `local-a3eb571a7fcc` tại http://localhost:3000 và http://192.168.1.80:3000; API736608/Web736609/control plane READY. Root `pnpm dev` exit0 ALREADY_RUNNING_VERIFIED, không spawn/restart. Menu Hệ thống → Kết nối ChatGPT `/settings/chatgpt-connection`; frontend/backend yêu cầu permission từ assignment SYSTEM. Owner SYSTEM main200; registry thật12contract, gồm task_list/get/history READ/PROJECT_AND_TASK, tất cả DISABLED vì CHATGPT_NOT_CONFIGURED. Check local có audit, checkedAt giữ qua reload.

@@ -1,6 +1,16 @@
 # Bộ nhớ phát triển Galaxy OS — 08/10/2026
 
-Đây là checkpoint phát triển trong repository, không phải Saved Memory của ChatGPT hoặc bộ nhớ vận hành hồ sơ khách hàng. Trạng thái luôn đối chiếu [STATUS](05-IMPLEMENTATION-STATUS.md) và [handoff hiện hành](handoffs/2026-10-08-recovery-ui-admin-maintenance.md).
+Đây là checkpoint phát triển trong repository, không phải Saved Memory của ChatGPT hoặc bộ nhớ vận hành hồ sơ khách hàng. Trạng thái luôn đối chiếu [STATUS](05-IMPLEMENTATION-STATUS.md) và [handoff hiện hành CONNECT_FIRST](handoffs/2026-10-08-chatgpt-connect-first.md).
+
+## CONNECT_FIRST — phạm vi hiện tại, 08/10
+
+Owner giao tập trung kết nối ChatGPT thật cho actor SYSTEM liên kết tại Windows/WSL host. Đã đọc đầy đủ CONNECT_FIRST; prompt này ưu tiên phạm vi so với RECOVERY/MASTER. Không tiếp tục CAS/Task writes/runtime daemon/Graphify/plugin trừ trực tiếp chặn connection. Scope/member grant không chặn dynamic begin-auth hợp lệ; owner inference và serving nhân viên kiểm riêng, SYSTEM khác không mặc định dùng token owner. Không dùng credential/clientID/auth.json Codex, không API-key/fallback/fees/purchased credits.
+
+S0 source trace: frontend Connect/Disconnect disabled literal, SettingsService canConnect:false/metadata cố định; chưa begin/callback/OAuth/credential/refresh/revoke/catalog HTTP/dispatcher, Project UI unified filter OpenRouter. Discovery OpenAI HTTP200 + official dynamic docs xác nhận route/client issued sau callback; chưa request authorize/token/models/responses/revoke hoặc refusal. Galaxy private/local owner pilot không giả OSS/personal, provider admission chưa xác nhận. Thay bước cũ “xác minh hồ sơ/grant/multiuser trước OAuth” bằng ba gate của [spec cụ thể](../superpowers/specs/2026-10-08-chatgpt-owner-connection-design.md).
+
+VERIFIED_THIS_RUN: canonical đầu lượt HEAD07708c5 sạch, root figma/prompt giữ; product diff từ a5e82d8 rỗng. Fresh localhost/LAN/API health200/cùng local-a3eb571a7fcc. Chrome Windows154/Win32 tới API127.0.0.1:3001 được200; mới chỉ existing API loopback, callback14555 NOT_IMPLEMENTED/cổng trống. Galaxy /me/admin401→login, ảnh fresh là login; không coi ảnh admin trước thành acceptance mới. Existing codec/pause unit8/8 PASS1.32s; full1400/573/5/1/64 và Chrome8/8 là checkpoint trước, chưa mới OAuth. Evidence private `.runtime/connect-first-20261008/s0/`; các app/DB/data/provider config/public policy không bị mutation.
+
+WRITTEN_SPEC_REVIEW_PENDING: spec local commit449435a, sửa thêm exact pending-registration/actor helper/no-paid-credit boundary và caller map trước review; user đã nhận câu hỏi review cụ thể theo AGENTS/Superpowers. Chưa product implementation/plan hoặc release mới. Chưa USER_AUTH_PENDING vì main/callback chưa ready. Sau approval thật: writing-plans + written plan review INLINE → TDD lifecycle/catalog/dispatcher/UI/375launcher → regression/reviews/artifact cutover → probe Windows callbackmain → owner tự auth/MFA → real model + Project completed + task_list loop/reload. L01–L20/S0–S4 hiện hành ở handoff. Member scope UNCONFIRMED riêng; chưa tool live nào.
 
 ## Nguồn và phạm vi
 
@@ -31,7 +41,7 @@ Full tracker regression trước bị fixture connection/PDF config lỗi; log g
 ## Bước tiếp
 
 1. Mốc READ/registry đã release và nghiệm thu main metadata/P04; mở lại STATUS/handoff/manifest để xác minh trước mốc kế. Giữ r1 rollback, không chạy recovery lịch sử.
-2. Xác minh registration/grant/phạm vi nhiều người với OpenAI trước OAuth/inference; chưa gửi form hoặc mở kết nối.
+2. CONNECT_FIRST thay bước cũ này: hoàn thiện route dynamic/begin-auth/callback theo spec duyệt; registration và owner grant là kết quả OAuth, scope phục vụ nhân viên gate riêng. Không yêu cầu partner dossier/issued client ID trước attempt động; chưa provider refusal. Hiện chờ written-spec review bắt buộc, không chờ hồ sơ chấp thuận.
 3. Thiết kế/duyệt mốc Task write/source/idempotency/CAS riêng, durable crash resume; giữ một domain và12giai đoạn. Task hiện chưa canonical accountable owner/group/stage/blocker/result, không bịa mapping từ5stage cũ.
 4. Main đã GET/download4file PDF/DOCX/XLSX/PNG hiện hữu và tải lại sau reload,200/SHA/kích thước giữ/session200/0mutation; chỉ binary transport, chưa parser/render hoặc export mới. Tiếp tục main file/export mới trong hồ sơ được phép; local parser/export tests không chứng minh model vision/OCR/main execution. DOCX/PDF/XLSX bytes/lineage/ACL đã có code; XLSX cached không recalculated. Missing binary baseline không được thay bằng file giả.
 
