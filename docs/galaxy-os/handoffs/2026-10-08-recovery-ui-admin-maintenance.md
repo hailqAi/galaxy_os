@@ -1,6 +1,6 @@
 # Phục hồi control plane và phát hành UI admin — packet hiện tại
 
-Trạng thái hiện hành: UI admin/P04 đã phát hành main `local-ce7fabf8ed1c`; API/Web READY, control plane phục hồi, `pnpm dev` exit0/ALREADY_RUNNING_VERIFIED. Owner duyệt packet native mới và contingency cleanup; Reexecute đúng một lần, cleanup hoàn tất. SIWC chưa configured/grant và multiuser scope chưa xác minh. Các packet bên dưới là lịch sử, không chạy lại.
+Trạng thái hiện hành: UI admin/P04 + tracker READ/registry đã phát hành main `local-a3eb571a7fcc`; API/Web READY, control plane phục hồi, `pnpm dev` exit0/ALREADY_RUNNING_VERIFIED. Owner duyệt packet native mới và contingency cleanup; Reexecute đúng một lần, cleanup hoàn tất. SIWC chưa configured/grant và multiuser scope chưa xác minh. Các packet bên dưới là lịch sử, không chạy lại.
 
 Baseline host kiểm lại08/10: manager UID1000/PID470, API643395/Web643396, Edge308598; bus path absent, private pathname không nối được; API/Web localhost trả `local-a0429faf5733`. Executor ngoài user-manager subtree. Main có0answer QUEUED/INDEXING/RUNNING tại thời điểm kiểm. Root worktree HEAD1a59665 và untracked figma/prompt được giữ; source canonical mới hơn tại linked worktree.
 
@@ -62,7 +62,7 @@ Root `pnpm dev` lần đầu bị automatic approval review từ chối do lo pa
 
 Chrome main qua phiên Galaxy SYSTEM owner đăng nhập: `/api/v1/me`200; admin GET200; canCheck=true; canConnect/canDisconnect=false; check local10:31:58 được giữ qua reload. Desktop1440/mobile375 không overflow. Ảnh main thật: `main-browser/admin-main-1440.png`, `admin-main-375.png`, `p04-main-work-1440.png`, `p04-main-work-375.png`, `p04-main-ai-1440.png`, `p04-main-ai-375.png`. P04 cả2route không có setup link, history hiện hữu và session reload200,9Project accessible. Work mobile empty state ẩn panel AI theo layout hiện hữu; không suy thành lỗi grant. Member/revoke main NOT_RUN vì không có phiên member thật; fixture API/Chrome denial đạt, không đổi role main để dựng nghiệm thu.
 
-## Tracker read/registry đang kiểm tra
+## Lịch sử kiểm tra tracker read/registry trước release r2
 
 Mốc đã duyệt:3READ tools task_list/get/history qua TasksService hiện hữu; Project/actor server-bound, task.read theo assignment, bỏ tài chính/dependency ngoài Project. Counts/statusCounts và contributor IDs lấy cùng RepeatableRead; snapshot tối đa1000task, đúng1001 trả TOOL_CONTEXT_LIMIT trước outbound. Page rỗng/ngoài trang vẫn lưu đủ contributors, revoke chặn saved answer/citation/continuation. History giới hạn, whitelist metadata version/status; HTTP get mặc định giữ đường đọc cũ. Registry từ schemas/policy thật, DISABLED/CHATGPT_NOT_CONFIGURED.
 
@@ -76,7 +76,7 @@ Owner xác nhận chưa có hồ sơ OpenAI chấp thuận. [Packet registration
 
 ## R01–R28 — mức nghiệm thu hiện hành
 
-Mốc đọc tracker đang gate full/candidate2. PASS dưới đây chỉ ở mức ghi trong evidence; không thay VENDOR_LIVE. Ảnh main từ runtime localhost, không phải Git branch main.
+Mốc đọc tracker đã qua full/build/exact Chrome8/8/release/main metadata. PASS dưới đây chỉ ở mức ghi trong evidence; không thay VENDOR_LIVE. Ảnh main từ runtime localhost, không phải Git branch main.
 
 | ID  | Trạng thái                                         | Evidence / giới hạn                                                                                                    |
 | --- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
@@ -85,8 +85,8 @@ Mốc đọc tracker đang gate full/candidate2. PASS dưới đây chỉ ở m�
 | R03 | PASS MAIN                                          | Root pnpm dev exit0/ALREADY_RUNNING_VERIFIED, đúng manager/app PID                                                     |
 | R04 | PASS MAIN + UNIT                                   | Hai owned user units tồn tại độc lập agent; up nhánh READY không spawn/restart; idempotence/owner tests                |
 | R05 | PASS INTEGRATION/MAIN                              | Artifact template validator XDG riêng; native recovery đúng approval, Reexecute1; owned cleanup PASS                   |
-| R06 | PASS r1, r2 NOT_RUN                                | r1 tested tree/artifact digest/env/schema86/backup; tracker candidate2 chưa build                                      |
-| R07 | PASS MAIN r1                                       | Localhost/LAN/API/Web200 cùng local-ce7fabf8ed1c; không dùng health bản cũ                                             |
+| R06 | PASS r2 LOCAL RELEASE                              | Tested tree/exact artifact/digests/env/schema86/rollback đối soát; Chrome8/8 PASS                                      |
+| R07 | PASS MAIN r2                                       | Localhost/LAN/API/Web200 cùng local-a3eb571a7fcc; root dev exit0 giữ API736608/Web736609                               |
 | R08 | PARTIAL MAIN/FIXTURE                               | Empty/selected/direct/mobile có ảnh main,5width AI selected; error/read-only/all-PDF comparison chưa đủ                |
 | R09 | PASS MAIN                                          | Login owner SYSTEM, menu Hệ thống→Kết nối ChatGPT, admin200/status thật                                                |
 | R10 | PASS UNIT/INTEGRATION/FIXTURE, MAIN NOT_RUN member | SELF/ORG/DEPT và revoked403; Project không CTA; không thay role main để giả member                                     |
@@ -107,8 +107,35 @@ Mốc đọc tracker đang gate full/candidate2. PASS dưới đây chỉ ở m�
 | R25 | BLOCKED VENDOR/MAIN                                | Tool roundtrip đọc→Task write→result chưa live; READ mock integration không thay vendor                                |
 | R26 | PARTIAL existing tests                             | Cancel/timeout/lease fence/revoke đạt; crash checkpoint/resume và no-repeat Task writes còn thiếu                      |
 | R27 | NOT_INSTALLED Graphify, REUSED skills              | Superpowers/Ponytail hiện hữu; rg/source đáp ứng mốc hiện tại, không cài mới hoặc semantic/network index               |
-| R28 | PARTIAL đang cập nhật                              | STATUS/PROJECT_STATUS/PROJECT_MEMORY/handoff/manifest đúng r1; final tracker SHA/release/checks còn gate               |
+| R28 | PASS CHECKPOINT, master PARTIAL                    | STATUS/PROJECT_STATUS/PROJECT_MEMORY/handoff/manifest đúng r2; các phần chưa xong ghi riêng                            |
 
-Full mới `checks/test-tracker-full-cpu8.log` exit0: API1400/Web573/Edge5/document1; Python64 `runtime-tracker-host-final.log` exit0. Pool3 giữ,8CPU đã có; không thay assertions/timeouts của hai ca M2 cũ từng timeout trong2CPU. Focused M2 proposal riêng404 vì phụ thuộc ca trước nên không được gọi regression product; full suite giữ đúng dependencies và PASS. Lint/types/format PASS. Main registry RED r1: heading chưa có, không bị báo GREEN giả. Candidate2 còn build/exact Chrome/release gate.
+Full mới `checks/test-tracker-full-cpu8.log` exit0: API1400/Web573/Edge5/document1; Python64 `runtime-tracker-host-final.log` exit0. Pool3 giữ,8CPU đã có; không thay assertions/timeouts của hai ca M2 cũ từng timeout trong2CPU. Focused M2 proposal riêng404 vì phụ thuộc ca trước nên không được gọi regression product; full suite giữ đúng dependencies và PASS. Lint/types/format PASS. Main registry RED r1: heading chưa có, không bị báo GREEN giả. Đây là checkpoint lịch sử trước cutover r2; các gate build/exact Chrome/release đã hoàn tất trong mục r2 bên dưới.
 
 Main selected chụp lại sau chờ history render (không dùng ảnh loading để báo selected): cả5width1440/1495/720/375/390 noOverflow, textarea112px, answer16px/26px,0mutation. Reference/main comparison standalone `design-review/comparison-main-r1.html`; đã đọc5design first-page render, không gọi pixel-perfect. Selected human conversation/read-only/error states chưa đủ main; giữ R08 PARTIAL.
+
+## Release r2 hiện hành — nghiệm thu 08/10 11:16 ICT
+
+- CODE_SHA = TESTED_SHA: `a5e82d80129cc698860c501683b844b404c7f33b`.
+- TESTED_TREE: `3e04b19306cece71605018e419ee87caab221922`.
+- DEPLOYED_LOCAL_RELEASE: `local-a3eb571a7fcc`.
+- Artifact immutable: `/home/galaxy_os/.runtime/releases/recovery-tracker-registry-20261008-r1`.
+- sourceDigest: `a3eb571a7fcc4d0f3a89502a8982b7593990a8d4748ab89cf465fd87139a8e04`; WebBuildID `tjp6cKNOGTQtsPYGiksmX`.
+- URL main: http://localhost:3000 và http://192.168.1.80:3000. Menu Hệ thống → Kết nối ChatGPT, `/settings/chatgpt-connection`.
+
+Canonical source tại `.worktrees/m2-a-20260928`, branch m2/project-chat-20260928; source sạch sau commit a5e82d8. Commit tài liệu tiếp theo không đổi CODE_SHA của artifact. Root checkout HEAD1a59665/untracked figma/prompt được bảo toàn. Không push/tag/merge.
+
+Full source gate PASS API1400/Web573/Edge5/document1/runtime64, lint/types/format. Build exact artifact PASS `recovery-ui-admin-20261008/checks/build-tracker-artifact.log`. Chrome **single8/8** PASS/41.7s tại `recovery-tracker-registry-20261008/checks/browser.log`: admin registry/check/reload/SYSTEM/member/revoke; Task125rows/page/retry; P01/P03/P04/P05/P06/S01, private file/export/PDF/citation/revoke, popup và5widths. Đây là fixture với PostgreSQL riêng/mock provider, không main hoặc vendor live. Review cuối correctness/security/authorization/UX/Ponytail không còn Critical/Important. Trần tracker1000 vẫn là giới hạn có ghi chú,1001 chặn trước outbound.
+
+Packet mới riêng `/home/galaxy_os/.runtime/recovery-tracker-registry-20261008/`: preparation/release-validation/artifact-integrity/cutover receipts, env0600/backup0700. Private socket inode giữ qua validator XDG cô lập. Digest API/Web/Edge/deps sau browser bằng sau build. Cutover READY chỉ2owned app units: API736608/Web736609. Env delta chỉ release marker, schema86/credential/provider bytes/storage giữ; Edge308598 giữ, public CLOSED. Rollback backup2units+manifest tại `rollback-cutover/`, artifact/env r1 local-ce7fabf8ed1c giữ. Không thêm manager recovery/Reexecute. Fixture wrapper736031/736054/736103 đã TERM/cleanup đúng identity; fixture-cleanup.json xác nhận hết3owned processes, không đóng Chrome/CDP/main.
+
+Root pnpm dev mới exit0, ALREADY_RUNNING_VERIFIED giữ API736608/Web736609, đúng build/source/DB/storage. GET localhost Web `/health`, API `/api/v1/ready`, LAN `.80:3000/health` đều200/release local-a3eb571a7fcc. Health receipt `main-browser/health-local-lan.json`. Một probe ban đầu dùng sai `/api/health` trả404; probe đúng đường manifest đạt, không coi đó là lỗi runtime hoặc che lỗi bằng thông báo.
+
+Main Chrome dùng session SYSTEM owner đã đăng nhập bình thường: /me200/adminGET200, registry12contract và đúng3READ tool task_list/get/history `PROJECT_AND_TASK`, DISABLED/CHATGPT_NOT_CONFIGURED. checkedAt `2026-10-08T03:31:58.780Z` giữ qua reload, Connect/Disconnect disabled, canCheck=true; metadata models[]/identitynull/NOT_GRANTED/UNCONFIRMED. Ảnh main mới **từ app đang phục vụ**, không fixture: [admin desktop](/home/galaxy_os/.runtime/recovery-tracker-registry-20261008/main-browser/admin-main-1440.png), [admin mobile](/home/galaxy_os/.runtime/recovery-tracker-registry-20261008/main-browser/admin-main-375.png), [AI selected desktop](/home/galaxy_os/.runtime/recovery-tracker-registry-20261008/main-browser/main-ai-selected-1440.png), [AI selected mobile](/home/galaxy_os/.runtime/recovery-tracker-registry-20261008/main-browser/main-ai-selected-375.png).
+
+`main-browser/acceptance.json`, registry-acceptance.json, p04-acceptance.json, selected-acceptance.json và checks/main-\*.log ghi main r2. P04 work/ai1440/375, overview/products/files1440/375, selected AI1440/1495/720/375/390 giữ9Project/session/reload200; không setup/key link trong Project, không overflow, answer16px/26px/composer112px,0API mutation. Work mobile ẩn AI panel theo layout, không suy gate=false thành kích hoạt. Selected AI hiển thị câu trả lời lịch sử cũ; nội dung “ERROR” trong câu cũ không chứng minh lỗi provider mới. Main member thật/error/read-only/all-five-state comparison và tạo/export file mới vẫn NOT_RUN/PARTIAL. Minor UX: launcher nổi che một phần giải thích ở admin375; không gọi mobile pixel-perfect.
+
+Owner xác nhận chưa hồ sơ chấp thuận OpenAI; thiếu registration/grant/multiuser scope là blocker thực tế cho kết nối trung tâm. [Packet điều kiện](2026-10-08-chatgpt-registration-eligibility.md) đã chuẩn bị topology, callback, usage và quyền người dùng; không gửi form hoặc xin OAuth/MFA. Sau đủ điều kiện vẫn cần implementation callback/store/refresh/revoke/catalog/plan dispatcher và nghiệm thu host/LAN/hai actor. API-key providers paused, không fallback/fees. Các việc local còn tiếp: thiết kế Task writes/CAS/source idempotency riêng, durable crash resume, bộ nhớ vận hành/4group12stage canonical và main file/download/reload trong scope được phép. Không báo toàn master hoàn tất.
+
+Main download/reload bổ sung: GET file list theo9Project được phép trả50file hiện hữu. Tải vào RAM tối đa1file nhỏ mỗi MIME PDF/DOCX/XLSX/PNG:200 cả4, Content-Type/kích thước khớp metadata; sau reload GET lại cùng version, SHA256/kích thước giữ, session200/0mutation. Receipt `recovery-tracker-registry-20261008/main-browser/download-acceptance.json`, log `checks/main-downloads-reload.log`. Đây là binary transport của file có sẵn, không tạo/export mới, không kiểm parser/render/nguồn đúng nội dung; PDF chọn đầu chỉ75byte, không dùng kết quả này chứng minh native PDF hợp lệ. R23/R24 vẫn PARTIAL cho main hai actor/tool export mới.
+
+Đã mở và để lại một tab quản trị main mới cho owner xem trực tiếp: `/settings/chatgpt-connection`, Web/API local-a3eb571a7fcc,12tools/adminGET200. Tab Project hiện có và nháp không reload/đóng; user-visible-tab.json xác nhận originalPagesPreserved=true. Trang vẫn “Chưa được kích hoạt” vì điều kiện vendor thiếu, không phải release UI cũ. Cuối checkpoint: full format:check và git diff --check PASS; review tài liệu độc lập không có Critical/Important. Commit docs-only không đổi tested/deployed production tree.

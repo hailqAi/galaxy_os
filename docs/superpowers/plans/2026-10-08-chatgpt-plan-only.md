@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Use superpowers:executing-plans. One source writer; independent read-only review.
 
-**Goal:** Deliver the existing P04/business workspace on the actual local runtime, with actor-owned official ChatGPT connections and no API-key dispatch.
+**Current goal (RECOVERY override):** Deliver P04/business workspace and system-admin central ChatGPT administration on the actual local runtime. Central inference stays disabled until application/grant/multiuser scope is verified; Galaxy members do not configure ChatGPT. The earlier actor-owned connection design is historical and superseded by the08/10 RECOVERY instruction. No API-key dispatch.
 
 **Architecture:** Extend the existing ProjectChat/ProjectAi services, domain tools, private configuration and immutable release mechanism. Preserve Galaxy identity/ACL separately from OpenAI identity and billing. Direct SIWC adapter is preferred; no shared Codex daemon or second chat engine.
 
@@ -75,17 +75,17 @@
 - [ ] RED/GREEN: todo/tracker pagination/counts/history; ordinary task create/update permission, source deduplication, optimistic concurrency and audit.
 - [ ] RED/GREEN: durable run resume/cancel/lease recovery and bounded tool iterations; preserve source/field ACL at every boundary.
 - [ ] Reuse parsers/exporters; cover DOCX/PDF/XLSX bytes, locators, lineage/revoke, explicit cached-not-recalculated state.
-- [ ] Minimal built-in registry/admin capability metadata; unsupported hosted/media capabilities disabled with actual reason.
+- [x] Minimal built-in registry/admin capability metadata; unsupported hosted/media capabilities disabled with actual reason. Mốc READ/registry r2 đã release, không external connector lifecycle.
 - [ ] Scope full relevant regression and review before local commit.
 
 ### Task 5: R1/S3/S5 release and acceptance
 
 - [x] Prepare immutable candidate, source/test identity, validated templates and exact rollback; finish all safe preparation before requesting any rejected control-plane repair.
-- [ ] Once separately authorized control plane is available, cut over only Galaxy API/Web through existing mechanism; preserve Edge/keeper/data.
+- [x] Once separately authorized control plane is available, cut over only Galaxy API/Web through existing mechanism; preserve Edge/keeper/data. r1/r2 đã READY; recovery/cleanup riêng đã hoàn tất.
 - [ ] Verify fresh localhost/LAN/API/Web identity; five PDF states at 1440/1495/narrow/375/390; main source/task/export journeys in permitted acceptance Project.
 - [ ] Only after main connection UI/callback is ready and app route eligible, request user login/MFA/consent on OpenAI.
 - [ ] Verify real grant/catalog/completed inference/tool roundtrip; separate vendor live, fixture, main Chrome and physical device.
-- [ ] Update STATUS, PROJECT_STATUS and handoff with actual SHAs/tree/artifact/release, remaining blockers and recovery steps.
+- [x] Update STATUS, PROJECT_STATUS and handoff with actual SHAs/tree/artifact/release, remaining blockers and recovery steps. Checkpoint r2, không toàn master.
 
 ## Execution ledger
 
@@ -98,3 +98,5 @@
 2026-10-08 recovery preparation follow-up: rejected restart draft remains unexecuted. Original temporary-bus + Manager.Reexecute proposal now has pinned process/socket ownership, atomic pre-mutation receipts, signal-safe bounded cleanup, direct private-socket peer verification and explicit host-loss limitations. Read-only independent review found no remaining blocker to presenting exact operation for separate user/environment approval. INSPECT_ONLY PASS; mutation NOT_RUN; no bus/signal/manager/service change. See current maintenance packet.
 
 2026-10-08 Task follow-up: CODE_SHA=TESTED_SHAe9a15df/tree8e46baf0677838a1de02a65e460bfbd09b3a0afd. Reproduced and fixed partial Task update when assignee validation fails; content/assignment/notification/update activity now atomic, assignment permission checked, real PostgreSQL audit-failure rollback PASS. M3 fixture selected archived finance role nondeterministically; pinned intended active AI role, preserved assertions. Full fresh PASS API1387/Web568/Edge5/document1, observed clock clean. Candidate r2 local-773c89f14d04 built from clean source, exact artifact Chrome7PASS; main remains old. Generic audit is not full Task CAS/idempotency/source-aware tooling. No recovery mutation; explicit approval pending.
+
+2026-10-08 recovery override/r2 checkpoint: system-only admin UI đã duyệt và triển khai qua Settings/IAM; owner chưa hồ sơ OpenAI chấp thuận. CODE_SHA=TESTED_SHAa5e82d80129cc698860c501683b844b404c7f33b/tree3e04b19306cece71605018e419ee87caab221922; DEPLOYED_LOCAL_RELEASE local-a3eb571a7fcc. Full API1400/Web573/Edge5/document1/runtime64, lint/types/format/build/exact artifact Chrome8/8 PASS. Main owner SYSTEM/admin/registry200, localhost/LAN release khớp, pnpm dev exit0 giữ hai app PID. READ tools task_list/get/history và built-in registry12contract đã phát hành nhưng chưa model live; Task writes/CAS/idempotency/crash resume/full tracker còn việc độc lập. Main4existing download bytes/MIME/version/SHA qua reload đạt, không export/parser mới. Tất cả fixture/live/main giới hạn ở handoff hiện hành.

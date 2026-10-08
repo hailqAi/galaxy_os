@@ -58,7 +58,7 @@
 ### Task 4: Backlog và bộ nhớ
 
 - [ ] Kiểm delta tracker/memory/document/export/resume/registry trong plan trước; triển khai từng mốc độc lập qua thiết kế/TDD, không trì hoãn UI main đủ điều kiện.
-- [ ] Cập nhật PROJECT_MEMORY, STATUS, PROJECT_STATUS, handoff và R01–R28 với evidence thật; nguồn thiếu ghi đúng blocker và bước tiếp.
+- [x] Cập nhật PROJECT_MEMORY, STATUS, PROJECT_STATUS, handoff và R01–R28 với evidence thật; nguồn thiếu ghi đúng blocker và bước tiếp.
 
 ## Ledger
 
@@ -67,3 +67,5 @@
 2026-10-08: Review độc lập phát hiện ghép permission SYSTEM từ role ngoài scope. RED real-session200 thay403; sửa effective permissions ở guard chung để system.\* chỉ đến từ assignmentSYSTEM, /me/nav/proxy/canCheck đồng nhất. Full regression với Poppler hiện hữu đạt API1388/Web573/Edge5/document1;64Python PASS. Lượt thiếu Poppler thất bại không tính PASS. Bare/resume Codex0.161.0 đạt idle/exit0, không model turn; lỗi mismatch NOT_REPRODUCED. Build cần biến production bắt buộc, không nới validator.
 
 2026-10-08 main checkpoint: r1 local-ce7fabf8ed1c đã cutover READY; recovery native và contingency cleanup được duyệt, Reexecute một lần, owned residue cleanup PASS. Root pnpm dev exit0 ALREADY_RUNNING_VERIFIED; admin main SYSTEM200/checkpersist/reload1440/375 và P04 work/ai thật có ảnh. Member main và full năm PDF states chưa đủ mới, giữ checkbox chưa complete. Tracker READ/registry approved9focused PASS, full/candidate2 đang gate; hồ sơ grant central chuẩn bị nhưng chưa vendor chấp thuận.
+
+2026-10-08 r2 checkpoint: tracker READ/registry đã release local-a3eb571a7fcc từ CODE_SHA=TESTED_SHAa5e82d8/tree3e04b19306cece71605018e419ee87caab221922. FullAPI1400/Web573/Edge5/document1/runtime64, lint/types/format/build và single exact artifact Chrome8/8 PASS; owner main SYSTEM/admin200/registry12contract/3READ tools, P04 selected5width/16px26px/composer112/nooverflow và0mutation. Rootdevexit0/API736608/Web736609 giữ. Memory/status/handoff đã cập nhật release thật; member main/all-five-state/file export mới và backlog master giữ PARTIAL. Owner chưa có hồ sơ OpenAI chấp thuận, Connect disabled đúng trạng thái, không chờ vendor để phát hành UI.
