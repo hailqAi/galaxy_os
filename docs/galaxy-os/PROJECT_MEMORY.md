@@ -34,3 +34,7 @@ Full tracker regression trước bị fixture connection/PDF config lỗi; log g
 2. Xác minh registration/grant/phạm vi nhiều người với OpenAI trước OAuth/inference; chưa gửi form hoặc mở kết nối.
 3. Thiết kế/duyệt mốc Task write/source/idempotency/CAS riêng, durable crash resume; giữ một domain và12giai đoạn. Task hiện chưa canonical accountable owner/group/stage/blocker/result, không bịa mapping từ5stage cũ.
 4. Main đã GET/download4file PDF/DOCX/XLSX/PNG hiện hữu và tải lại sau reload,200/SHA/kích thước giữ/session200/0mutation; chỉ binary transport, chưa parser/render hoặc export mới. Tiếp tục main file/export mới trong hồ sơ được phép; local parser/export tests không chứng minh model vision/OCR/main execution. DOCX/PDF/XLSX bytes/lineage/ACL đã có code; XLSX cached không recalculated. Missing binary baseline không được thay bằng file giả.
+
+## Điểm tiếp chưa duyệt
+
+08/10 11:28: main owner rooms của9Project đều200 nhưng0accessible room; selected human/read-only main chưa có dữ liệu, không tự tạo. Mốc CAS bounded đã gửi trong chat, USER_APPROVAL_PENDING: expectedVersion nguyên dương/409, conditional authorized write và atomic audit/assignment/notification, concurrency/rollback PostgreSQL. Callers không gửi version vẫn gọi được; đây chỉ foundation generic update, chưa Task tool writes/source idempotency hoặc fulltracker. Chưa product code; chờ câu trả lời thật, không coi elapsed time là duyệt. Khi có approval thì ghi nhận và tiếp tục theo AGENTS/Superpowers, không xin lại quyền local release/UI đã có.
