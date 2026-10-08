@@ -446,21 +446,10 @@ export function AiAnswer({
 }
 
 export function ChatGptConnection() {
-  const description = useId();
   return (
-    <section aria-label="Kết nối ChatGPT" className="ai-capability-state">
-      <button type="button" disabled aria-describedby={description}>
-        Kết nối ChatGPT
-      </button>
-      <p id={description}>
-        Quyền kết nối ChatGPT của ứng dụng Galaxy OS chưa được xác nhận. Chưa có
-        tài khoản kết nối hoặc model được cấp. Bạn vẫn có thể xem hồ sơ, công
-        việc và lịch sử còn quyền.
-      </p>
-      <p>
-        Các dịch vụ dùng API key đang tạm dừng. Không tự chuyển sang dịch vụ
-        tính phí.
-      </p>
+    <section aria-label="Trạng thái AI" className="ai-capability-state">
+      <p>AI chưa được quản trị viên kích hoạt.</p>
+      <p>Bạn vẫn có thể xem hồ sơ, công việc và lịch sử còn quyền.</p>
     </section>
   );
 }
@@ -1731,8 +1720,7 @@ export function ProjectAi({
                     Câu hỏi AI
                     {planOnly && (
                       <span role="status" className="block text-sm">
-                        Chưa kết nối ChatGPT · Quyền ứng dụng chưa được xác
-                        nhận.
+                        AI chưa được quản trị viên kích hoạt.
                       </span>
                     )}
                     <ChatComposerInput

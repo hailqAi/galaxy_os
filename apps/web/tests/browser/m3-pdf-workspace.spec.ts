@@ -11,7 +11,7 @@ import {
 
 let fixture: Awaited<ReturnType<typeof createM2BrowserFixture>>;
 let productId: string;
-test('ChatGPT plan-only gate shows no granted models or working login redirect', async ({
+test('ChatGPT plan-only gate keeps member setup controls absent and model catalog empty', async ({
   page,
 }, info) => {
   test.skip(
@@ -44,19 +44,16 @@ test('ChatGPT plan-only gate shows no granted models or working login redirect',
   });
   await expect(
     page.getByRole('button', { name: 'Kết nối ChatGPT', exact: true }),
-  ).toBeDisabled();
+  ).toHaveCount(0);
   await expect(
-    page.getByText(
-      /Quyền kết nối ChatGPT của ứng dụng Galaxy OS chưa được xác nhận/,
-    ),
+    page.getByText(/AI chưa được quản trị viên kích hoạt/).first(),
   ).toBeVisible();
   for (const width of [1440, 1495, 720, 375, 390]) {
     await page.setViewportSize({ width, height: 1024 });
     await expect(
-      page.getByText(
-        'Chưa kết nối ChatGPT · Quyền ứng dụng chưa được xác nhận.',
-        { exact: true },
-      ),
+      page
+        .getByText('AI chưa được quản trị viên kích hoạt.', { exact: true })
+        .first(),
     ).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth),
@@ -65,6 +62,115 @@ test('ChatGPT plan-only gate shows no granted models or working login redirect',
       path: info.outputPath(`chatgpt-gate-${width}.png`),
       fullPage: true,
     });
+  }
+});
+test('system admin sees truthful ChatGPT status; member and revoked session cannot manage it', async ({
+  page,
+}, info) => {
+  test.skip(
+    process.env.GALAXY_AI_EXECUTION_POLICY !== 'CHATGPT_PLAN_ONLY',
+    'Requires the plan-only fixture API',
+  );
+  const db = new PrismaClient();
+  const assignment = await db.userRole.findFirstOrThrow({
+    where: {
+      userId: fixture.users.sender!.id,
+      role: { code: `pdf-${fixture.projectId}` },
+    },
+  });
+  const cookie = fixture.users.sender!.cookie,
+    split = cookie.indexOf('=');
+  await page.context().addCookies([
+    {
+      name: cookie.slice(0, split),
+      value: cookie.slice(split + 1),
+      url: process.env.APP_PUBLIC_ORIGIN!,
+      httpOnly: true,
+      sameSite: 'Lax',
+    },
+  ]);
+  try {
+    const permissions = await db.permission.findMany({
+      where: {
+        code: { in: ['system.settings.read', 'system.settings.update'] },
+      },
+    });
+    await db.rolePermission.createMany({
+      data: permissions.map((permission) => ({
+        roleId: assignment.roleId,
+        permissionId: permission.id,
+      })),
+    });
+    await page.goto('/settings/chatgpt-connection');
+    await expect(page).toHaveURL(/\/forbidden/);
+    await expect(
+      page.getByRole('link', { name: 'Kết nối ChatGPT', exact: true }),
+    ).toHaveCount(0);
+    await db.userRole.update({
+      where: { id: assignment.id },
+      data: { scopeType: 'SYSTEM' },
+    });
+    await page.goto('/settings/chatgpt-connection');
+    await expect(
+      page.getByRole('heading', { name: 'Chưa được kích hoạt' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('link', { name: 'Kết nối ChatGPT', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Kết nối ChatGPT', exact: true }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole('button', { name: 'Ngắt kết nối', exact: true }),
+    ).toBeDisabled();
+    await expect(
+      page.getByText('Chưa có model được cấp.', { exact: false }),
+    ).toBeVisible();
+    await page
+      .getByRole('button', { name: 'Kiểm tra cấu hình', exact: true })
+      .click();
+    await expect(page.getByRole('status')).toContainText(
+      'Chưa xác minh kết nối với OpenAI',
+    );
+    for (const width of [1440, 375]) {
+      await page.setViewportSize({ width, height: 1024 });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+      ).toBeLessThanOrEqual(width);
+      await page.screenshot({
+        path: info.outputPath(`admin-chatgpt-${width}.png`),
+        fullPage: true,
+      });
+    }
+    await page.reload();
+    await expect(page.getByText('Chưa kiểm tra', { exact: true })).toHaveCount(
+      0,
+    );
+    await db.userRole.update({
+      where: { id: assignment.id },
+      data: { scopeType: 'ORGANIZATION' },
+    });
+    const denied = await page.request.post(
+      '/api/v1/system/settings/chatgpt-connection',
+      { headers: { Origin: process.env.APP_PUBLIC_ORIGIN! } },
+    );
+    expect(denied.status()).toBe(403);
+    await page.reload();
+    await expect(page).toHaveURL(/\/forbidden/);
+  } finally {
+    await db.userRole.update({
+      where: { id: assignment.id },
+      data: { scopeType: assignment.scopeType },
+    });
+    await db.rolePermission.deleteMany({
+      where: {
+        roleId: assignment.roleId,
+        permission: {
+          code: { in: ['system.settings.read', 'system.settings.update'] },
+        },
+      },
+    });
+    await db.$disconnect();
   }
 });
 test('Task pagination uses domain totals, retries failed reads and keeps the current query after a delayed create', async ({

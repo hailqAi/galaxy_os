@@ -190,7 +190,8 @@ export const navigation: NavigationItem[] = [
     label: 'Hệ thống',
     href: '/settings/organization',
     icon: '⚙',
-    activeRouteMatcher: '^/settings/(organization|system|custom-fields)',
+    activeRouteMatcher:
+      '^/settings/(organization|system|custom-fields|chatgpt-connection)',
     sortOrder: 60,
     children: [
       item(
@@ -220,6 +221,13 @@ export const navigation: NavigationItem[] = [
         '/settings/system',
         'system.settings.read',
         40,
+      ),
+      item(
+        'chatgpt-connection',
+        'Kết nối ChatGPT',
+        '/settings/chatgpt-connection',
+        'system.settings.read',
+        50,
       ),
     ],
   },
@@ -253,6 +261,10 @@ const canSee = (
     | 'ORGANIZATION',
 ) =>
   (!item.requiredPermission || permissions.includes(item.requiredPermission)) &&
+  !(
+    item.href === '/settings/chatgpt-connection' &&
+    administrationScope !== 'SYSTEM'
+  ) &&
   !(item.href === '/settings/users' && administrationScope === 'SELF') &&
   (!item.featureFlag || process.env[item.featureFlag] === 'true');
 

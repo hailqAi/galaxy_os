@@ -172,6 +172,8 @@ export async function proxy(request: NextRequest) {
         path !== '/forbidden' &&
         routePermissions.find(([prefix]) => path.startsWith(prefix))?.[1];
       if (
+        (path.startsWith('/settings/chatgpt-connection') &&
+          actor.administrationScope !== 'SYSTEM') ||
         (path.startsWith('/settings/users') &&
           actor.administrationScope === 'SELF') ||
         (required && !actor.permissions.includes(required))

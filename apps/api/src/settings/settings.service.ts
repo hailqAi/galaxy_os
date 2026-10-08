@@ -7,6 +7,7 @@ import {
 import { CurrentActor } from '../access-control/current-actor';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma.service';
+import { AI_MODELS, readAiConfig } from '../project-chat/ai-registry';
 
 const systemKeys = new Set([
   'authentication.passwordPolicy',
@@ -33,6 +34,68 @@ export class SettingsService {
   system(actor: CurrentActor) {
     this.systemOnly(actor);
     return this.prisma.systemSetting.findMany({ orderBy: { key: 'asc' } });
+  }
+
+  async chatGptConnection(actor: CurrentActor) {
+    this.systemOnly(actor);
+    const lastCheck = await this.prisma.auditLog.findFirst({
+      where: {
+        organizationId: actor.organizationId,
+        action: 'chatgpt.connection.check',
+        entityType: 'ChatGptConnection',
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    const config = readAiConfig();
+    return {
+      status: 'NOT_CONFIGURED',
+      appEligibility: 'ELIGIBILITY_UNCONFIRMED',
+      inferenceGrant: 'NOT_GRANTED',
+      providerScope: 'UNCONFIRMED',
+      identity: null,
+      models: [],
+      canConnect: false,
+      canDisconnect: false,
+      canCheck: actor.permissions.includes('system.settings.update'),
+      checkedAt: lastCheck?.createdAt.toISOString() ?? null,
+      checkKind: 'LOCAL_CONFIGURATION_ONLY',
+      executionPolicy:
+        process.env.GALAXY_AI_EXECUTION_POLICY ?? 'LEGACY_API_KEY',
+      apiRelease: process.env.GALAXY_RELEASE_ID ?? null,
+      legacyProviders: AI_MODELS.map(({ provider }) => ({
+        provider,
+        paused: config[provider]?.paused ?? false,
+        configured: Boolean(config[provider]),
+      })),
+      missingRequirements: [
+        'APP_REGISTRATION',
+        'INFERENCE_GRANT',
+        'MULTIUSER_PROVIDER_SCOPE',
+      ],
+      callbackHost: 'NOT_CONFIGURED',
+      callbackLan: 'NOT_VERIFIED',
+      usage: 'UNKNOWN',
+    };
+  }
+
+  async checkChatGptConnection(actor: CurrentActor) {
+    this.systemOnly(actor);
+    const metadata = await this.chatGptConnection(actor);
+    const check = await this.prisma.$transaction((tx) =>
+      this.audit.write(tx, actor, {
+        action: 'chatgpt.connection.check',
+        entityType: 'ChatGptConnection',
+        entityId: actor.organizationId,
+        afterData: {
+          status: metadata.status,
+          appEligibility: metadata.appEligibility,
+          providerScope: metadata.providerScope,
+          checkKind: metadata.checkKind,
+        },
+      }),
+    );
+    return { ...metadata, checkedAt: check.createdAt.toISOString() };
   }
 
   setSystem(actor: CurrentActor, key: string, value: unknown) {

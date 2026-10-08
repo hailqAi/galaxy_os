@@ -163,7 +163,13 @@ export class DevelopmentAuthGuard implements CanActivate {
             assignment.organizationId === membership.organizationId,
         )
         .flatMap((assignment) =>
-          assignment.role.permissions.map(({ permission }) => permission.code),
+          assignment.role.permissions
+            .filter(
+              ({ permission }) =>
+                !permission.code.startsWith('system.') ||
+                assignment.scopeType === 'SYSTEM',
+            )
+            .map(({ permission }) => permission.code),
         ),
     );
     const assignments = user.roles.filter(

@@ -171,6 +171,142 @@ describe.sequential('Sprint 1 API integration', () => {
       .set('x-galaxy-dev-auth', process.env.DEV_AUTH_USER_EMAIL!);
   });
 
+  it('keeps central ChatGPT metadata and checks system-only, including after assignment revocation', async () => {
+    const endpoint = '/api/v1/system/settings/chatgpt-connection';
+    const checked = await request(app.getHttpServer())
+      .get(endpoint)
+      .set('x-galaxy-dev-auth', 'admin@galaxy.local')
+      .expect(200);
+    expect(checked.body).toMatchObject({
+      status: 'NOT_CONFIGURED',
+      appEligibility: 'ELIGIBILITY_UNCONFIRMED',
+      inferenceGrant: 'NOT_GRANTED',
+      providerScope: 'UNCONFIRMED',
+      identity: null,
+      models: [],
+      canConnect: false,
+      canDisconnect: false,
+    });
+    const permissions = await prisma.permission.findMany({
+      where: {
+        code: { in: ['system.settings.read', 'system.settings.update'] },
+      },
+    });
+    const assignment = await prisma.userRole.findFirstOrThrow({
+      where: { userId: restrictedId, roleId: restrictedRoleId },
+    });
+    const membership = await prisma.organizationMembership.findFirstOrThrow({
+      where: { userId: restrictedId, organizationId },
+    });
+    const scopedDepartment = await prisma.department.findFirstOrThrow({
+      where: { organizationId, status: 'active' },
+    });
+    const { randomBytes, createHash } = await import('node:crypto');
+    const token = randomBytes(32).toString('hex');
+    const session = await prisma.session.create({
+      data: {
+        userId: restrictedId,
+        organizationMembershipId: membership.id,
+        tokenHash: createHash('sha256').update(token).digest('hex'),
+        expiresAt: new Date(Date.now() + 3600000),
+        lastSeenAt: new Date(),
+      },
+    });
+    const unrelatedSystemRole = await prisma.role.create({
+      data: {
+        organizationId,
+        code: `chatgpt-unrelated-${Date.now()}`,
+        name: 'Unrelated SYSTEM fixture',
+        permissions: {
+          create: { permission: { connect: { code: 'organization.read' } } },
+        },
+      },
+    });
+    const unrelatedSystemAssignment = await prisma.userRole.create({
+      data: {
+        organizationId,
+        userId: restrictedId,
+        roleId: unrelatedSystemRole.id,
+        scopeType: 'SYSTEM',
+      },
+    });
+    const cookie = `${process.env.SESSION_COOKIE_NAME}=${token}`;
+    try {
+      await prisma.rolePermission.createMany({
+        data: permissions.map((permission) => ({
+          roleId: restrictedRoleId,
+          permissionId: permission.id,
+        })),
+      });
+      for (const scopeType of ['SELF', 'DEPARTMENT', 'ORGANIZATION'] as const) {
+        await prisma.userRole.update({
+          where: { id: assignment.id },
+          data: {
+            scopeType,
+            departmentId:
+              scopeType === 'DEPARTMENT' ? scopedDepartment.id : null,
+          },
+        });
+        await request(app.getHttpServer())
+          .get(endpoint)
+          .set('Cookie', cookie)
+          .expect(403);
+        await request(app.getHttpServer())
+          .post(endpoint)
+          .set('Cookie', cookie)
+          .send({})
+          .expect(403);
+      }
+      await prisma.userRole.update({
+        where: { id: assignment.id },
+        data: { scopeType: 'SYSTEM' },
+      });
+      const result = await request(app.getHttpServer())
+        .post(endpoint)
+        .set('Cookie', cookie)
+        .send({})
+        .expect(201);
+      expect(result.body.checkKind).toBe('LOCAL_CONFIGURATION_ONLY');
+      expect(result.body.checkedAt).toEqual(expect.any(String));
+      expect(result.body.models).toEqual([]);
+      await prisma.userRole.update({
+        where: { id: assignment.id },
+        data: { scopeType: 'ORGANIZATION' },
+      });
+      await request(app.getHttpServer())
+        .get(endpoint)
+        .set('Cookie', cookie)
+        .expect(403);
+      await request(app.getHttpServer())
+        .post(endpoint)
+        .set('Cookie', cookie)
+        .send({})
+        .expect(403);
+    } finally {
+      await prisma.userRole.delete({
+        where: { id: unrelatedSystemAssignment.id },
+      });
+      await prisma.rolePermission.deleteMany({
+        where: { roleId: unrelatedSystemRole.id },
+      });
+      await prisma.role.delete({ where: { id: unrelatedSystemRole.id } });
+      await prisma.session.delete({ where: { id: session.id } });
+      await prisma.userRole.update({
+        where: { id: assignment.id },
+        data: {
+          scopeType: assignment.scopeType,
+          departmentId: assignment.departmentId,
+        },
+      });
+      await prisma.rolePermission.deleteMany({
+        where: {
+          roleId: restrictedRoleId,
+          permissionId: { in: permissions.map((p) => p.id) },
+        },
+      });
+    }
+  });
+
   it('reads paged tasks and complete status totals from the same domain query', async () => {
     const title = `tracker-${crypto.randomUUID()}`;
     try {

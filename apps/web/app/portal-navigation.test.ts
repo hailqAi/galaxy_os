@@ -7,6 +7,23 @@ import {
 } from './portal-navigation';
 
 describe('permission-aware portal navigation', () => {
+  it('shows ChatGPT management only to system administrators with read permission', () => {
+    const hrefs = (
+      scope: 'SYSTEM' | 'ORGANIZATION' | 'MANAGED_DEPARTMENTS' | 'SELF',
+      permissions = ['system.settings.read'],
+    ) =>
+      visibleNavigation(permissions, scope)
+        .flatMap((group) => group.children ?? [])
+        .map((item) => item.href);
+    expect(hrefs('SYSTEM')).toContain('/settings/chatgpt-connection');
+    for (const scope of [
+      'ORGANIZATION',
+      'MANAGED_DEPARTMENTS',
+      'SELF',
+    ] as const)
+      expect(hrefs(scope)).not.toContain('/settings/chatgpt-connection');
+    expect(hrefs('SYSTEM', [])).not.toContain('/settings/chatgpt-connection');
+  });
   it.each([
     '/installations',
     '/installations/work-orders/ee41927b-82bf-4ba4-af50-c66e6dbe8e94',

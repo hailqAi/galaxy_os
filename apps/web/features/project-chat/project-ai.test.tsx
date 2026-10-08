@@ -9,11 +9,13 @@ import {
   ChatGptConnection,
 } from './project-ai';
 
-it('shows blocked ChatGPT eligibility without models, a login redirect or key fallback', () => {
+it('keeps member AI unavailable without provider management controls or diagnostics', () => {
   const html = renderToStaticMarkup(createElement(ChatGptConnection));
-  expect(html).toContain('Kết nối ChatGPT');
-  expect(html).toContain('disabled=""');
-  expect(html).toContain('chưa được xác nhận');
+  expect(html).toContain('AI chưa được quản trị viên kích hoạt');
+  expect(html).not.toContain('<button');
+  expect(html).not.toContain('Kết nối ChatGPT');
+  expect(html).not.toContain('API key');
+  expect(html).not.toContain('ELIGIBILITY');
   expect(html).not.toContain('href=');
   expect(html).not.toContain('CONNECTED');
 });

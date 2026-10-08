@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Put } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Post, Put } from '@nestjs/common';
 import { Actor, RequirePermission } from '../access-control/access.decorators';
 import { CurrentActor } from '../access-control/current-actor';
 import { SetSettingDto } from './settings.dto';
@@ -9,6 +9,16 @@ export class SystemSettingsController {
   constructor(
     @Inject(SettingsService) private readonly settings: SettingsService,
   ) {}
+  @Get('chatgpt-connection') @RequirePermission('system.settings.read') chatGpt(
+    @Actor() actor: CurrentActor,
+  ) {
+    return this.settings.chatGptConnection(actor);
+  }
+  @Post('chatgpt-connection')
+  @RequirePermission('system.settings.update')
+  checkChatGpt(@Actor() actor: CurrentActor) {
+    return this.settings.checkChatGptConnection(actor);
+  }
   @Get() @RequirePermission('system.settings.read') list(
     @Actor() actor: CurrentActor,
   ) {
