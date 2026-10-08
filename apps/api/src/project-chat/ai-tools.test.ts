@@ -148,3 +148,25 @@ it('tool chậm có deadline riêng và truyền abort xuống handler', async (
     vi.useRealTimers();
   }
 });
+
+it('tracker schemas are bounded and reject model supplied scope', () => {
+  const list = { page: 1, pageSize: 2, status: null, mine: false };
+  expect(toolInputs.task_list.parse(list)).toEqual(list);
+  for (const extra of [
+    { projectId: 'other' },
+    { actorId: 'admin' },
+    { sql: 'select 1' },
+  ])
+    expect(() => toolInputs.task_list.parse({ ...list, ...extra })).toThrow();
+  expect(() =>
+    toolInputs.task_list.parse({ ...list, pageSize: 100 }),
+  ).toThrow();
+  expect(() => toolInputs.task_get.parse({ taskId: '../secret' })).toThrow();
+  expect(() =>
+    toolInputs.task_history.parse({
+      taskId: 'd44348d5-89aa-46b2-8590-57c596275b28',
+      page: 0,
+      pageSize: 20,
+    }),
+  ).toThrow();
+});

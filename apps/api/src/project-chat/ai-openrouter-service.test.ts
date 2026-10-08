@@ -33,6 +33,7 @@ const service = new ProjectAiService(
   null as never,
   null as never,
   null as never,
+  null as never,
 );
 afterEach(() => vi.unstubAllEnvs());
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
@@ -276,6 +277,7 @@ it.each(['BACKOFF', 'CANCELLED'])(
       null as never,
       null as never,
       access as never,
+      null as never,
       null as never,
       null as never,
     );

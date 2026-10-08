@@ -7,6 +7,12 @@ import {
 import { CurrentActor } from '../access-control/current-actor';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma.service';
+import {
+  toolDefinitions,
+  toolInputs,
+  toolPolicy,
+  ToolName,
+} from '../project-chat/ai-tools';
 import { AI_MODELS, readAiConfig } from '../project-chat/ai-registry';
 
 const systemKeys = new Set([
@@ -55,6 +61,17 @@ export class SettingsService {
       providerScope: 'UNCONFIRMED',
       identity: null,
       models: [],
+      tools: toolDefinitions(Object.keys(toolInputs) as ToolName[]).map(
+        ({ function: tool }) => ({
+          name: tool.name,
+          description: tool.description,
+          inputSchema: tool.parameters,
+          ...toolPolicy(tool.name as ToolName),
+          implementation: 'LOCAL_IMPLEMENTED',
+          status: 'DISABLED',
+          reason: 'CHATGPT_NOT_CONFIGURED',
+        }),
+      ),
       canConnect: false,
       canDisconnect: false,
       canCheck: actor.permissions.includes('system.settings.update'),

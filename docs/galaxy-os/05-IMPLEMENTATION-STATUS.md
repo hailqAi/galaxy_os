@@ -1,5 +1,13 @@
 # Trạng thái triển khai và điểm tiếp tục
 
+## 08/10 — UI admin/P04 đã chạy main, tracker read đang kiểm tra
+
+Handoff hiện hành: [recovery/UI/admin](handoffs/2026-10-08-recovery-ui-admin-maintenance.md). Main `local-ce7fabf8ed1c` tại http://localhost:3000 và http://192.168.1.80:3000; API/Web/control plane READY, root `pnpm dev` exit0 ALREADY_RUNNING_VERIFIED. Menu Hệ thống → Kết nối ChatGPT `/settings/chatgpt-connection`; frontend/backend yêu cầu permission từ assignment SYSTEM, check local có audit. Phiên owner SYSTEM main200, screenshot thật1440/375; P04 work/ai giữ9Project/session/history và không có cấu hình ChatGPT trong Project. Member main chưa có phiên thật; fixture denial/revoke PASS.
+
+DEPLOYED_LOCAL_RELEASE `local-ce7fabf8ed1c`, CODE_SHA=TESTED_SHA `f2bdd2549a4d0b449a73e86b043d7f9007ef8d77`, TESTED_TREE `7dd89945e555e8e34fefd8f94fb1211bade997ea`. Full r1 API1388/Web573/Edge5/document1/runtime64 + lint/types/format/build PASS. Recovery native đã được duyệt riêng, Reexecute một lần; cleanup peer transport hoàn tất,2unit/bus tạm được xóa đúng ownership. Không chạy lại script lịch sử. Schema86, provider pause, Edge và public CLOSED giữ.
+
+SIWC NOT_CONFIGURED/NOT_GRANTED/UNCONFIRMED, Connect disabled; chưa có registration/grant/model/inference/tool live hoặc quyền nhiều người. Mốc tracker READ/registry đã duyệt,9integration mới PASS/review không còn Critical/Important; full regression mới PASS API1400/Web573/Edge5/document1/runtime64, lint/types/format PASS; candidate2/browser/release code này còn gate. Task writes/CAS, durable crash resume và bộ nhớ vận hành đầy đủ còn việc. Lịch sử bên dưới không thay evidence hiện hành.
+
 ## 08/10 — ChatGPT plan only đang triển khai, main chưa cutover
 
 Handoff hiện hành: [08/10 ChatGPT plan only](handoffs/2026-10-08-chatgpt-plan-only.md), kế hoạch hợp nhất [master + addendum](../superpowers/plans/2026-10-08-chatgpt-plan-only.md). Đã pause4provider API key bằng config live; không có job QUEUED/RUNNING tại lúc kiểm. Main localhost/LAN vẫn `local-a0429faf5733`, APP_SERVING nhưng CONTROL_PLANE_UNAVAILABLE. Chưa phục hồi D-Bus hoặc vượt rejection cũ.

@@ -93,7 +93,13 @@ export function assertG00Isolation(source = process.env) {
     database.password !== databasePassword ||
     database.pathname !== `/${databaseName}` ||
     database.searchParams.get('schema') !== 'public' ||
-    [...database.searchParams.keys()].some((key) => key !== 'schema')
+    [...database.searchParams.keys()].some(
+      (key) => !['schema', 'connection_limit'].includes(key),
+    ) ||
+    database.searchParams.getAll('schema').length !== 1 ||
+    database.searchParams.getAll('connection_limit').length > 1 ||
+    (database.searchParams.has('connection_limit') &&
+      !/^[1-5]$/.test(database.searchParams.get('connection_limit')))
   )
     reject('DATABASE_URL is not the dedicated G00 database');
 

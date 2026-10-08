@@ -5,6 +5,15 @@ import { useEffect, useState } from 'react';
 import { api, ApiError } from '../../lib/api';
 
 type Connection = {
+  tools: {
+    name: string;
+    description: string;
+    version: string;
+    sideEffect: string;
+    authorization: string;
+    status: string;
+    reason: string;
+  }[];
   status: string;
   appEligibility: string;
   inferenceGrant: string;
@@ -177,6 +186,25 @@ export default function ChatGptConnectionPage() {
             >
               Hướng dẫn quản lý usage trong ChatGPT
             </a>
+          </section>
+          <section className="panel grid gap-3" aria-label="Công cụ Galaxy">
+            <h2 className="text-xl font-semibold">Công cụ Galaxy</h2>
+            <p>
+              Danh mục contract hiện có. Chưa có công cụ live được xác minh; kết
+              nối ChatGPT chưa được kích hoạt.
+            </p>
+            <ul className="grid gap-3">
+              {connection.tools.map((tool) => (
+                <li key={tool.name}>
+                  <strong>{tool.name}</strong>
+                  <p>{tool.description}</p>
+                  <p>
+                    v{tool.version} · {tool.sideEffect} · {tool.authorization} ·{' '}
+                    {tool.status} ({tool.reason})
+                  </p>
+                </li>
+              ))}
+            </ul>
           </section>
           <section className="panel grid gap-3" aria-label="Chẩn đoán quản trị">
             <h2 className="text-xl font-semibold">

@@ -6,11 +6,20 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, ChatAiSourceIndex, ChatAiAnswer } from '@prisma/client';
+import {
+  Prisma,
+  ChatAiSourceIndex,
+  ChatAiAnswer,
+  TaskStatus,
+} from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import { addAbortSignal } from 'node:stream';
 import { projectWhereForPermissions } from '../access-control/business-entity.policy';
-import { CurrentActor } from '../access-control/current-actor';
+import {
+  CurrentActor,
+  actorsForPermission,
+} from '../access-control/current-actor';
+import { TasksService } from '../tasks/tasks.service';
 import { ProjectChatPolicy } from '../access-control/project-chat.policy';
 import { PrismaService } from '../prisma.service';
 import {
@@ -100,6 +109,7 @@ export class ProjectAiService {
     @Inject(FilesService) private readonly files: FilesService,
     @Inject(ProjectStageTwoService)
     private readonly stageTwo: ProjectStageTwoService,
+    @Inject(TasksService) private readonly tasks: TasksService,
   ) {}
 
   private async authorized<T>(
@@ -126,6 +136,144 @@ export class ProjectAiService {
       const grant = await this.access.authority(tx, actor, projectId, 'INVOKE');
       return run(tx, grant.id);
     });
+  }
+  private async taskTool(
+    actor: CurrentActor,
+    projectId: string,
+    name: 'task_list' | 'task_get' | 'task_history',
+    input: unknown,
+  ) {
+    const fresh = await this.authorized(actor, projectId, async (tx) => {
+      const current = await this.access.freshActor(tx, actor);
+      if (
+        !(await tx.project.findFirst({
+          where: {
+            AND: [
+              { id: projectId },
+              projectWhereForPermissions(current, [
+                'project.read',
+                'task.read',
+              ]),
+            ],
+          },
+          select: { id: true },
+        }))
+      )
+        throw new NotFoundException();
+      return current;
+    });
+    const visibility: Prisma.TaskWhereInput = {
+      projectId,
+      OR: actorsForPermission(fresh, 'task.read').map((scope) =>
+        this.tasks.visibleWhere(scope),
+      ),
+    };
+    type Row = Awaited<ReturnType<TasksService['list']>>['items'][number];
+    const project = ({
+      id,
+      title,
+      description,
+      status,
+      priority,
+      startDate,
+      dueDate,
+      completedAt,
+      version,
+      createdBy,
+      updatedBy,
+      assignees,
+    }: Row) => ({
+      id,
+      title,
+      description,
+      status,
+      priority,
+      startDate,
+      dueDate,
+      completedAt,
+      version,
+      createdBy,
+      updatedBy,
+      assignees: assignees.map(({ user }) => user),
+      accountableOwner: null,
+      stage: null,
+      group: null,
+    });
+    if (name === 'task_list') {
+      const args = toolInputs.task_list.parse(input);
+      const { snapshotTaskIds, ...data } = await this.tasks.list(
+        fresh,
+        { ...args, status: args.status ?? undefined, projectId },
+        visibility,
+        true,
+      );
+      if (
+        !snapshotTaskIds ||
+        snapshotTaskIds.length > 1000 ||
+        snapshotTaskIds.length !== data.total
+      )
+        throw new AiError('TOOL_CONTEXT_LIMIT');
+      return {
+        value: { ...data, items: data.items.map(project) },
+        taskIds: snapshotTaskIds,
+      };
+    }
+    const args = toolInputs[name].parse(input);
+    const page =
+      name === 'task_history'
+        ? toolInputs.task_history.parse(input)
+        : { page: 1, pageSize: 1 };
+    const data = await this.tasks.get(fresh, args.taskId, visibility, page);
+    const metadata = (value: Prisma.JsonValue) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value))
+        return {};
+      return {
+        ...(typeof value.from === 'string' &&
+        Object.values(TaskStatus).includes(value.from as TaskStatus)
+          ? { from: value.from }
+          : {}),
+        ...(typeof value.to === 'string' &&
+        Object.values(TaskStatus).includes(value.to as TaskStatus)
+          ? { to: value.to }
+          : {}),
+        ...(typeof value.fromVersion === 'number'
+          ? { fromVersion: value.fromVersion }
+          : {}),
+        ...(typeof value.toVersion === 'number'
+          ? { toVersion: value.toVersion }
+          : {}),
+      };
+    };
+    return {
+      taskIds: [data.id],
+      value:
+        name === 'task_get'
+          ? project(data)
+          : {
+              taskId: data.id,
+              version: data.version,
+              page: page.page,
+              pageSize: page.pageSize,
+              total: data.activityTotal ?? 0,
+              totalPages: Math.ceil((data.activityTotal ?? 0) / page.pageSize),
+              computedAt: new Date().toISOString(),
+              items: data.activity.map(
+                ({
+                  id,
+                  event,
+                  createdAt,
+                  actor: actorLabel,
+                  metadata: value,
+                }) => ({
+                  id,
+                  event,
+                  createdAt,
+                  actor: actorLabel,
+                  ...metadata(value),
+                }),
+              ),
+            },
+    };
   }
   private readonly running = new Map<string, AbortController>();
   private denied(error: unknown) {
@@ -2096,6 +2244,22 @@ export class ProjectAiService {
         }))
       )
         return hidden;
+      const taskIds = [
+        ...new Set(toolSources.flatMap((source) => source.taskIds ?? [])),
+      ];
+      if (
+        taskIds.length &&
+        (await tx.task.count({
+          where: {
+            projectId,
+            id: { in: taskIds },
+            OR: actorsForPermission(fresh, 'task.read').map((scope) =>
+              this.tasks.visibleWhere(scope),
+            ),
+          },
+        })) !== taskIds.length
+      )
+        return hidden;
     }
     const pin = requestMetadata(answer.usage);
     if (pin) {
@@ -3799,11 +3963,24 @@ export class ProjectAiService {
           if (
             name === 'calculate' ||
             name === 'read_project_records' ||
-            name === 'analyze_table'
+            name === 'analyze_table' ||
+            name === 'task_list' ||
+            name === 'task_get' ||
+            name === 'task_history'
           ) {
             let value: unknown;
             let permissions: ToolSource['permissions'] = [];
-            if (name === 'calculate')
+            let taskIds: string[] | undefined;
+            if (
+              name === 'task_list' ||
+              name === 'task_get' ||
+              name === 'task_history'
+            ) {
+              const result = await this.taskTool(actor, projectId, name, input);
+              value = result.value;
+              taskIds = result.taskIds;
+              permissions = ['project.read', 'task.read'];
+            } else if (name === 'calculate')
               value = calculate(toolInputs.calculate.parse(input));
             else if (name === 'analyze_table') {
               const args = toolInputs.analyze_table.parse(input);
@@ -3922,10 +4099,13 @@ export class ProjectAiService {
                   ? 'Kết quả tính Decimal'
                   : name === 'analyze_table'
                     ? `Phân tích XLSX · ${toolInputs.analyze_table.parse(input).sheet}!${toolInputs.analyze_table.parse(input).range}`
-                    : 'Kế hoạch giai đoạn 2 · ảnh chụp dữ liệu',
+                    : taskIds
+                      ? 'Todo/tracker · ảnh chụp Task domain'
+                      : 'Kế hoạch giai đoạn 2 · ảnh chụp dữ liệu',
               version: key,
               provenance: 'AI_DRAFT',
               permissions,
+              ...(taskIds ? { taskIds } : {}),
               createdAt: new Date().toISOString(),
             };
             if (!toolSources.some((existing) => existing.handle === handle))
@@ -3969,6 +4149,9 @@ export class ProjectAiService {
                       'search_project_sources',
                       'read_project_source',
                       'read_project_records',
+                      'task_list',
+                      'task_get',
+                      'task_history',
                       'calculate',
                       'analyze_table',
                       'create_document',

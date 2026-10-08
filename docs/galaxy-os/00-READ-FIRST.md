@@ -21,6 +21,8 @@ Bộ canonical yêu cầu và tiếp tục phát triển: `docs/galaxy-os/`. Ngu
 | [07 — Nghiệm thu](07-ACCEPTANCE.md)                     | 24 ca NOT_RUN và cách ghi bằng chứng                                         |
 | [Nguồn chủ dự án](sources/OWNER_BRIEF_2026-09-28.md)    | Toàn bộ phạm vi giao việc M0 và yêu cầu hợp nhất tự đủ                       |
 
+Bộ nhớ phát triển hiện hành: [PROJECT_MEMORY](PROJECT_MEMORY.md). Không thay bộ nhớ vận hành Project.
+
 ## Trước thay đổi và cuối phiên
 
 Đọc charter/spec phần liên quan và source/callers/tests. Dùng domain hiện hữu, một hồ sơ xuyên suốt; không tự tạo sổ chat/AI độc lập với hợp đồng/PO/tiền. Thiết kế code theo quy trình Superpowers/Ponytail của repository; không suy quyền runtime từ tên role hoặc mockup.

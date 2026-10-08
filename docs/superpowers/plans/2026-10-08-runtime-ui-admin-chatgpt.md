@@ -46,14 +46,14 @@
 - [x] RED: menu chỉ SYSTEM; member Project không CTA; API admin/member/stale session thực qua DB fixture.
 - [x] GREEN: tái dùng SettingsService.systemOnly, trả status/identity/grant/scope/catalog/missing requirements/checkedAt và release metadata thật; POST kiểm local có audit.
 - [x] GREEN: trang status luôn render với actor hợp lệ; buttons chưa khả dụng có lý do; Project thông báo ngắn, không metadata admin.
-- [ ] Focused API/Web + browser fixture; full lint/types/tests/build/format một lần sau diff ổn định.
+- [x] Focused API/Web + browser fixture; full lint/types/tests/build/format một lần sau diff ổn định.
 
 ### Task 3: Candidate và release
 
-- [ ] Build snapshot mới, đối soát tested tree/digests/config/pause/schema86; stage hai unit từ artifact bằng validator XDG riêng, rollback/data không đổi.
-- [ ] Khi recovery được duyệt và đạt: cutover qua mechanism hiện hữu; kiểm localhost/LAN/API/Web release khớp.
+- [x] Build snapshot mới, đối soát tested tree/digests/config/pause/schema86; stage hai unit từ artifact bằng validator XDG riêng, rollback/data không đổi.
+- [x] Khi recovery được duyệt và đạt: cutover qua mechanism hiện hữu; kiểm localhost/LAN/API/Web release khớp.
 - [ ] Main Chrome admin/member và năm P04, screenshot theo state/viewport/release; không gắn fixture thành main.
-- [ ] Review độc lập correctness/security/auth/UX và Ponytail; sửa finding bằng RED→GREEN.
+- [x] Review độc lập correctness/security/auth/UX và Ponytail; sửa finding bằng RED→GREEN.
 
 ### Task 4: Backlog và bộ nhớ
 
@@ -65,3 +65,5 @@
 2026-10-08: owner duyệt thiết kế trang quản trị và yêu cầu triển khai ngay. Plan bổ sung delta quản trị; kế hoạch cũ giữ nguyên lịch sử. Baseline HEAD14be03c/codee9a15df; main vẫn local-a0429faf5733. Không có recovery/cutover mutation.
 
 2026-10-08: Review độc lập phát hiện ghép permission SYSTEM từ role ngoài scope. RED real-session200 thay403; sửa effective permissions ở guard chung để system.\* chỉ đến từ assignmentSYSTEM, /me/nav/proxy/canCheck đồng nhất. Full regression với Poppler hiện hữu đạt API1388/Web573/Edge5/document1;64Python PASS. Lượt thiếu Poppler thất bại không tính PASS. Bare/resume Codex0.161.0 đạt idle/exit0, không model turn; lỗi mismatch NOT_REPRODUCED. Build cần biến production bắt buộc, không nới validator.
+
+2026-10-08 main checkpoint: r1 local-ce7fabf8ed1c đã cutover READY; recovery native và contingency cleanup được duyệt, Reexecute một lần, owned residue cleanup PASS. Root pnpm dev exit0 ALREADY_RUNNING_VERIFIED; admin main SYSTEM200/checkpersist/reload1440/375 và P04 work/ai thật có ảnh. Member main và full năm PDF states chưa đủ mới, giữ checkbox chưa complete. Tracker READ/registry approved9focused PASS, full/candidate2 đang gate; hồ sơ grant central chuẩn bị nhưng chưa vendor chấp thuận.

@@ -6,7 +6,29 @@ import { AiError } from './ai-registry';
 
 export const ToolDecimal = Prisma.Decimal.clone({ precision: 80 });
 const decimal = z.string().regex(/^-?(?:0|[1-9]\d{0,29})(?:\.\d{1,12})?$/);
+const taskPage = {
+  page: z.number().int().min(1).max(10000),
+  pageSize: z.number().int().min(1).max(20),
+};
 export const toolInputs = {
+  task_list: z
+    .object({
+      ...taskPage,
+      status: z
+        .enum([
+          'TODO',
+          'IN_PROGRESS',
+          'BLOCKED',
+          'IN_REVIEW',
+          'DONE',
+          'CANCELLED',
+        ])
+        .nullable(),
+      mine: z.boolean(),
+    })
+    .strict(),
+  task_get: z.object({ taskId: z.string().uuid() }).strict(),
+  task_history: z.object({ taskId: z.string().uuid(), ...taskPage }).strict(),
   create_document: documentInput,
   revise_draft: documentInput.extend({ sourceId: z.string().uuid() }).strict(),
   search_project_sources: z
@@ -54,18 +76,37 @@ export const toolInputs = {
 } as const;
 export type ToolName = keyof typeof toolInputs;
 export const toolPolicy = (name: ToolName) => ({
+  version: '1',
+  sideEffect:
+    name === 'create_document' || name === 'revise_draft'
+      ? 'DRAFT'
+      : name === 'search_web' || name === 'fetch_public_page'
+        ? 'EXTERNAL'
+        : 'READ',
+  retry:
+    name === 'create_document' || name === 'revise_draft'
+      ? 'IDEMPOTENT_KEY'
+      : 'BOUNDED_READ',
   costClass: name === 'search_web' ? 'EXTERNAL_CREDIT' : 'LOCAL',
   timeoutMs: 20000,
   authorization:
-    name === 'read_project_records'
-      ? 'PROJECT_AND_FIELD'
-      : name === 'search_project_sources' ||
-          name === 'read_project_source' ||
-          name === 'analyze_table'
-        ? 'PROJECT_AND_SOURCE'
-        : 'PROJECT_AI_INVOKE',
+    name === 'task_list' || name === 'task_get' || name === 'task_history'
+      ? 'PROJECT_AND_TASK'
+      : name === 'read_project_records'
+        ? 'PROJECT_AND_FIELD'
+        : name === 'search_project_sources' ||
+            name === 'read_project_source' ||
+            name === 'analyze_table'
+          ? 'PROJECT_AND_SOURCE'
+          : 'PROJECT_AI_INVOKE',
 });
 const descriptions: Record<ToolName, string> = {
+  task_list:
+    'Todo/tracker của Project hiện hành từ Task domain; phân trang/count/trạng thái thật theo quyền. Không có số tài chính; group/stage thiếu không tự suy từ room. Snapshot lúc đọc, không hoàn thành task.',
+  task_get:
+    'Đọc taskId được phép trong Project hiện hành, version/owner/hạn/trạng thái thật. Thiếu owner/hạn giữ null hoặc danh sách rỗng; không ghi hay phê duyệt.',
+  task_history:
+    'Đọc lịch sử Task domain được phép trong Project hiện hành theo trang. Không coi hoàn thành AI/file là hoàn thành việc nghiệp vụ.',
   create_document:
     'Tạo file DOCX/PDF/XLSX riêng tư thật, bản nháp chưa phê duyệt. Văn bản/bảng/ảnh dùng sourceId được phép; số XLSX lưu chuỗi chính xác, không công thức. Không dùng để phát hành hoặc thay nghĩa vụ đã ký.',
   revise_draft:
@@ -218,6 +259,7 @@ export const toolSourceSchema = z
       })
       .strict()
       .optional(),
+    taskIds: z.array(z.string().uuid()).max(1000).optional(),
     permissions: z
       .array(z.enum(['project.read', 'task.read', 'estimate.read']))
       .max(3),

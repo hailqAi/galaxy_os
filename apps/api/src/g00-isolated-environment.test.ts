@@ -34,6 +34,30 @@ describe('G00 isolated test environment guard', () => {
     });
   });
 
+  it('allows a bounded fixture connection pool while retaining database isolation', () => {
+    expect(
+      assertG00Isolation({
+        ...valid,
+        DATABASE_URL: valid.DATABASE_URL + '&connection_limit=3',
+      }).databaseName,
+    ).toBe('galaxy_os_g00_20260914g00');
+    for (const query of [
+      'connection_limit=0',
+      'connection_limit=6',
+      'connection_limit=-1',
+      'connection_limit=03',
+      'connection_limit=3&connection_limit=3',
+      'options=anything',
+    ]) {
+      expect(() =>
+        assertG00Isolation({
+          ...valid,
+          DATABASE_URL: valid.DATABASE_URL + '&' + query,
+        }),
+      ).toThrow(/G00 isolation rejected/);
+    }
+  });
+
   it.each([
     ['missing confirmation', { GALAXY_TEST_ISOLATION: undefined }],
     [

@@ -177,6 +177,16 @@ describe.sequential('Sprint 1 API integration', () => {
       .get(endpoint)
       .set('x-galaxy-dev-auth', 'admin@galaxy.local')
       .expect(200);
+    expect(checked.body.tools).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'task_list',
+          sideEffect: 'READ',
+          status: 'DISABLED',
+          reason: 'CHATGPT_NOT_CONFIGURED',
+        }),
+      ]),
+    );
     expect(checked.body).toMatchObject({
       status: 'NOT_CONFIGURED',
       appEligibility: 'ELIGIBILITY_UNCONFIRMED',

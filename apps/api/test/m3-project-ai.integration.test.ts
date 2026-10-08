@@ -728,6 +728,311 @@ describe.sequential(
         rmSync(dir, { recursive: true });
       }
     });
+    async function taskToolScenario() {
+      const a = await aiScenario(0),
+        { dir } = unifiedProvider();
+      await db.project.update({
+        where: { id: a.projectId },
+        data: { projectOwnerId: users.owner!.id },
+      });
+      const role = await db.role.create({
+        data: {
+          organizationId,
+          code: randomUUID(),
+          name: 'Task read fixture',
+          maximumScope: 'ORGANIZATION',
+          permissions: {
+            create: ['task.read'].map((code) => ({
+              permission: { connect: { code } },
+            })),
+          },
+        },
+      });
+      const assignment = await db.userRole.create({
+        data: {
+          organizationId,
+          userId: users.owner!.id,
+          roleId: role.id,
+          scopeType: 'ORGANIZATION',
+        },
+      });
+      const tasks = [];
+      for (let i = 0; i < 3; i++)
+        tasks.push(
+          await db.task.create({
+            data: {
+              organizationId,
+              projectId: a.projectId,
+              title: `Task source ${i}`,
+              status: i === 2 ? 'DONE' : 'TODO',
+              allocatedBudget: '987654321.12',
+              createdBy: users.owner!.id,
+              updatedBy: users.owner!.id,
+            },
+          }),
+        );
+      await db.task.create({
+        data: {
+          organizationId,
+          projectId: otherProjectId,
+          title: 'CROSS_PROJECT_TRACKER_SECRET',
+          createdBy: users.owner!.id,
+          updatedBy: users.owner!.id,
+        },
+      });
+      await db.activity.create({
+        data: {
+          organizationId,
+          actorId: users.owner!.id,
+          event: 'TASK_CREATED',
+          entityType: 'Task',
+          entityId: tasks[0]!.id,
+        },
+      });
+      return { a, dir, assignment, tasks };
+    }
+    it('tracker tool paginates real domain totals without budget/cross-project data and revoked permission hides history', async () => {
+      const { a, dir, assignment } = await taskToolScenario();
+      try {
+        const payloads = toolVendor('task_list', {
+          page: 2,
+          pageSize: 2,
+          status: null,
+          mine: false,
+        });
+        const answer = await a.ask(),
+          result = await a.post(`/answers/${answer.id}/run`, {}).expect(201);
+        expect(result.body.status).toBe('COMPLETED');
+        expect(payloads.join('')).not.toContain('CROSS_PROJECT_TRACKER_SECRET');
+        expect(payloads.join('')).not.toContain('987654321.12');
+        const source = (
+          await a
+            .get(
+              `/answers/${answer.id}/sources/${result.body.sources[0].handle}`,
+            )
+            .expect(200)
+        ).body;
+        const snapshot = JSON.parse(source.text);
+        expect(snapshot).toMatchObject({
+          page: 2,
+          pageSize: 2,
+          total: 3,
+          totalPages: 2,
+          statusCounts: { TODO: 2, DONE: 1 },
+        });
+        expect(snapshot.items).toHaveLength(1);
+        expect(snapshot.computedAt).toEqual(expect.any(String));
+        await db.userRole.delete({ where: { id: assignment.id } });
+        expect(
+          (await a.get(`/conversations/${answer.conversationId}`).expect(200))
+            .body.answers[0].status,
+        ).toBe('ACCESS_REVOKED');
+      } finally {
+        await db.userRole.deleteMany({ where: { id: assignment.id } });
+        rmSync(dir, { recursive: true });
+      }
+    });
+    it.each(['task_get', 'task_history'] as const)(
+      '%s reads Task version/history, then per-task visibility revocation hides its saved output',
+      async (name) => {
+        const { a, dir, assignment, tasks } = await taskToolScenario();
+        try {
+          await db.userRole.update({
+            where: { id: assignment.id },
+            data: { scopeType: 'SELF' },
+          });
+          const task = tasks[0]!;
+          const payloads = toolVendor(name, {
+            taskId: task.id,
+            ...(name === 'task_history' ? { page: 1, pageSize: 2 } : {}),
+          });
+          const answer = await a.ask(),
+            result = await a.post(`/answers/${answer.id}/run`, {}).expect(201);
+          expect(result.body.status).toBe('COMPLETED');
+          expect(payloads.join('')).not.toContain('987654321.12');
+          const source = (
+            await a
+              .get(
+                `/answers/${answer.id}/sources/${result.body.sources[0].handle}`,
+              )
+              .expect(200)
+          ).body;
+          const snapshot = JSON.parse(source.text);
+          if (name === 'task_get')
+            expect(snapshot).toMatchObject({
+              id: task.id,
+              version: 1,
+              status: 'TODO',
+            });
+          else
+            expect(snapshot).toMatchObject({
+              taskId: task.id,
+              total: 1,
+              items: [{ event: 'TASK_CREATED' }],
+            });
+          await db.task.update({
+            where: { id: task.id },
+            data: { createdBy: users.reader!.id, updatedBy: users.reader!.id },
+          });
+          expect(
+            (await a.get(`/conversations/${answer.conversationId}`).expect(200))
+              .body.answers[0].status,
+          ).toBe('ACCESS_REVOKED');
+        } finally {
+          await db.userRole.deleteMany({ where: { id: assignment.id } });
+          rmSync(dir, { recursive: true });
+        }
+      },
+    );
+    it('tracker refuses exactly1001 contributors before outbound, instead of dropping its ACL evidence', async () => {
+      const { a, dir, assignment } = await taskToolScenario();
+      try {
+        await db.task.createMany({
+          data: Array.from({ length: 998 }, (_, i) => ({
+            organizationId,
+            projectId: a.projectId,
+            title: 'Witness boundary ' + i,
+            createdBy: users.owner!.id,
+            updatedBy: users.owner!.id,
+          })),
+        });
+        const payloads = toolVendor('task_list', {
+            page: 1,
+            pageSize: 20,
+            status: null,
+            mine: false,
+          }),
+          answer = await a.ask();
+        const result = await a
+          .post(`/answers/${answer.id}/run`, {})
+          .expect(201);
+        expect(result.body.status).toBe('FAILED');
+        expect(
+          (
+            await db.chatAiAnswer.findUniqueOrThrow({
+              where: { id: answer.id },
+            })
+          ).errorCode,
+        ).toBe('TOOL_CONTEXT_LIMIT');
+        expect(payloads).toHaveLength(1);
+      } finally {
+        await db.chatAiAnswer.updateMany({
+          where: { projectId: a.projectId },
+          data: { leaseUntil: null },
+        });
+        await db.userRole.deleteMany({ where: { id: assignment.id } });
+        rmSync(dir, { recursive: true });
+      }
+    });
+    it.each([2, 5])(
+      'tracker page%s rechecks off-page contributors to saved totals, including empty pages',
+      async (page) => {
+        const { a, dir, assignment, tasks } = await taskToolScenario();
+        try {
+          await db.userRole.update({
+            where: { id: assignment.id },
+            data: { scopeType: 'SELF' },
+          });
+          toolVendor('task_list', {
+            page,
+            pageSize: 2,
+            status: null,
+            mine: false,
+          });
+          const answer = await a.ask(),
+            result = await a.post(`/answers/${answer.id}/run`, {}).expect(201);
+          expect(result.body.status).toBe('COMPLETED');
+          const source = (
+            await a
+              .get(
+                `/answers/${answer.id}/sources/${result.body.sources[0].handle}`,
+              )
+              .expect(200)
+          ).body;
+          const snapshot = JSON.parse(source.text);
+          expect(snapshot.total).toBe(3);
+          expect(snapshot.items).toHaveLength(page === 2 ? 1 : 0);
+          const offPage = tasks.find(
+            (task) =>
+              !snapshot.items.some(
+                (item: { id: string }) => item.id === task.id,
+              ),
+          )!;
+          await db.task.update({
+            where: { id: offPage.id },
+            data: { createdBy: users.reader!.id, updatedBy: users.reader!.id },
+          });
+          expect(
+            (await a.get(`/conversations/${answer.conversationId}`).expect(200))
+              .body.answers[0].status,
+          ).toBe('ACCESS_REVOKED');
+          await a
+            .get(
+              `/answers/${answer.id}/sources/${result.body.sources[0].handle}`,
+            )
+            .expect(404);
+        } finally {
+          await db.userRole.deleteMany({ where: { id: assignment.id } });
+          rmSync(dir, { recursive: true });
+        }
+      },
+    );
+    it.each([
+      'MISSING_PERMISSION',
+      'SELF_OTHER_OWNER',
+      'CROSS_PROJECT',
+    ] as const)(
+      'tracker refuses %s despite unrelated broad Project/AI role, before sending task data',
+      async (reason) => {
+        const { a, dir, assignment, tasks } = await taskToolScenario();
+        try {
+          let taskId = tasks[0]!.id;
+          if (reason === 'MISSING_PERMISSION')
+            await db.userRole.delete({ where: { id: assignment.id } });
+          else if (reason === 'SELF_OTHER_OWNER') {
+            await db.userRole.update({
+              where: { id: assignment.id },
+              data: { scopeType: 'SELF' },
+            });
+            await db.task.update({
+              where: { id: taskId },
+              data: {
+                createdBy: users.reader!.id,
+                updatedBy: users.reader!.id,
+              },
+            });
+          } else
+            taskId = (
+              await db.task.findFirstOrThrow({
+                where: {
+                  organizationId,
+                  projectId: otherProjectId,
+                  title: 'CROSS_PROJECT_TRACKER_SECRET',
+                },
+              })
+            ).id;
+          const payloads = toolVendor('task_get', { taskId }),
+            answer = await a.ask();
+          const result = await a
+            .post(`/answers/${answer.id}/run`, {})
+            .expect(201);
+          expect(result.body.status).toBe('ACCESS_REVOKED');
+          expect(payloads).toHaveLength(1);
+          expect(payloads.join('')).not.toContain(
+            'CROSS_PROJECT_TRACKER_SECRET',
+          );
+          expect(payloads.join('')).not.toContain('987654321.12');
+        } finally {
+          // Release only this synthetic Project's deliberately retained reservation.
+          await db.chatAiAnswer.updateMany({
+            where: { projectId: a.projectId },
+            data: { leaseUntil: null },
+          });
+          await db.userRole.deleteMany({ where: { id: assignment.id } });
+          rmSync(dir, { recursive: true });
+        }
+      },
+    );
     it('công cụ nghiệp vụ đọc đủ kế hoạch đúng Project, giữ Decimal và revoke quyền tài chính trong history', async () => {
       const a = await aiScenario(0),
         { dir } = unifiedProvider();
@@ -2432,34 +2737,67 @@ describe.sequential(
       }
     });
 
-    it('admin duyệt đúng nguồn/version, nguồn chưa duyệt không outbound; 503 rồi revoke không retry', async () => {
-      const scenario = await aiScenario(2);
-      await scenario.post('/index', { scope: 'ALL' }).expect(201);
-      const indexes = await db.chatAiSourceIndex.findMany({
-        where: { projectId: scenario.projectId },
-        orderBy: { roomId: 'asc' },
+    describe('admin duyệt đúng nguồn/version, nguồn chưa duyệt không outbound; 503 rồi revoke không retry', () => {
+      let scenario: Awaited<ReturnType<typeof aiScenario>>;
+      let indexes: Awaited<ReturnType<typeof db.chatAiSourceIndex.findMany>>;
+      let dir = '',
+        path = '',
+        question = '',
+        calls = 0,
+        conversationId = '';
+      const policy = {
+        model: 'kira-3.5-pro',
+        action: 'APPROVE',
+        confirmed: true,
+      };
+      const ask = async () =>
+        (
+          await scenario
+            .post(`/conversations/${conversationId}/answers`, {
+              ...policy,
+              action: undefined,
+              confirmed: undefined,
+              question,
+              clientKey: randomUUID(),
+              dataClassification: 'SYNTHETIC_PUBLIC_APPROVED',
+            })
+            .expect(201)
+        ).body;
+      afterAll(async () => {
+        if (scenario)
+          await db.chatAiAnswer.updateMany({
+            where: { projectId: scenario.projectId },
+            data: { leaseUntil: null },
+          });
+        if (dir) rmSync(dir, { recursive: true });
       });
-      const dir = mkdtempSync(join(tmpdir(), 'm3-approval-'));
-      const path = join(dir, 'providers.json');
-      const question = scenario.code + ' kích thước?';
-      writeFileSync(
-        path,
-        JSON.stringify({
-          providers: {
-            kira: {
-              revision: 'policy-' + randomUUID(),
-              KIRA_API_KEY: 'synthetic-only',
-              replacementConfirmed: true,
-              enabled: true,
-              dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+      it('01: duyệt đúng nguồn rồi inference chỉ nhận version được duyệt', async () => {
+        scenario = await aiScenario(2);
+        await scenario.post('/index', { scope: 'ALL' }).expect(201);
+        indexes = await db.chatAiSourceIndex.findMany({
+          where: { projectId: scenario.projectId },
+          orderBy: { roomId: 'asc' },
+        });
+        dir = mkdtempSync(join(tmpdir(), 'm3-approval-'));
+        path = join(dir, 'providers.json');
+        question = scenario.code + ' kích thước?';
+        writeFileSync(
+          path,
+          JSON.stringify({
+            providers: {
+              kira: {
+                revision: 'policy-' + randomUUID(),
+                KIRA_API_KEY: 'synthetic-only',
+                replacementConfirmed: true,
+                enabled: true,
+                dataPolicy: 'SYNTHETIC_PUBLIC_APPROVED',
+              },
             },
-          },
-        }),
-        { mode: 0o600 },
-      );
-      vi.stubEnv('GALAXY_AI_CONFIG_FILE', path);
-      let calls = 0;
-      try {
+          }),
+          { mode: 0o600 },
+        );
+        vi.stubEnv('GALAXY_AI_CONFIG_FILE', path);
+
         await db.chatProjectGrant.create({
           data: {
             organizationId,
@@ -2484,11 +2822,6 @@ describe.sequential(
             confirmed: true,
           })
           .expect(404);
-        const policy = {
-          model: 'kira-3.5-pro',
-          action: 'APPROVE',
-          confirmed: true,
-        };
         await scenario
           .post('/settings/egress', { ...policy, kind: 'PROJECT' })
           .expect(201);
@@ -2543,19 +2876,7 @@ describe.sequential(
         const c = await scenario
           .post('/conversations', { scope: 'ALL', clientKey: randomUUID() })
           .expect(201);
-        const ask = async () =>
-          (
-            await scenario
-              .post(`/conversations/${c.body.id}/answers`, {
-                ...policy,
-                action: undefined,
-                confirmed: undefined,
-                question,
-                clientKey: randomUUID(),
-                dataClassification: 'SYNTHETIC_PUBLIC_APPROVED',
-              })
-              .expect(201)
-          ).body;
+        conversationId = c.body.id;
         const first = await ask();
         const result = await scenario
           .post(`/answers/${first.id}/run`, {})
@@ -2576,6 +2897,9 @@ describe.sequential(
           health: { status: 'NORMAL' },
         });
         expect(health.lastSuccessfulCallAt).toBeTruthy();
+      });
+      it('02: cooldown rồi revoke chặn retry và lịch sử', async () => {
+        vi.stubEnv('GALAXY_AI_CONFIG_FILE', path);
         vi.stubGlobal('fetch', async () => {
           calls++;
           return new Response('{}', {
@@ -2634,7 +2958,7 @@ describe.sequential(
         );
         expect(calls).toBe(3);
         const hidden = await scenario
-          .get(`/conversations/${c.body.id}`)
+          .get(`/conversations/${conversationId}`)
           .expect(200);
         expect(hidden.body.answers[0]).toMatchObject({
           status: 'EGRESS_POLICY_DENIED',
@@ -2656,13 +2980,7 @@ describe.sequential(
           JSON.parse(readFileSync(path, 'utf8')).providers.kira
             .approvedProjects,
         ).toEqual([]);
-      } finally {
-        await db.chatAiAnswer.updateMany({
-          where: { projectId: scenario.projectId },
-          data: { leaseUntil: null },
-        });
-        rmSync(dir, { recursive: true });
-      }
+      });
     });
 
     it('pins model/revision, switches within one conversation and blocks revoked egress before replay', async () => {

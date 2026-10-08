@@ -127,6 +127,16 @@ test('system admin sees truthful ChatGPT status; member and revoked session cann
     await expect(
       page.getByText('Chưa có model được cấp.', { exact: false }),
     ).toBeVisible();
+    const registry = page.locator('section[aria-label="Công cụ Galaxy"]');
+    await expect(registry).toBeVisible();
+    for (const name of ['task_list', 'task_get', 'task_history']) {
+      const entry = registry
+        .locator('li')
+        .filter({ has: page.getByText(name, { exact: true }) });
+      await expect(entry).toContainText(
+        'READ · PROJECT_AND_TASK · DISABLED (CHATGPT_NOT_CONFIGURED)',
+      );
+    }
     await page
       .getByRole('button', { name: 'Kiểm tra cấu hình', exact: true })
       .click();

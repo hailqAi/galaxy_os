@@ -85,11 +85,13 @@ export class TasksService {
       sort?: 'title' | 'updatedAt' | 'dueDate' | 'priority';
       direction?: 'asc' | 'desc';
     },
+    visibility: Prisma.TaskWhereInput = this.visibleWhere(actor),
+    snapshot = false,
   ) {
     const now = new Date();
     const where: Prisma.TaskWhereInput = {
       AND: [
-        this.visibleWhere(actor),
+        visibility,
         q.search ? { title: { contains: q.search, mode: 'insensitive' } } : {},
       ],
       status: q.status,
@@ -111,26 +113,44 @@ export class TasksService {
       where,
       _count: { _all: true },
     });
-    const [items, total, counts] = await this.prisma.$transaction(
-      [
-        this.prisma.task.findMany({
-          where,
-          include: this.include(),
-          omit: this.financialOmit(actor),
-          orderBy: [
-            { [q.sort ?? 'updatedAt']: q.direction ?? 'desc' },
-            { id: 'asc' },
+    const queries = [
+      this.prisma.task.findMany({
+        where,
+        include: this.include(),
+        omit: this.financialOmit(actor),
+        orderBy: [
+          { [q.sort ?? 'updatedAt']: q.direction ?? 'desc' },
+          { id: 'asc' },
+        ],
+        skip: (q.page - 1) * q.pageSize,
+        take: q.pageSize,
+      }),
+      this.prisma.task.count({ where }),
+      grouped,
+    ] as const;
+    const options = {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    };
+    // ponytail: at most1000 contributing IDs per AI snapshot; use a database ACL witness if larger collections become necessary.
+    const [items, total, counts, snapshotIds] = await (snapshot
+      ? this.prisma.$transaction(
+          [
+            ...queries,
+            this.prisma.task.findMany({
+              where,
+              select: { id: true },
+              orderBy: { id: 'asc' },
+              take: 1001,
+            }),
           ],
-          skip: (q.page - 1) * q.pageSize,
-          take: q.pageSize,
-        }),
-        this.prisma.task.count({ where }),
-        grouped,
-      ],
-      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
-    );
+          options,
+        )
+      : this.prisma.$transaction([...queries], options));
     return {
       items,
+      ...(snapshot
+        ? { snapshotTaskIds: snapshotIds?.map((item) => item.id) }
+        : {}),
       page: q.page,
       pageSize: q.pageSize,
       total,
@@ -141,23 +161,48 @@ export class TasksService {
       computedAt: now.toISOString(),
     };
   }
-  async get(actor: CurrentActor, id: string) {
-    const item = await this.prisma.task.findFirst({
-      where: { ...this.visibleWhere(actor), id },
-      include: this.include(),
-      omit: this.financialOmit(actor),
-    });
-    if (!item) throw new NotFoundException('Task not found');
-    const activity = await this.prisma.activity.findMany({
-      where: {
+  async get(
+    actor: CurrentActor,
+    id: string,
+    visibility: Prisma.TaskWhereInput = this.visibleWhere(actor),
+    historyPage?: { page: number; pageSize: number },
+  ) {
+    const read = async (tx: Prisma.TransactionClient) => {
+      const item = await tx.task.findFirst({
+        where: { ...visibility, id },
+        include: this.include(),
+        omit: this.financialOmit(actor),
+      });
+      if (!item) throw new NotFoundException('Task not found');
+      const where = {
         organizationId: actor.organizationId,
         entityType: 'Task',
         entityId: id,
-      },
-      include: { actor: { select: { id: true, displayName: true } } },
-      orderBy: { createdAt: 'desc' },
-    });
-    return { ...item, activity };
+      };
+      const activity = await tx.activity.findMany({
+        where,
+        include: { actor: { select: { id: true, displayName: true } } },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        ...(historyPage
+          ? {
+              skip: (historyPage.page - 1) * historyPage.pageSize,
+              take: historyPage.pageSize,
+            }
+          : {}),
+      });
+      return {
+        ...item,
+        activity,
+        ...(historyPage
+          ? { activityTotal: await tx.activity.count({ where }) }
+          : {}),
+      };
+    };
+    return historyPage
+      ? this.prisma.$transaction(read, {
+          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        })
+      : read(this.prisma);
   }
   async create(actor: CurrentActor, data: CreateTaskDto) {
     this.requireGenericMutation(data);
