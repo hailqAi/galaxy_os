@@ -53,6 +53,7 @@ test('ChatGPT plan-only gate keeps member setup controls absent and model catalo
     await expect(
       page
         .getByText('AI chưa được quản trị viên kích hoạt.', { exact: true })
+        .and(page.locator(':visible'))
         .first(),
     ).toBeVisible();
     expect(
