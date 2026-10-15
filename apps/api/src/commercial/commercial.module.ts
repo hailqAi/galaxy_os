@@ -8,6 +8,7 @@ import { CommercialService } from './commercial.service';
 import { QuotationDocumentsService } from './quotation-documents.service';
 
 @Module({
+  exports: [CommercialService],
   imports: [AccessControlModule, AuditModule, FilesModule],
   controllers: [CommercialController],
   providers: [CommercialService, QuotationDocumentsService, PrismaService],

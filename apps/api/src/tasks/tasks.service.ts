@@ -10,9 +10,61 @@ import { CurrentActor } from '../access-control/current-actor';
 import { PrismaService } from '../prisma.service';
 import { ChecklistDto, CreateTaskDto, UpdateTaskDto } from './tasks.dto';
 import { STAGE_TWO_PLAN_ENTITY } from '../projects/project-stage-two.dto';
+type TaskOperation = {
+  id: string;
+  digest: string;
+  expectedVersion?: number;
+  authorize?: (tx: Prisma.TransactionClient) => Promise<{
+    actor: CurrentActor;
+    visibility?: Prisma.TaskWhereInput;
+  }>;
+};
 @Injectable()
 export class TasksService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  private async authorizeOperation(
+    tx: Prisma.TransactionClient,
+    actor: CurrentActor,
+    operation?: TaskOperation,
+  ) {
+    if (!operation) return { actor };
+    await tx.$queryRaw(
+      Prisma.sql`SELECT 1 FROM pg_advisory_xact_lock(hashtextextended(${actor.organizationId + ':' + actor.userId + ':' + operation.id},0))`,
+    );
+    return operation.authorize ? operation.authorize(tx) : { actor };
+  }
+  private async replay(
+    tx: Prisma.TransactionClient,
+    actor: CurrentActor,
+    operation?: TaskOperation,
+    visibility?: Prisma.TaskWhereInput,
+  ) {
+    if (!operation) return null;
+    const receipt = await tx.activity.findFirst({
+      where: {
+        organizationId: actor.organizationId,
+        actorId: actor.userId,
+        entityType: 'Task',
+        event: { in: ['TASK_CREATED', 'TASK_UPDATED'] },
+        metadata: { path: ['operation_id'], equals: operation.id },
+      },
+    });
+    if (!receipt) return null;
+    if (
+      (receipt.metadata as Prisma.JsonObject).command_hash !== operation.digest
+    )
+      throw new ConflictException('TASK_OPERATION_CONFLICT');
+    return tx.task.findFirstOrThrow({
+      where: {
+        ...(visibility ?? {}),
+        id: receipt.entityId,
+        organizationId: actor.organizationId,
+        deletedAt: null,
+      },
+      include: this.include(),
+      omit: this.financialOmit(actor),
+    });
+  }
   visibleWhere(actor: CurrentActor): Prisma.TaskWhereInput {
     const access = ['SYSTEM', 'ORGANIZATION'].includes(
       actor.administrationScope,
@@ -204,11 +256,19 @@ export class TasksService {
         })
       : read(this.prisma);
   }
-  async create(actor: CurrentActor, data: CreateTaskDto) {
+  async create(
+    actor: CurrentActor,
+    data: CreateTaskDto,
+    operation?: TaskOperation,
+  ) {
     this.requireGenericMutation(data);
     await this.assertProject(actor, data.projectId);
     await this.assertUsers(actor, data.assigneeIds ?? [], data.departmentId);
     return this.prisma.$transaction(async (tx) => {
+      const authority = await this.authorizeOperation(tx, actor, operation);
+      actor = authority.actor;
+      const replay = await this.replay(tx, actor, operation);
+      if (replay) return replay;
       const { assigneeIds = [], ...values } = data;
       const task = await tx.task.create({
         data: {
@@ -237,6 +297,13 @@ export class TasksService {
           event: 'TASK_CREATED',
           entityType: 'Task',
           entityId: task.id,
+          ...(operation && {
+            metadata: {
+              operation_id: operation.id,
+              command_hash: operation.digest,
+              toVersion: task.version,
+            },
+          }),
         },
       });
       return tx.task.findUniqueOrThrow({
@@ -246,8 +313,14 @@ export class TasksService {
       });
     });
   }
-  async update(actor: CurrentActor, id: string, data: UpdateTaskDto) {
-    const current = await this.get(actor, id);
+  async update(
+    actor: CurrentActor,
+    id: string,
+    data: UpdateTaskDto,
+    operation?: TaskOperation,
+    visibility: Prisma.TaskWhereInput = this.visibleWhere(actor),
+  ) {
+    const current = await this.get(actor, id, visibility);
     this.requireGenericMutation(current);
     this.requireGenericMutation(data);
     await this.assertProject(actor, data.projectId);
@@ -262,8 +335,23 @@ export class TasksService {
       );
     }
     return this.prisma.$transaction(async (tx) => {
+      const authority = await this.authorizeOperation(tx, actor, operation);
+      actor = authority.actor;
+      visibility = authority.visibility ?? visibility;
+      const replay = await this.replay(tx, actor, operation, visibility);
+      if (replay) {
+        if (replay.id !== id)
+          throw new ConflictException('TASK_OPERATION_CONFLICT');
+        return replay;
+      }
+      if (operation && current.version !== operation.expectedVersion)
+        throw new ConflictException('TASK_VERSION_CONFLICT');
       const task = await tx.task.update({
-        where: { id },
+        where: {
+          ...visibility,
+          id,
+          ...(operation && { version: operation.expectedVersion }),
+        },
         data: {
           ...values,
           startDate: values.startDate ? new Date(values.startDate) : undefined,
@@ -284,6 +372,10 @@ export class TasksService {
             fields: Object.keys(data),
             fromVersion: task.version - 1,
             toVersion: task.version,
+            ...(operation && {
+              operation_id: operation.id,
+              command_hash: operation.digest,
+            }),
           },
         },
       });

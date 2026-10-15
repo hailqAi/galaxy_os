@@ -80,3 +80,11 @@ Galaxy OS:
 - Cuối phiên cập nhật STATUS/handoff bằng kết quả có thật.
 
 <!-- END GALAXY_OS_CORE_BOOTSTRAP -->
+
+<!-- BEGIN GALAXY_AI_DEVELOPMENT_MEMORY -->
+
+- Đầu phiên đọc [README bộ nhớ AI](/home/galaxy_os/prompt/README.md), memory và checkpoint được dẫn trong README trước khi tiếp tục công việc Galaxy OS.
+- Nguồn chuẩn kiến trúc AI mới: `/home/galaxy_os/prompt`; charter/spec/plan/approval gate hiện hữu giữ nguyên hiệu lực theo phạm vi.
+- Khi có quyết định hoặc bằng chứng quan trọng và trước kết thúc phiên, cập nhật đúng memory/matrix/checkpoint và STATUS áp dụng; ghi nguồn, thời điểm, version, phần bị thay thế và kết quả thực. Chỉ tự cập nhật trong phiên có quyền, không theo dõi nền; không lưu secret hoặc dữ liệu khách hàng.
+
+<!-- END GALAXY_AI_DEVELOPMENT_MEMORY -->

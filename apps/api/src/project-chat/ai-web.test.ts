@@ -3,7 +3,12 @@ import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 import https from 'node:https';
 import * as dns from 'node:dns/promises';
-import { publicTarget, fetchPublicPage, webSearch } from './ai-web';
+import {
+  publicTarget,
+  fetchPublicPage,
+  webSearch,
+  publicResearchQuery,
+} from './ai-web';
 vi.mock('node:dns/promises', () => ({ lookup: vi.fn() }));
 afterEach(() => {
   vi.restoreAllMocks();
@@ -12,6 +17,18 @@ afterEach(() => {
 const signal = () => new AbortController().signal;
 const allow = async () => {};
 const receipt = async () => {};
+it('public research accepts only server-approved literals and rejects private strings or extra data', () => {
+  expect(
+    publicResearchQuery({ subject: 'MINOTTI', topic: 'catalogue' }).query,
+  ).toBe('Minotti official furniture catalogue');
+  for (const input of [
+    { subject: 'PRIVATE_CUSTOMER', topic: 'catalogue' },
+    { subject: 'MINOTTI', topic: 'PRIVATE_PRICE_123' },
+    { subject: 'MINOTTI', topic: 'catalogue', query: 'private address' },
+    { subject: 'https://internal/token', topic: 'catalogue' },
+  ])
+    expect(() => publicResearchQuery(input)).toThrow();
+});
 it.each([
   'http://127.0.0.1/',
   'http://2130706433/',

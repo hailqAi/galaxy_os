@@ -10,6 +10,10 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { PrismaService } from './prisma.service';
 import { Public } from './access-control/access.decorators';
 import { RuntimeRequest, runtimeIdentity } from './runtime-http';
+import {
+  deploymentInFlight,
+  deploymentNativeInFlight,
+} from './deployment-admission';
 
 @ApiTags('system')
 @Controller()
@@ -40,6 +44,12 @@ export class HealthController {
       return {
         status: 'ok',
         database: 'connected',
+        ...(!request?.headers?.['x-forwarded-for']
+          ? {
+              inFlight: Math.max(0, deploymentInFlight() - 1),
+              nativeInFlight: deploymentNativeInFlight(),
+            }
+          : {}),
         ...(request?.runtimeIdentity ?? runtimeIdentity()),
       };
     } catch {

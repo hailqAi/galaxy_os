@@ -151,6 +151,18 @@ describe('FilesController preview', () => {
 });
 
 describe('FilesService', () => {
+  it('seeks an authorized original download to the UTF8 byte cursor', async () => {
+    const { storage, service } = previewFixture('text/plain');
+    await service.download(
+      actor,
+      'file',
+      ['file.read', 'file.download'],
+      undefined,
+      7,
+    );
+    expect(storage.stream).toHaveBeenCalledWith('organization/2026/08/file', 7);
+  });
+
   it.each([
     'application/pdf',
     'image/jpeg',

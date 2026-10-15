@@ -27,6 +27,8 @@ export function observeHttp(
   response: RuntimeResponse,
   next: () => void,
 ) {
+  const receivedAt = new Date().toISOString(),
+    started = performance.now();
   const identity = (request.runtimeIdentity = runtimeIdentity(
     request.headers?.['x-request-id'],
   ));
@@ -42,6 +44,9 @@ export function observeHttp(
         method: request.method,
         pathname: request.url?.split('?')[0],
         status: response.statusCode,
+        receivedAt,
+        finishedAt: new Date().toISOString(),
+        durationMs: performance.now() - started,
       }),
     ),
   );

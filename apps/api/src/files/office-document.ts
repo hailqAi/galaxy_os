@@ -12,21 +12,23 @@ const wordNamespaces = new Set([
 const attr = (tag: SaxesTagNS, local: string) =>
   Object.values(tag.attributes).find((a) => a.local === local)?.value;
 
-function xml(
+export function officeXml(
   bytes: Buffer,
   open: (tag: SaxesTagNS) => void,
   close?: (tag: SaxesTagNS) => void,
   text?: (value: string) => void,
+  format = 'DOCX',
 ) {
   if (bytes.length > 4_000_000)
-    throw new BadRequestException('Nội dung DOCX quá lớn');
+    throw new BadRequestException(`Nội dung ${format} quá lớn`);
   const parser = new SaxesParser({ xmlns: true });
   let depth = 0;
   parser.on('doctype', () => {
-    throw new BadRequestException('DOCX không cho phép DTD');
+    throw new BadRequestException(`${format} không cho phép DTD`);
   });
   parser.on('opentag', (tag) => {
-    if (++depth > 128) throw new BadRequestException('DOCX lồng quá nhiều lớp');
+    if (++depth > 128)
+      throw new BadRequestException(`${format} lồng quá nhiều lớp`);
     open(tag);
   });
   parser.on('closetag', (tag) => {
@@ -41,9 +43,10 @@ function xml(
       .close();
   } catch (error) {
     if (error instanceof BadRequestException) throw error;
-    throw new BadRequestException('XML DOCX không hợp lệ');
+    throw new BadRequestException(`XML ${format} không hợp lệ`);
   }
 }
+const xml = officeXml;
 
 export function docxParts(bytes: Buffer) {
   if (bytes.length > 8_000_000) throw new BadRequestException('DOCX quá lớn');

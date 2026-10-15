@@ -40,7 +40,10 @@ test('ChatGPT plan-only gate keeps member setup controls absent and model catalo
   expect(await (await metadata).json()).toMatchObject({
     executionPolicy: 'CHATGPT_PLAN_ONLY',
     models: [],
-    chatGptConnection: { status: 'ELIGIBILITY_UNCONFIRMED', canConnect: false },
+    chatGptConnection: {
+      status: 'OWNER_CONNECTION_REQUIRED',
+      canStaffUseAI: false,
+    },
   });
   await expect(
     page.getByRole('button', { name: 'Kết nối ChatGPT', exact: true }),
@@ -113,36 +116,61 @@ test('system admin sees truthful ChatGPT status; member and revoked session cann
     });
     await page.goto('/settings/chatgpt-connection');
     await expect(
-      page.getByRole('heading', { name: 'Chưa được kích hoạt' }),
+      page.getByRole('heading', { name: 'Chưa liên kết tài khoản' }),
     ).toBeVisible();
     await expect(
       page.getByRole('link', { name: 'Kết nối ChatGPT', exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole('button', { name: 'Kết nối ChatGPT', exact: true }),
-    ).toBeDisabled();
+      page.getByRole('button', { name: 'Continue with ChatGPT', exact: true }),
+    ).toBeEnabled();
     await expect(
       page.getByRole('button', { name: 'Ngắt kết nối', exact: true }),
     ).toBeDisabled();
     await expect(
-      page.getByText('Chưa có model được cấp.', { exact: false }),
+      page.getByText(
+        'Chưa nhận được danh sách model từ tài khoản đã kết nối.',
+        { exact: true },
+      ),
     ).toBeVisible();
-    const registry = page.locator('section[aria-label="Công cụ Galaxy"]');
-    await expect(registry).toBeVisible();
-    for (const name of ['task_list', 'task_get', 'task_history']) {
-      const entry = registry
-        .locator('li')
-        .filter({ has: page.getByText(name, { exact: true }) });
-      await expect(entry).toContainText(
-        'READ · PROJECT_AND_TASK · DISABLED (CHATGPT_NOT_CONFIGURED)',
-      );
-    }
-    await page
-      .getByRole('button', { name: 'Kiểm tra cấu hình', exact: true })
-      .click();
-    await expect(page.getByRole('status')).toContainText(
-      'Chưa xác minh kết nối với OpenAI',
+    // Fixture validates browser navigation only; it never logs in to OpenAI.
+    await page.context().route('https://auth.openai.com/**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: '<title>OAuth navigation fixture</title>',
+      }),
     );
+    const opened = page.waitForEvent('popup');
+    await page
+      .getByRole('button', { name: 'Continue with ChatGPT', exact: true })
+      .click();
+    const popup = await opened;
+    try {
+      await popup.waitForURL('https://auth.openai.com/**');
+      const authorize = new URL(popup.url());
+      expect(authorize.pathname).toBe('/api/accounts/authorize');
+      expect(authorize.searchParams.get('client_id')).toBe(
+        'dynamic_agent_client',
+      );
+      expect(authorize.searchParams.get('agent_name_hint')).toBe('Galaxy OS');
+      expect(authorize.searchParams.get('code_challenge_method')).toBe('S256');
+      expect(
+        new URL(authorize.searchParams.get('redirect_uri')!).hostname,
+      ).toBe('127.0.0.1');
+      await expect(
+        page.getByRole('heading', { name: 'Đang chờ đăng nhập trên OpenAI' }),
+      ).toBeVisible();
+      await page
+        .getByRole('button', { name: 'Hủy đăng nhập', exact: true })
+        .click();
+      await expect(
+        page.getByRole('heading', { name: 'Đã hủy lần đăng nhập' }),
+      ).toBeVisible();
+    } finally {
+      await popup.close();
+      await page.context().unroute('https://auth.openai.com/**');
+    }
     for (const width of [1440, 375]) {
       await page.setViewportSize({ width, height: 1024 });
       expect(
@@ -154,9 +182,9 @@ test('system admin sees truthful ChatGPT status; member and revoked session cann
       });
     }
     await page.reload();
-    await expect(page.getByText('Chưa kiểm tra', { exact: true })).toHaveCount(
-      0,
-    );
+    await expect(
+      page.getByRole('heading', { name: 'Đã hủy lần đăng nhập' }),
+    ).toBeVisible();
     await db.userRole.update({
       where: { id: assignment.id },
       data: { scopeType: 'ORGANIZATION' },
@@ -169,6 +197,9 @@ test('system admin sees truthful ChatGPT status; member and revoked session cann
     await page.reload();
     await expect(page).toHaveURL(/\/forbidden/);
   } finally {
+    await db.systemSetting.deleteMany({
+      where: { key: 'chatgpt.connection.' + assignment.organizationId },
+    });
     await db.userRole.update({
       where: { id: assignment.id },
       data: { scopeType: assignment.scopeType },

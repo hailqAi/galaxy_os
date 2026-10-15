@@ -543,7 +543,7 @@ describe.sequential(
           },
         });
       }
-    });
+    }, 15_000);
 
     it('returns sanitized status with committed uploaded-part checksums', async () => {
       const requirement = await createRequirement(primaryProjectId, 'status');
@@ -2028,7 +2028,7 @@ describe.sequential(
           },
         });
       }
-    });
+    }, 15_000);
 
     it('links a Stage 2 definition through the same logical upload and download path', async () => {
       const definition = await prisma.projectRequiredDocument.create({

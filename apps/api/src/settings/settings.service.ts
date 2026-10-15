@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  ConflictException,
+  ServiceUnavailableException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -12,8 +14,16 @@ import {
   toolInputs,
   toolPolicy,
   ToolName,
+  SIWC_PROJECT_READ_TOOLS,
 } from '../project-chat/ai-tools';
-import { AI_MODELS, readAiConfig } from '../project-chat/ai-registry';
+import { ChatGptConnectionService } from './chatgpt-connection.service';
+import { AiError, AI_MODELS, readAiConfig } from '../project-chat/ai-registry';
+import {
+  siwcCapabilities,
+  siwcPreference,
+  siwcPreferenceKey,
+  siwcPreferenceSchema,
+} from './siwc-capabilities';
 
 const systemKeys = new Set([
   'authentication.passwordPolicy',
@@ -35,32 +45,25 @@ export class SettingsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(ChatGptConnectionService)
+    private readonly connection: ChatGptConnectionService,
   ) {}
 
   system(actor: CurrentActor) {
     this.systemOnly(actor);
-    return this.prisma.systemSetting.findMany({ orderBy: { key: 'asc' } });
+    return this.prisma.systemSetting.findMany({
+      where: { key: { in: [...systemKeys] } },
+      orderBy: { key: 'asc' },
+    });
   }
 
   async chatGptConnection(actor: CurrentActor) {
     this.systemOnly(actor);
-    const lastCheck = await this.prisma.auditLog.findFirst({
-      where: {
-        organizationId: actor.organizationId,
-        action: 'chatgpt.connection.check',
-        entityType: 'ChatGptConnection',
-      },
-      orderBy: { createdAt: 'desc' },
-      select: { createdAt: true },
-    });
+    const metadata = await this.connection.metadata(actor);
     const config = readAiConfig();
     return {
-      status: 'NOT_CONFIGURED',
-      appEligibility: 'ELIGIBILITY_UNCONFIRMED',
-      inferenceGrant: 'NOT_GRANTED',
-      providerScope: 'UNCONFIRMED',
-      identity: null,
-      models: [],
+      ...metadata,
+      preferredSelection: await siwcPreference(this.prisma, actor),
       tools: toolDefinitions(Object.keys(toolInputs) as ToolName[]).map(
         ({ function: tool }) => ({
           name: tool.name,
@@ -68,15 +71,18 @@ export class SettingsService {
           inputSchema: tool.parameters,
           ...toolPolicy(tool.name as ToolName),
           implementation: 'LOCAL_IMPLEMENTED',
-          status: 'DISABLED',
-          reason: 'CHATGPT_NOT_CONFIGURED',
+          status:
+            SIWC_PROJECT_READ_TOOLS.includes(tool.name as ToolName) &&
+            metadata.canTestOwnerInference
+              ? 'AVAILABLE'
+              : 'DISABLED',
+          reason: SIWC_PROJECT_READ_TOOLS.includes(tool.name as ToolName)
+            ? metadata.canTestOwnerInference
+              ? 'OWNER_READ_TOOL_AVAILABLE'
+              : 'CHATGPT_NOT_READY'
+            : 'NOT_ENABLED_ON_SIWC',
         }),
       ),
-      canConnect: false,
-      canDisconnect: false,
-      canCheck: actor.permissions.includes('system.settings.update'),
-      checkedAt: lastCheck?.createdAt.toISOString() ?? null,
-      checkKind: 'LOCAL_CONFIGURATION_ONLY',
       executionPolicy:
         process.env.GALAXY_AI_EXECUTION_POLICY ?? 'LEGACY_API_KEY',
       apiRelease: process.env.GALAXY_RELEASE_ID ?? null,
@@ -85,19 +91,17 @@ export class SettingsService {
         paused: config[provider]?.paused ?? false,
         configured: Boolean(config[provider]),
       })),
-      missingRequirements: [
-        'APP_REGISTRATION',
-        'INFERENCE_GRANT',
-        'MULTIUSER_PROVIDER_SCOPE',
-      ],
-      callbackHost: 'NOT_CONFIGURED',
-      callbackLan: 'NOT_VERIFIED',
-      usage: 'UNKNOWN',
     };
   }
 
   async checkChatGptConnection(actor: CurrentActor) {
     this.systemOnly(actor);
+    try {
+      await this.connection.catalog(actor);
+    } catch (error) {
+      if (error instanceof AiError) throw new ConflictException(error.code);
+      throw new ServiceUnavailableException('CHATGPT_CATALOG_UNAVAILABLE');
+    }
     const metadata = await this.chatGptConnection(actor);
     const check = await this.prisma.$transaction((tx) =>
       this.audit.write(tx, actor, {
@@ -113,6 +117,41 @@ export class SettingsService {
       }),
     );
     return { ...metadata, checkedAt: check.createdAt.toISOString() };
+  }
+
+  setChatGptPreference(actor: CurrentActor, value: unknown) {
+    this.systemOnly(actor);
+    const parsed = siwcPreferenceSchema.safeParse(value);
+    if (!parsed.success)
+      throw new BadRequestException('SIWC_PREFERENCE_INPUT_INVALID');
+    return this.prisma.$transaction(async (tx) => {
+      const owner = await this.connection.owner(actor, undefined, tx);
+      if (!owner.models.some((m) => m.id === parsed.data.model))
+        throw new ConflictException('MODEL_NOT_AVAILABLE');
+      const capability = await siwcCapabilities(
+        tx,
+        actor.organizationId,
+        owner.generation,
+        parsed.data.model,
+      );
+      if (!capability.reasoningModes.includes(parsed.data.reasoning))
+        throw new ConflictException('SIWC_REASONING_UNVERIFIED');
+      const key = siwcPreferenceKey(actor);
+      const before = await tx.systemSetting.findUnique({ where: { key } });
+      const after = await tx.systemSetting.upsert({
+        where: { key },
+        create: { key, value: parsed.data, updatedByUserId: actor.userId },
+        update: { value: parsed.data, updatedByUserId: actor.userId },
+      });
+      await this.audit.write(tx, actor, {
+        action: 'chatgpt.preference.update',
+        entityType: 'SystemSetting',
+        entityId: after.id,
+        beforeData: before?.value,
+        afterData: parsed.data,
+      });
+      return parsed.data;
+    });
   }
 
   setSystem(actor: CurrentActor, key: string, value: unknown) {

@@ -1,5 +1,7 @@
 # Bộ nhớ phát triển Galaxy OS — 08/10/2026
 
+> **09/10 — nguồn đọc hiện hành:** kiến trúc AI và bộ nhớ phát triển mới chuyển nguồn chuẩn sang [README `/prompt`](/home/galaxy_os/prompt/README.md) và [memory dài hạn](/home/galaxy_os/prompt/GALAXY_OS_LONG_TERM_MEMORY.md); tiến độ/approval/bằng chứng ở [checkpoint AI-CP-20261009-r1](/home/galaxy_os/prompt/GALAXY_AI_PLAN_AND_CHECKPOINT.md) và STATUS/handoff mới nhất. Toàn bộ nội dung 08/10 bên dưới được giữ làm lịch sử; các đoạn CONNECT_FIRST/pending OAuth/runtime cũ không là hiện trạng hay task mới. Giữ quyết định nghiệp vụ/UX còn hiệu lực, không di chuyển hoặc sửa spec/plan/hash đã duyệt.
+
 Đây là checkpoint phát triển trong repository, không phải Saved Memory của ChatGPT hoặc bộ nhớ vận hành hồ sơ khách hàng. Trạng thái luôn đối chiếu [STATUS](05-IMPLEMENTATION-STATUS.md) và [handoff hiện hành CONNECT_FIRST](handoffs/2026-10-08-chatgpt-connect-first.md).
 
 ## CONNECT_FIRST — phạm vi hiện tại, 08/10
@@ -48,3 +50,5 @@ Full tracker regression trước bị fixture connection/PDF config lỗi; log g
 ## Điểm tiếp chưa duyệt
 
 08/10 11:28: main owner rooms của9Project đều200 nhưng0accessible room; selected human/read-only main chưa có dữ liệu, không tự tạo. Mốc CAS bounded đã gửi trong chat, USER_APPROVAL_PENDING: expectedVersion nguyên dương/409, conditional authorized write và atomic audit/assignment/notification, concurrency/rollback PostgreSQL. Callers không gửi version vẫn gọi được; đây chỉ foundation generic update, chưa Task tool writes/source idempotency hoặc fulltracker. Chưa product code; chờ câu trả lời thật, không coi elapsed time là duyệt. Khi có approval thì ghi nhận và tiếp tục theo AGENTS/Superpowers, không xin lại quyền local release/UI đã có.
+
+E02-r22: kiến trúc AI/checkpoint hiện hành tại /home/galaxy_os/prompt/README.md và GALAXY_AI_PLAN_AND_CHECKPOINT.md; owner đã duyệt toàn scope chức năng E02 và defer UI redesign. Main R2 Office live còn FAIL, source E02-3 mới đang verify; không suy PASS từ docs/lịch sử.

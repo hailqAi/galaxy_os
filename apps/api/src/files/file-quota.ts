@@ -4,6 +4,7 @@ import {
   PayloadTooLargeException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { statfs } from 'node:fs/promises';
 
 type FileCapacityClient = Pick<
   Prisma.TransactionClient,
@@ -11,6 +12,54 @@ type FileCapacityClient = Pick<
 >;
 
 const FILE_OBJECT_RESERVATION_BYTES = 1024n * 1024n;
+
+export function uploadDiskFits(
+  disk: { bsize: bigint; blocks: bigint; bavail: bigint },
+  reservedBytes: bigint,
+  incomingBytes: bigint,
+) {
+  if (
+    disk.bsize <= 0n ||
+    disk.blocks <= 0n ||
+    disk.bavail < 0n ||
+    reservedBytes < 0n ||
+    incomingBytes < 0n
+  )
+    return false;
+  const headroom = (disk.blocks * disk.bsize + 9n) / 10n;
+  return (
+    disk.bavail * disk.bsize -
+      (headroom > 5_000_000_000n ? headroom : 5_000_000_000n) >=
+    reservedBytes + incomingBytes * 3n
+  );
+}
+
+export async function assertUploadDiskSpace(
+  tx: Pick<Prisma.TransactionClient, '$queryRaw'>,
+  root: string,
+  incomingBytes = 0n,
+) {
+  const [reservation] = await tx.$queryRaw<
+    { reservedBytes: string }[]
+  >(Prisma.sql`
+    SELECT (COALESCE((SELECT SUM(GREATEST(0, 3 * "declaredSize" - "uploadedBytes"))
+      FROM "UploadSession" WHERE "storageProvider"='LOCAL' AND "fileAssetId" IS NULL
+      AND "stagingReleasedAt" IS NULL AND "status" IN ('INITIATED','UPLOADING','VERIFYING','FAILED')), 0)
+      + COALESCE((SELECT SUM("sizeBytes") FROM "FileStorageReservation"), 0))::text AS "reservedBytes"
+  `);
+  if (
+    !reservation ||
+    !/^\d+$/.test(reservation.reservedBytes) ||
+    !uploadDiskFits(
+      await statfs(root, { bigint: true }),
+      BigInt(reservation.reservedBytes),
+      incomingBytes,
+    )
+  )
+    throw new PayloadTooLargeException(
+      'Không đủ dung lượng đĩa an toàn cho tệp; thử lại sau khi giải phóng staging.',
+    );
+}
 export const fileStorageReservationExpiry = () =>
   new Date(Date.now() + 24 * 60 * 60 * 1000);
 
@@ -78,6 +127,11 @@ export async function assertFileCapacity(
           AND NOT EXISTS (
             SELECT 1 FROM "ImportJob" AS reference
             WHERE reference."fileAssetId" = file."id"
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM "ChatAiSourceIndex" AS reference
+            WHERE reference."fileAssetId" = file."id"
+              OR reference."projectFileAssetId" = file."id"
           )
       )
     )

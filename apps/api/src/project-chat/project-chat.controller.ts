@@ -3,6 +3,7 @@ import { ProjectAiService } from './project-ai.service';
 import {
   ChatAiConversationDto,
   ChatAiQuestionDto,
+  ChatAiResumeDto,
   ChatAiScopeDto,
   ChatAiEgressDto,
 } from './project-chat.dto';
@@ -15,6 +16,8 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Patch,
+  Delete,
   Query,
   ValidationPipe,
   Type,
@@ -26,6 +29,7 @@ import {
   CanActivate,
   ExecutionContext,
   PreconditionFailedException,
+  Req,
 } from '@nestjs/common';
 import { Actor, AllowExternal } from '../access-control/access.decorators';
 import { CurrentActor } from '../access-control/current-actor';
@@ -87,6 +91,52 @@ export class ProjectChatController {
     @Inject(ProjectChatService) private readonly service: ProjectChatService,
     @Inject(FilesService) private readonly files: FilesService,
   ) {}
+  @Get('projects/:id/ai/memory') memoryList(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: unknown,
+  ) {
+    return this.ai.memoryList(actor, id, query);
+  }
+  @Post('projects/:id/ai/memory') memoryCreate(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() value: unknown,
+  ) {
+    return this.ai.memoryCreate(actor, id, value);
+  }
+  @Get('projects/:id/ai/memory/:memoryId/revisions') memoryRevisions(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('memoryId', ParseUUIDPipe) memoryId: string,
+    @Query() query: unknown,
+  ) {
+    return this.ai.memoryRevisions(actor, id, memoryId, query);
+  }
+  @Get('projects/:id/ai/memory/:memoryId') memoryRead(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('memoryId', ParseUUIDPipe) memoryId: string,
+    @Query() query: unknown,
+  ) {
+    return this.ai.memoryRead(actor, id, memoryId, query);
+  }
+  @Patch('projects/:id/ai/memory/:memoryId') memoryUpdate(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('memoryId', ParseUUIDPipe) memoryId: string,
+    @Body() value: unknown,
+  ) {
+    return this.ai.memoryUpdate(actor, id, memoryId, value);
+  }
+  @Delete('projects/:id/ai/memory/:memoryId') memoryInactive(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('memoryId', ParseUUIDPipe) memoryId: string,
+    @Body() value: unknown,
+  ) {
+    return this.ai.memoryInactive(actor, id, memoryId, value);
+  }
   @Post('projects/:id/ai/conversations/:conversationId/files')
   @UseInterceptors(
     MultipartAdmissionInterceptor,
@@ -117,6 +167,23 @@ export class ProjectChatController {
       value.clientKey,
     );
   }
+  @Get('projects/:id/ai/files/:sourceId/promote-targets')
+  aiPromoteTargets(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('sourceId', ParseUUIDPipe) sourceId: string,
+  ) {
+    return this.ai.promoteTargets(actor, id, sourceId);
+  }
+  @Post('projects/:id/ai/files/:sourceId/promote')
+  aiPromote(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('sourceId', ParseUUIDPipe) sourceId: string,
+    @Body() value: unknown,
+  ) {
+    return this.ai.promoteFile(actor, id, sourceId, value);
+  }
   @Get('projects/:id/ai/files/:sourceId/download')
   async aiDownload(
     @Actor() actor: CurrentActor,
@@ -129,6 +196,41 @@ export class ProjectChatController {
       await this.ai.downloadFile(actor, id, sourceId),
       response,
     );
+  }
+  @Get('projects/:id/ai/files/:sourceId/preview')
+  async aiPreview(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('sourceId', ParseUUIDPipe) sourceId: string,
+    @Req() request: import('node:http').IncomingMessage,
+    @Res({ passthrough: true }) response: import('node:http').ServerResponse,
+  ) {
+    const controller = new AbortController(),
+      abort = () => controller.abort();
+    request.on('aborted', abort);
+    response.on('close', abort);
+    try {
+      const result = await this.ai.previewFile(
+        actor,
+        id,
+        sourceId,
+        AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]),
+      );
+      const file = this.fileResponse(result, response);
+      response.setHeader(
+        'Content-Disposition',
+        `inline; filename*=UTF-8''${encodeURIComponent(result.file.originalFilename).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())}`,
+      );
+      response.setHeader(
+        'Content-Security-Policy',
+        "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; sandbox",
+      );
+      response.setHeader('X-Content-Type-Options', 'nosniff');
+      return file;
+    } finally {
+      request.off('aborted', abort);
+      response.off('close', abort);
+    }
   }
   @Get('projects/:id/ai/settings') aiSettings(
     @Actor() actor: CurrentActor,
@@ -163,6 +265,24 @@ export class ProjectChatController {
     @Param('answerId', ParseUUIDPipe) answerId: string,
   ) {
     return this.ai.cancel(actor, id, answerId);
+  }
+  @Get('projects/:id/ai/answers/:answerId/markdown')
+  async aiMarkdown(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('answerId', ParseUUIDPipe) answerId: string,
+    @Res({ passthrough: true })
+    response: { setHeader(name: string, value: string): void },
+  ) {
+    const content = await this.ai.markdown(actor, id, answerId);
+    response.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="Galaxy-AI-${answerId}.md"`,
+    );
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    return new StreamableFile(Buffer.from(content));
   }
   @Get('projects/:id/ai/answers/:answerId/sources/:handle') aiCitation(
     @Actor() actor: CurrentActor,
@@ -199,6 +319,14 @@ export class ProjectChatController {
   ) {
     return this.ai.history(actor, id, conversationId);
   }
+  @Get('projects/:id/ai/conversations/:conversationId/metadata')
+  aiConversationMetadata(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+  ) {
+    return this.ai.conversationMetadata(actor, id, conversationId);
+  }
   @Post('projects/:id/ai/conversations/:conversationId/answers') aiAsk(
     @Actor() actor: CurrentActor,
     @Param('id', ParseUUIDPipe) id: string,
@@ -211,8 +339,9 @@ export class ProjectChatController {
     @Actor() actor: CurrentActor,
     @Param('id', ParseUUIDPipe) id: string,
     @Param('answerId', ParseUUIDPipe) answerId: string,
+    @Body(input(ChatAiResumeDto)) value: ChatAiResumeDto,
   ) {
-    return this.ai.run(actor, id, answerId);
+    return this.ai.enqueueRun(actor, id, answerId, value);
   }
   @Get('projects/:id/link-options') linkOptions(
     @Actor() actor: CurrentActor,

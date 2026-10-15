@@ -28,7 +28,11 @@ const allowedHosts = () => {
   );
 };
 
-const contentSecurityPolicy = (nonce: string, development: boolean) =>
+const contentSecurityPolicy = (
+  nonce: string,
+  development: boolean,
+  origin: string,
+) =>
   [
     "default-src 'self'",
     development
@@ -42,7 +46,7 @@ const contentSecurityPolicy = (nonce: string, development: boolean) =>
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
-    'frame-src blob:',
+    `frame-src blob: ${origin}/api/v1/project-chat/projects/`,
     "worker-src 'self' blob:",
     "manifest-src 'self'",
   ].join('; ');
@@ -66,7 +70,12 @@ export async function proxy(request: NextRequest) {
 
   const development = process.env.NODE_ENV === 'development';
   const nonce = randomBytes(16).toString('base64url');
-  const csp = contentSecurityPolicy(nonce, development);
+  const csp = contentSecurityPolicy(
+    nonce,
+    development,
+    trustedRequestOrigin(request.headers, request.nextUrl.origin) ??
+      request.nextUrl.origin,
+  );
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('Content-Security-Policy', csp);
   requestHeaders.set('x-nonce', nonce);
@@ -169,11 +178,10 @@ export async function proxy(request: NextRequest) {
         process.env.FEATURE_PROJECT_CHAT === 'true' && isProjectChatPath(path);
       const required =
         !roomRoute &&
+        !/^\/settings\/(?:chatgpt-connection|mcp-consent)\/?$/.test(path) &&
         path !== '/forbidden' &&
         routePermissions.find(([prefix]) => path.startsWith(prefix))?.[1];
       if (
-        (path.startsWith('/settings/chatgpt-connection') &&
-          actor.administrationScope !== 'SYSTEM') ||
         (path.startsWith('/settings/users') &&
           actor.administrationScope === 'SELF') ||
         (required && !actor.permissions.includes(required))
@@ -202,7 +210,8 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     {
-      source: '/((?!api|_next/static|_next/image|favicon.ico|health).*)',
+      source:
+        '/((?!api|_next/static|_next/image|favicon.ico|health|\\.well-known/oauth-authorization-server/?$).*)',
       missing: [
         { type: 'header', key: 'next-router-prefetch' },
         { type: 'header', key: 'purpose', value: 'prefetch' },

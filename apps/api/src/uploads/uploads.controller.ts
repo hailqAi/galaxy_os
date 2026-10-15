@@ -18,6 +18,7 @@ import {
   RecoverUploadsQuery,
   SubmitUploadsDto,
   UploadPartQuery,
+  UploadConstraintsQuery,
 } from './uploads.dto';
 import { UploadsService } from './uploads.service';
 
@@ -33,8 +34,10 @@ export class UploadsController {
   }
   @Get('constraints')
   @RequirePermission('file.upload')
-  constraints(@Actor() a: CurrentActor) {
-    return this.uploads.constraints(a);
+  constraints(@Actor() a: CurrentActor, @Query() q?: UploadConstraintsQuery) {
+    return q?.aiConversationId
+      ? this.uploads.constraints(a, q)
+      : this.uploads.constraints(a);
   }
   @Get('recovery')
   @RequirePermission('file.upload')

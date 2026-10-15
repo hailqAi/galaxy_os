@@ -36,7 +36,7 @@ export class ProductionService {
   async list(actor: CurrentActor, query: ProductionQuery) {
     const projects = await this.prisma.project.findMany({
       where: {
-        ...this.policy.projectWhere(actor),
+        ...this.policy.projectWhere(actor, 'production.read'),
         id: query.projectId,
       },
       select: { id: true },
@@ -57,13 +57,15 @@ export class ProductionService {
     });
   }
 
-  async get(actor: CurrentActor, id: string) {
+  async get(actor: CurrentActor, id: string, permission = 'production.read') {
     const item = await this.prisma.productionOrder.findFirst({
       where: {
         id,
         organizationId: actor.organizationId,
         purchaseOrder: {
-          purchaseRequest: { project: this.policy.projectWhere(actor) },
+          purchaseRequest: {
+            project: this.policy.projectWhere(actor, permission),
+          },
         },
       },
       include: {
@@ -244,7 +246,7 @@ export class ProductionService {
     id: string,
     data: ProductionMilestoneDto,
   ) {
-    const item = await this.get(actor, id);
+    const item = await this.get(actor, id, 'production.update');
     await this.assertProjectFile(actor, item.projectId, data.evidenceFileId);
     if (data.status === 'DELAYED' && !data.delayReason)
       throw new UnprocessableEntityException('Delay reason is required');
@@ -446,7 +448,7 @@ export class ProductionService {
   }
 
   async quality(actor: CurrentActor, id: string, data: QualityReportDto) {
-    const item = await this.get(actor, id);
+    const item = await this.get(actor, id, 'production.quality.create');
     await this.assertProjectFile(actor, item.projectId, data.fileId);
     return this.prisma.qualityReport.create({
       data: { ...data, productionOrderId: id, createdBy: actor.userId },
@@ -454,7 +456,7 @@ export class ProductionService {
   }
 
   async packing(actor: CurrentActor, id: string, data: PackingRecordDto) {
-    const item = await this.get(actor, id);
+    const item = await this.get(actor, id, 'production.packing.create');
     await this.assertProjectFile(actor, item.projectId, data.fileId);
     return this.prisma.packingRecord.create({
       data: {

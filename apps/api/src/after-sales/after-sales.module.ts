@@ -6,6 +6,7 @@ import { AfterSalesController } from './after-sales.controller';
 import { AfterSalesService } from './after-sales.service';
 
 @Module({
+  exports: [AfterSalesService],
   imports: [AccessControlModule, FilesModule],
   controllers: [AfterSalesController],
   providers: [PrismaService, AfterSalesService],

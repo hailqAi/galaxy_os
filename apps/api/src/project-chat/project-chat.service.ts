@@ -723,6 +723,15 @@ export class ProjectChatService {
       )
         continue;
       try {
+        // A scoped System authority may issue their own already-held chat capability.
+        // This changes Project data grants, never their IAM role or administration tier.
+        if (
+          candidate.userId === userId &&
+          candidate.administrationScope === 'SYSTEM'
+        ) {
+          permitted = true;
+          break;
+        }
         await this.users.assert(candidate, userId, 'assignRoles');
         permitted = true;
         break;

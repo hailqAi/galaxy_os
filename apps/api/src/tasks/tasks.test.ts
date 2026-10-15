@@ -213,3 +213,29 @@ describe('TasksService', () => {
     );
   });
 });
+
+it('rechecks mutation authority after waiting for the operation lock, before replay or write', async () => {
+  const taskCreate = vi.fn().mockResolvedValue({ id: 'task', version: 1 });
+  const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    activity: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn() },
+    task: { create: taskCreate, findUniqueOrThrow: vi.fn() },
+  };
+  const service = new TasksService({
+    $transaction: vi.fn(async (work: (tx: unknown) => unknown) => work(tx)),
+  } as unknown as PrismaService);
+  const authorize = vi
+    .fn()
+    .mockRejectedValue(new ForbiddenException('revoked'));
+  await expect(
+    service.create(actor, { title: 'Blocked task' }, {
+      id: 'op',
+      digest: 'hash',
+      authorize,
+    } as unknown as Parameters<TasksService['create']>[2]),
+  ).rejects.toThrow('revoked');
+  expect(tx.$queryRaw).toHaveBeenCalledOnce();
+  expect(authorize).toHaveBeenCalledWith(tx);
+  expect(taskCreate).not.toHaveBeenCalled();
+  expect(tx.activity.findFirst).not.toHaveBeenCalled();
+});

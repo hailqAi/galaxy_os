@@ -1,12 +1,12 @@
 # Galaxy ChatGPT — kết nối riêng tại host
 
-Trạng thái: **WRITTEN_SPEC_REVIEW_PENDING**, chưa duyệt hoặc triển khai kiến trúc này. Phạm vi và thiết kế khái niệm được owner giao trong CONNECT_FIRST ngày 08/10/2026; hồ sơ này cụ thể hóa giao thức, lưu trữ, caller và nghiệm thu. Không phải bằng chứng live.
+Trạng thái: **OWNER_SCOPE_APPROVED / IMPLEMENTING**, theo bản chốt của owner ngày 08/10/2026; chỉ phạm vi connection → owner Project chat → task_list. Thực thi INLINE đã được chọn. Code/live chưa được nghiệm thu. Phạm vi và thiết kế khái niệm được owner giao trong CONNECT_FIRST ngày 08/10/2026; hồ sơ này cụ thể hóa giao thức, lưu trữ, caller và nghiệm thu. Không phải bằng chứng live.
 
 ## Kết quả cần đạt
 
 SYSTEM admin liên kết tài khoản ChatGPT riêng của mình tại Windows/WSL host, nhận model thật, hoàn tất một câu trả lời trong Project và vòng `task_list` qua model → TasksService → model. Galaxy giữ IAM, lịch sử, nguồn/citation, tính chính xác tài chính, tool executor và chat engine hiện hữu. Nhân viên không nhập key, không cấu hình ChatGPT; inference cho nhân viên vẫn khóa riêng cho tới khi phạm vi nhà cung cấp được xác minh.
 
-CONNECT_FIRST ưu tiên phạm vi hiện tại. Không mở runtime recovery, CAS/Task writes, Graphify hoặc plugin. Bốn provider API key tiếp tục PAUSED_BY_USER; không fallback, API key, mua credits, tunnel hoặc public callback. Commit và release local theo quyền đã có; không push/tag/merge. Không đổi schema hoặc dữ liệu nghiệp vụ.
+CONNECT_FIRST ưu tiên phạm vi hiện tại. Không mở runtime recovery, CAS/Task writes, Graphify hoặc plugin. Bốn provider API key tiếp tục PAUSED_BY_USER; không fallback, API key, mua credits, tunnel hoặc public callback. Release local/LAN được phê duyệt trong nhiệm vụ hiện tại; không tự commit; không push/tag/merge. Không đổi schema hoặc dữ liệu nghiệp vụ.
 
 ## S0 — nguyên nhân đã trace
 
@@ -31,8 +31,8 @@ Phạm vi file/exports: service lifecycle trong Settings hiện có, SettingsMod
 Chọn route chính thức **ChatGPT plan usage for open-source and locally hosted apps**, OAuth động. Galaxy được mô tả đúng là **private/local owner pilot**, không giả là OSS hoặc personal project. Tài liệu nêu selected private clients; việc có đường đăng ký động không chứng minh Galaxy hoặc tài khoản đã được nhận. Chỉ phản hồi OpenAI thật mới xác nhận registration/grant hoặc refusal; không đòi pre-issued client ID, grant hoặc hồ sơ partner để bắt đầu một attempt động.
 
 1. `canBeginAuth`: Galaxy session còn hợp lệ; quyền quản trị/update từ SYSTEM; attempt/loopback listener sẵn sàng và trình duyệt tại host tới được listener. Chưa cần issued client ID, inference scope, catalog hoặc quyền dùng chung.
-2. `canUseOwnerInference`: actor Galaxy khớp user + organization + membership của connection; registration và OIDC identity đã xác minh; token response thực cấp `resource.invoke` và `chatgpt.tokens.use.direct`; token hợp lệ/refresh được; model còn trong catalog; Project/ai.invoke/source/tool ACL và data policy còn cho phép.
-3. `canUseMemberInference`: cần thêm phạm vi phục vụ người khác được xác minh từ nhà cung cấp. Trong đợt này **UNCONFIRMED/DISABLED**. Một SYSTEM admin khác cũng không được dùng gói của owner chỉ vì có quyền quản trị.
+2. `canTestOwnerInference`: actor Galaxy khớp user + organization + membership của connection; registration và OIDC identity đã xác minh; token response thực cấp `resource.invoke` và `chatgpt.tokens.use.direct`; token hợp lệ/refresh được; model còn trong catalog; Project/ai.invoke/source/tool ACL và data policy còn cho phép.
+3. `canStaffUseAI`: cần thêm phạm vi phục vụ người khác được xác minh từ nhà cung cấp. Trong đợt này **UNCONFIRMED/DISABLED**. Một SYSTEM admin khác cũng không được dùng gói của owner chỉ vì có quyền quản trị.
 
 Đăng nhập liên kết này không tạo hoặc thay Galaxy login/user. Registration/identity riêng của Galaxy, không dùng client ID, cookie hoặc auth.json của Codex. Một account đang active; reauthorize dùng registration hiện tại. Action “tài khoản khác” tạo attempt động mới có xác nhận rõ, chỉ thay active sau xác minh; không làm account picker hoặc import/export credential.
 
@@ -78,7 +78,16 @@ Tools namespace `galaxy` dùng schema và executor hiện có. Danh mục advert
 
 Registry phân biệt implementation, readiness, actorAllowed và liveEvidence từng tool; tool đã chạy fixture không có LIVE. Một task_list thật không đánh dấu 12 tools LIVE. Lỗi giữ HTTP/error.code/error.param/request ID thực; diagnostic text redact, không dùng detail string làm mã ổn định. Usage/quota UNKNOWN khi provider không cho số; không bịa reset time hoặc báo Unlimited. 429 subscription usage stop new requests và chỉ link Usage, không top-up.
 
-No-paid-credits là điều kiện riêng trước inference, không chặn OAuth hoặc catalog. Tài liệu nói route có thể dùng plan **hoặc credits balance**, và không công bố Responses flag để Galaxy ép không debit credits. Không giả rằng scope OAuth bảo đảm miễn phí: trước S3, owner đặt hạn mức credits của ứng dụng Galaxy bằng0/tắt dùng credits trong ChatGPT Usage nếu control đó có sẵn, lưu xác nhận không bí mật gắn registration. Nếu provider không có cách bảo đảm giới hạn này, giữ inference khóa và báo đúng blocker billing control thay vì tự thử request có thể debit. Không mua hoặc tự chỉnh credits của người dùng, không đưa yêu cầu API-key vào UI.
+Giới hạn thanh toán theo bản chốt: chỉ dùng OAuth ChatGPT plan đã cấp; không API key, fallback, mua credits, mở thanh toán hoặc đổi đường tính phí. Không thêm gate duyệt credits trước owner pilot đã được yêu cầu. UI dẫn tới ChatGPT Settings → Usage để owner xem/giới hạn usage; lỗi quota dừng request và không chuyển billing path.
+
+## Khác biệt với bản chốt ngày 08/10/2026
+
+- Bỏ trạng thái chờ duyệt spec/plan; owner đã duyệt phạm vi và INLINE.
+- Dùng đúng bốn quyết định canBeginAuth, canTestOwnerInference, ownerInferenceVerified, canStaffUseAI; quyền nhiều người không chặn owner.
+- Chỉ advertise/execute task_list trong pilot; không đưa các tool khác hoặc RAG/media vào điều kiện hoàn tất.
+- Bỏ gate xác nhận credits bổ sung của spec cũ; giữ nguyên hạn chế billing được owner giao.
+- Không coi quyền commit lịch sử là lệnh hiện tại. Chỉ cập nhật artifact local/LAN sau kiểm tra; không commit/push/merge/public.
+- Mọi nội dung ngoài phạm vi bản chốt không được xem là đã duyệt.
 
 ## UI, kiểm thử và phát hành
 

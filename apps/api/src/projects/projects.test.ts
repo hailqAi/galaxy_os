@@ -34,6 +34,27 @@ const actor = {
   administrationTier: 1,
 } satisfies CurrentActor;
 describe('ProjectsService', () => {
+  it('counts permitted Projects with the list predicate without loading a page', async () => {
+    const count = vi.fn().mockResolvedValue(17);
+    const findMany = vi.fn();
+    const prisma = {
+      project: { count, findMany },
+      $transaction: vi.fn().mockResolvedValue([[], 17]),
+    } as unknown as PrismaService;
+    const service = new ProjectsService(prisma, {} as AuditService);
+    const reader = { ...actor, permissions: ['project.read'] };
+    const filters = { search: 'Alpha', status: 'ACTIVE' as const, mine: true };
+    const result = await service.count(reader, filters);
+    expect(result.count).toBe(17);
+    expect(result.entity_type).toBe('Project');
+    expect(result.filters.status).toBe('ACTIVE');
+    expect(result.filters.deleted).toBe('excluded');
+    expect(result.queried_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(findMany).not.toHaveBeenCalled();
+    const aggregateWhere = count.mock.calls[0]![0].where;
+    await service.list(reader, { ...filters, page: 2, pageSize: 1 });
+    expect(findMany.mock.calls[0]![0].where).toEqual(aggregateWhere);
+  });
   it('lọc hồ sơ đã ký từ Contract thật, cùng scope/count và phân trang phía dữ liệu', async () => {
     const findMany = vi.fn(),
       count = vi.fn();

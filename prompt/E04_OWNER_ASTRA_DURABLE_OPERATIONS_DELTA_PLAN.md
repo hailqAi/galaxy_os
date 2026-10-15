@@ -1,0 +1,33 @@
+# E04 Owner, Astra và vận hành bền vững — delta sau workbook
+
+Trạng thái: REQUIRES_EXECUTION; không chứng nhận code/runtime đã hoàn tất. Dùng Codex CLI inline và approval chức năng đã được Owner duyệt, cùng addendum Owner/Astra ngày12/10/2026. Không chặn phát hành lát XLSX R40. Dùng lại Superpowers brainstorming/writing-plans/TDD/executing-plans và review Ponytail; không tạo queue, memory engine hoặc hệ AI thứ hai.
+
+## Bằng chứng và quyết định hiện hành
+
+Owner read-only02:17:35Z có hai protectedSYSTEM roles/tier100, đủ300permissions, INVOKE trên9/9Projects: không cấp thêm role hoặc biến người khác thành Owner để chữa một lỗi chưa có. Nguồn quyền hiện hữu phải được kiểm mới ở backend. Bản Astra/max Owner actualSIWC completed/ACCEPTED có requested/sent/provider-observed đúng; không đổi model của run XLSXgpt-6.1-sol/HIGH. Ultra/service-tier/x1.5/contextcapacity chưa có bằng chứng, không gửi field chưa hỗ trợ hoặc bịa entitlement.
+
+Latest Owner addendum thay thế trần tổng workflow30phút và10.000.000.000byte/file. New NORMAL/DEEP deadlineNULL đã có ở R38; R40 bỏ legacy total10provider/40tool ceilings, giữ cửa sổ checkpoint có journal đầy đủ, bảo vệ ACL/idempotency/no-progress và giới hạn từng thao tác. Upload, tổng file trong một nhiệm vụ, pause/backoff và toàn bộ vòng học từ feedback chưa hoàn tất. Giới hạn số nguyên/HTTP request/parser process/thời gian từng tool/đĩa/concurrency phải được ghi đúng là giới hạn kỹ thuật, không lấy làm quyền provider hoặc tuyên bố toàn công việc xong.
+
+## Thiết kế tối thiểu trong domain đang chạy
+
+1. **Chọn model.** Backend catalogue của chính SIWC Owner cung cấp lựa chọn mặc địnhgpt-6-astra và effortmax khi hợp lệ; tách mong muốn khỏi available. UI giữ saved/draft/run selection, hiển thị rõ unavailable thay vì tự chọn model đầu tiên. Không đổi provider hoặc dùng một model khác viết lại kết quả. General QA đơn giản vẫn một lead, tool_choiceauto; điều phối tác nhân là Galaxy, độc lập effort/tier.
+2. **Upload và dữ liệu lớn.** Rà soát UI/draft/DTO/API/Edge/storage/resumable/scan/parser cùng caller. Bỏ fixed10GB và trần do Galaxy tự đặt không có căn cứ; constraints lấy từ resource/policy thật, số nguyên chính xác và từng request. Tiếp tụcstream/hash/chunks/cancel/cleanup hiện hữu, bảo toànoriginal/version. Dùng batch/cursor cho manifest lớn; không đưa cả binary vào DB/RAM/provider. AVAILABLE file không được gây một vòng chờ staging khiến chọn nhiều file rồi không gửi được. Không chỉ gỡ validator rồi làm hỏng checkpoint/modelcontext.
+3. **Pause, auth và quota.** Dùng ChatAiAnswer worker/checkpoint/lease hiện hữu. Pause tại ranh giới thao tác đã commit; giữ công việc khi đóng tab hoặc restart. Phân biệt pausepending, paused, chờ quota, chờ đăng nhập và mất worker. Resume kiểm Actor/Project/sourceversion/connection/model/effort mới, không replay uncertain provider hoặc write. Retry từng thao tác có backoff/giới hạn và journal; không trần tổng công việc hoặc model loop vô hạn.
+4. **Tiến trình và cuối lượt.** Timer/bước/pages lấy từ timestamp/events/coverage thật. Nội dung tiến trình tách khỏi answer; kết thúc giữ artifact/ảnh/Markdown, nguồn gọn trongChi tiết và attribution bắt buộc. Không dùng modelReadUNKNOWN làm tuyên bố thiếu dữ liệu nếu dữ liệu/artifact đã được kiểm; vẫn nêu phần thực sự thiếu như ảnh hoặc ô chưa trích được. Renderer không được biến hiển thị ảnh thành chứng nhận engine tạo ảnh.
+5. **Nguồn và cải thiện.** Ba source acceptance chỉ được phân loại từ exact Owner/source/file/version/hash/receipt; không filenamefilter/xóa/ACLchange. Default business retrieval/history-derived context/memory/cache loại provenance fixture đã xác minh, explicit access vẫn đúng quyền. Workbook tồn kho chưa rõ mục đích giữ nguyên. P1-B correctioncandidate private/UNVERIFIED sau giao sản phẩm, đúng nguồn/phạm vi; không tự biến thành decision hoặc skill toàn công ty. Role con chỉ dùng khi có việc độc lập/lợi ích kiểm chứng, không cài engine/multiagent để chữa read loop.
+
+## Thứ tự thực thi và kiểm
+
+- [x] R40 full5/browser29/owned process50tool journal and artifact/wholePDF recovery; fresh mainbackup/zero-writer fence/app-only release; ONE same-answer safe continuation; XLSX/source/question/hash/reload/providerpin/actual result. No repeated POST after uncertain ACK.
+- [ ] Astra picker/default RED: Ownercatalog current, maxsupported, no selectedmodel fallback; draft/history/retry/resume retain model/effort; staff/otheractor lacks Ownerconnection privilege. Fix in existinglist/UI/preferences path; fresh unit + realOwner browser/request.
+- [ ] Upload RED: above old10GB metadata protocol test, under/around/over50MiB physicalupload, resume/hash/cancel/restart and real storage shortage. Unsafeinteger/negative/truncated binary reject. Multi-file queue across oldcount limits preserves one question and all attachments; real HTTP/parser bounds reported separately. No huge live fixture without resource evidence.
+- [ ] Pause/restart/auth/quota RED: owned worker interrupted at safe checkpoint, Stop fences late outputs, persisted artifact delivered despite finaltimeout, write idempotent. Real per-operation failures/backoff do not discard originals/outputs or repeat successful reads. AppliedSQL guards reviewed; only additive migration if required, never reset/rewrite.
+- [ ] Fixture/default-source and warning/progress RED: exact fixture metadata excluded from business discovery/context/memory, same-name realuserfile included; correct sources after reload/Project/revoke. Timer/phase from realrun, completed layout hides runningprogress; missingcontent still explicit.
+- [ ] Execute approved R4 memory/team plans after useful artifacts; correction/privatecandidate/evals/source/revoke/rollback tests. Compare single+tools/team on same task only where roles improve a measured defect.
+- [ ] Independent correctness/Ponytail/security/ACL/UX review, fresh focused checks each verified slice, full5/browser/provider/artifact/deployed gate for accepted release. Record actual scope/limits, not package/test-count-only PASS.
+
+## Quy tắc bàn giao
+
+Mỗi lát đã kiểm có snapshot/checkpoint bền vững trong/home/galaxy_os/prompt; raw quote/secret/privateURL ở.runtimeignored. CODE_SHA không đại diện dirtytree: dùng TESTED_TREE/sourcehash/buildID/runtimeartifact. Ghi riêng đãcode/đãtest/đãbuild/đãdeployed/Ownerlive. Không cài hàng loạt repo, đổi OAuth/refresh, bật Workspace/pausedproviders, muacredits, commit/push/PR hoặc reset dữ liệu.
+
+Execution checkpoint CP91 (2026-10-12T03:38:15.917623+00:00): **PAUSED_AT_USER_REQUEST**. Task1 R40/XLSX complete; Task2 R41 source only, one focused API native-image failure unresolved. Full gates/release and Task3+ pending. See `E04_PAUSED_CP91.md`; resume only on explicit user instruction.

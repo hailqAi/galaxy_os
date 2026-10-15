@@ -1,18 +1,104 @@
 import { docxParts } from '../files/office-document';
 import { existsSync } from 'node:fs';
 import { expect, it } from 'vitest';
-import { nativeSource, documentText, scanPages } from './ai-native-source';
+import {
+  nativeSource,
+  documentText,
+  scanPages,
+  analyzeTable,
+  pdfTextFragment,
+  cachedPdfPage,
+} from './ai-native-source';
 import { activationFixture } from './ai-activation';
 import { createHash } from 'node:crypto';
+import { chunks } from './ai-source';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import ExcelJS from 'exceljs';
 import {
   docxFixture as docx,
   scanPdfFixture,
+  textPdfFixture,
 } from '../../test/document-fixtures';
 const png = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhGQAAAAASUVORK5CYII=',
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=',
   'base64',
 );
+
+it('reuses all verified full PDF extraction pages without losing layout, values or Unicode', () => {
+  const original = 'a'.repeat(64),
+    id = '50000000-0000-4000-8000-000000000101';
+  const version = '1:' + original;
+  const pages = [
+    '① product\n\nquantity 2   € 1,50\n',
+    'x'.repeat(1700) + '\nfinal fact\n',
+  ];
+  const text = pages.join('\f') + '\f';
+  const indexed = pages.flatMap((page, offset) =>
+    chunks({
+      organizationId: id,
+      projectId: id,
+      roomId: null,
+      sourceId: id,
+      version,
+      text: page,
+    }).map((chunk) => ({
+      ...chunk,
+      page: offset + 1,
+      text:
+        '[Phạm vi: trích lớp chữ PDF; nội dung nằm trong ảnh chưa được đọc.]\n' +
+        chunk.text,
+    })),
+  );
+  const index = {
+    status: 'READY',
+    version,
+    text: text.normalize('NFKC'),
+    checksum: createHash('sha256').update(text).digest('hex'),
+    chunks: indexed,
+  };
+  for (const page of [1, 2])
+    expect(cachedPdfPage(index, original, page)).toMatchObject({
+      text: pages[page - 1],
+      processingMetadata: { pagesTotal: 2, extractionReused: true },
+    });
+  expect(cachedPdfPage(index, 'b'.repeat(64), 1)).toBeUndefined();
+  expect(
+    cachedPdfPage({ ...index, checksum: 'b'.repeat(64) }, original, 1),
+  ).toBeUndefined();
+  expect(
+    cachedPdfPage({ ...index, status: 'REVOKED' }, original, 1),
+  ).toBeUndefined();
+  expect(
+    cachedPdfPage({ ...index, chunks: indexed.slice(1) }, original, 1),
+  ).toBeUndefined();
+});
+
+it('continues a long PDF line to its final fact without repeating or splitting Unicode', () => {
+  const text = '😀'.repeat(9500) + ' DISTINCTIVE-LAST-FACT\nfinal row\n';
+  let offset = 0;
+  const fragments: string[] = [];
+  while (offset < text.length) {
+    const fragment = pdfTextFragment(text, 1, offset);
+    expect(fragment.offset).toBe(offset);
+    expect(fragment.endOffset).toBeGreaterThan(offset);
+    expect(fragment.totalLength).toBe(text.length);
+    expect(
+      Buffer.byteLength(JSON.stringify(fragment.text)),
+    ).toBeLessThanOrEqual(16000);
+    expect(fragment.text).not.toMatch(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/);
+    fragments.push(fragment.text);
+    offset = fragment.endOffset;
+  }
+  expect(fragments.length).toBeGreaterThan(2);
+  expect(fragments.join('')).toBe(text);
+  expect(fragments.at(-1)).toContain('DISTINCTIVE-LAST-FACT');
+  expect(() => pdfTextFragment(text, 1, 1)).toThrow('PDF_CURSOR_INVALID');
+  expect(() => pdfTextFragment(text, 1, text.length + 1)).toThrow(
+    'PDF_CURSOR_INVALID',
+  );
+});
 const source = {
   organizationId: 'o',
   projectId: 'p',
@@ -23,6 +109,144 @@ const source = {
 };
 const docxMime =
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+it('validates a bounded PDF original without allocating metadata for every page', async () => {
+  const bytes = await textPdfFixture(20);
+  const checksum = createHash('sha256').update(bytes).digest('hex');
+  const original = await nativeSource(
+    source,
+    'pages.pdf',
+    'application/pdf',
+    bytes,
+    checksum,
+    undefined,
+    true,
+  );
+  expect(original.pages).toBe(20);
+  expect(original.chunks).toHaveLength(1);
+  expect(original.chunks[0]!.page).toBeUndefined();
+  expect(original.chunks[0]!.text).toContain('20');
+  expect(original.chunks[0]!.text).toContain('chưa');
+  await expect(
+    nativeSource(source, 'pages.pdf', 'application/pdf', bytes, checksum),
+  ).rejects.toThrow('PDF_PAGE_LIMIT');
+  await expect(
+    nativeSource(
+      source,
+      'pages.pdf',
+      'application/pdf',
+      bytes,
+      'b'.repeat(64),
+      undefined,
+      true,
+    ),
+  ).rejects.toThrow('SOURCE_UNAVAILABLE');
+});
+it('reads exactly a requested PDF page beyond ten and reports text-only partial coverage', async () => {
+  const work = await mkdtemp(join(tmpdir(), 'galaxy-pdf-page-'));
+  try {
+    const path = join(work, 'pages.pdf');
+    await writeFile(path, await textPdfFixture(16));
+    const { pdfFileText } = await import('./ai-native-source');
+    const result = await pdfFileText(source, 'pages.pdf', path, 11);
+    expect(result.text).toContain('PAGE-11');
+    expect(result.text).not.toContain('PAGE-10');
+    expect(result.text).not.toContain('PAGE-12');
+    expect(result.processingMetadata).toMatchObject({
+      parserVersion: 'pdf-page-v1',
+      pagesTotal: 16,
+      page: 11,
+      scope: 'PDF_TEXT_ONLY',
+      coverage: 'PARTIAL',
+      originalSent: false,
+    });
+    expect(result.chunks.every((chunk) => chunk.page === 11)).toBe(true);
+    await expect(pdfFileText(source, 'pages.pdf', path, 17)).rejects.toThrow(
+      'INVALID_PAGE',
+    );
+    const scanned = join(work, 'scan.pdf');
+    await writeFile(scanned, scanPdfFixture(16));
+    const rendered = await scanPages(
+      source,
+      'scan.pdf',
+      scanned,
+      'a'.repeat(64),
+      undefined,
+      11,
+    );
+    expect(rendered.pages).toBe(16);
+    expect(rendered.chunks).toHaveLength(1);
+    expect(rendered.chunks[0]!.page).toBe(11);
+    expect(rendered.chunks[0]!.text).toContain('11/16');
+    expect(rendered.media[0]!.bytes.subarray(1, 4).toString()).toBe('PNG');
+    expect(await pdfFileText(source, 'scan.pdf', scanned, 11)).toMatchObject({
+      status: 'UNSUPPORTED',
+      errorCode: 'PDF_SCAN_REQUIRES_VISION',
+      processingMetadata: { coverage: 'NOT_READ', page: 11, pagesTotal: 16 },
+    });
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+});
+it('rejects zero PNG bit depth and a JPEG frame without scan data before egress', async () => {
+  const noDepth = Buffer.from(png);
+  noDepth[24] = 0;
+  noDepth.writeUInt32BE(
+    (await import('node:zlib')).crc32(noDepth.subarray(12, 29)),
+    29,
+  );
+  const noScan = Buffer.from(
+    'ffd8ffc00011080001000103011100021100031100ffd9',
+    'hex',
+  );
+  for (const [name, mime, bytes] of [
+    ['Bad.png', 'image/png', noDepth],
+    ['Bad.jpg', 'image/jpeg', noScan],
+  ] as const)
+    await expect(
+      nativeSource(
+        source,
+        name,
+        mime,
+        bytes,
+        createHash('sha256').update(bytes).digest('hex'),
+      ),
+    ).rejects.toThrow();
+});
+it('decodes valid bounded JPEG pixels and rejects structurally plausible corrupt scan data', async () => {
+  const sharp = (await import('sharp')).default;
+  const bytes = await sharp({
+    create: {
+      width: 2,
+      height: 2,
+      channels: 3,
+      background: { r: 0, g: 0, b: 255 },
+    },
+  })
+    .jpeg()
+    .toBuffer();
+  expect(
+    await nativeSource(
+      source,
+      'Blue.jpg',
+      'image/jpeg',
+      bytes,
+      createHash('sha256').update(bytes).digest('hex'),
+    ),
+  ).toHaveProperty('chunks');
+  const corrupt = Buffer.from(
+    'ffd8ffdb0002ffc40002ffc00011080001000103011100021100031100ffda000c03010002000300003f0000ffd9',
+    'hex',
+  );
+  await expect(
+    nativeSource(
+      source,
+      'Bad.jpg',
+      'image/jpeg',
+      corrupt,
+      createHash('sha256').update(corrupt).digest('hex'),
+    ),
+  ).rejects.toThrow();
+});
 it('đọc DOCX với đề mục, đoạn, bảng và nguồn ảnh; không giả đã đọc ảnh nhúng', async () => {
   const bytes = await docx();
   const result = await documentText(
@@ -82,8 +306,11 @@ it('đọc XLSX bằng parser hiện hữu, giữ sheet/cell và giá trị lưu
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Vật liệu');
   sheet.getCell('A1').value = 'VT-X928';
+  workbook.addWorksheet('Sheet 2').getCell('A1').value = '0007392';
   sheet.getCell('B2').value = { formula: '21*2', result: 42 };
   sheet.getCell('C2').value = { formula: '1+1' };
+  sheet.getCell('D2').value = { formula: '1/0', result: { error: '#DIV/0!' } };
+  sheet.getCell('E2').value = { formula: '0*1', result: 0 };
   sheet.getCell('B2').numFmt = '#,##0 "₫"';
   const bytes = Buffer.from(await workbook.xlsx.writeBuffer());
   const result = await documentText(
@@ -100,6 +327,48 @@ it('đọc XLSX bằng parser hiện hữu, giữ sheet/cell và giá trị lưu
   );
   expect(result.text).toContain('C2: [chưa có giá trị lưu sẵn]');
   expect(result.text).toContain('định dạng: #,##0');
+  expect(result.text).toContain('Sheet 2!A1: 0007392');
+  expect(result.text).toContain('D2: #DIV/0!');
+  expect(result.text).not.toContain('[object Object]');
+  expect(result.text).toContain('E2: 0');
+  const range = await analyzeTable(bytes, 'Vật liệu', 'B2:E2');
+  expect(range.cells.map((cell) => cell.value)).toEqual([
+    '42',
+    null,
+    '#DIV/0!',
+    '0',
+  ]);
+  expect(range.cells.every((cell) => cell.recalculated === false)).toBe(true);
+  expect(range.numericGroups).toEqual([
+    expect.objectContaining({ format: '#,##0 "₫"', count: 1, sum: '42' }),
+    expect.objectContaining({ format: 'General', count: 1, sum: '0' }),
+  ]);
+});
+
+it('rejects signature-only, malformed and excessive-size images before native media egress', async () => {
+  const zero = Buffer.from(png);
+  zero.writeUInt32BE(0, 16);
+  const huge = Buffer.from(png);
+  huge.writeUInt32BE(9000000, 16);
+  const malformed = Buffer.from(png);
+  malformed.write('XXXX', 12, 'ascii');
+  for (const bytes of [
+    png.subarray(0, 8),
+    png.subarray(0, 24),
+    zero,
+    huge,
+    malformed,
+  ]) {
+    await expect(
+      nativeSource(
+        source,
+        'invalid.png',
+        'image/png',
+        bytes,
+        createHash('sha256').update(bytes).digest('hex'),
+      ),
+    ).rejects.toThrow();
+  }
 });
 it('đọc PDF text cục bộ với locator trang và MD UTF-8, không gọi vendor', async () => {
   const pdf = activationFixture('pdf').media[0]!.bytes;
@@ -138,6 +407,8 @@ it('keeps original version and locator for verified image bytes and rejects mism
     sourceId: 'file',
     page: 1,
   });
+  expect(result.chunks[0]!.text).toContain('Chỉ metadata');
+  expect(result.chunks[0]!.text).not.toContain('Nội dung gửi native');
   await expect(
     nativeSource(source, 'sample.png', 'image/png', png, 'wrong'),
   ).rejects.toThrow('SOURCE_UNAVAILABLE');

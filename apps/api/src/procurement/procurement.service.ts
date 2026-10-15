@@ -47,7 +47,7 @@ export class ProcurementService {
         id,
         organizationId: actor.organizationId,
         deletedAt: null,
-        project: this.policy.projectWhere(actor),
+        project: this.policy.projectWhere(actor, 'purchase_request.read'),
       },
       include: {
         lines: { orderBy: { position: 'asc' } },
@@ -63,7 +63,7 @@ export class ProcurementService {
     const where: Prisma.PurchaseRequestWhereInput = {
       organizationId: actor.organizationId,
       deletedAt: null,
-      project: this.policy.projectWhere(actor),
+      project: this.policy.projectWhere(actor, 'purchase_request.read'),
       projectId: q.projectId,
       status: q.status,
     };
@@ -285,7 +285,9 @@ export class ProcurementService {
       recipients: q.supplierId
         ? { some: { supplierId: q.supplierId } }
         : undefined,
-      purchaseRequest: { project: this.policy.projectWhere(actor) },
+      purchaseRequest: {
+        project: this.policy.projectWhere(actor, 'procurement.rfq.read'),
+      },
     };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.supplierRFQ.findMany({
@@ -309,7 +311,9 @@ export class ProcurementService {
         id,
         organizationId: actor.organizationId,
         deletedAt: null,
-        purchaseRequest: { project: this.policy.projectWhere(actor) },
+        purchaseRequest: {
+          project: this.policy.projectWhere(actor, 'procurement.rfq.read'),
+        },
       },
       include: {
         purchaseRequest: {
@@ -1114,25 +1118,37 @@ export class ProcurementService {
     return this.getSupplierComparison(actor, id);
   }
 
-  async listPurchaseOrders(actor: CurrentActor, projectId?: string) {
+  async listPurchaseOrders(
+    actor: CurrentActor,
+    projectId?: string,
+    page?: { page: number; pageSize: number },
+  ) {
     return this.prisma.purchaseOrder.findMany({
       where: {
         organizationId: actor.organizationId,
         projectId,
-        purchaseRequest: { project: this.policy.projectWhere(actor) },
+        purchaseRequest: {
+          project: this.policy.projectWhere(
+            actor,
+            'procurement.purchase_order.read',
+          ),
+        },
       },
       include: { _count: { select: { lines: true } } },
       orderBy: { updatedAt: 'desc' },
-      take: 100,
+      take: page?.pageSize ?? 100,
+      ...(page && { skip: (page.page - 1) * page.pageSize }),
     });
   }
 
-  async getPurchaseOrder(actor: CurrentActor, id: string) {
+  async getPurchaseOrder(actor: CurrentActor, id: string, permission?: string) {
     const item = await this.prisma.purchaseOrder.findFirst({
       where: {
         id,
         organizationId: actor.organizationId,
-        purchaseRequest: { project: this.policy.projectWhere(actor) },
+        purchaseRequest: {
+          project: this.policy.projectWhere(actor, permission),
+        },
       },
       include: {
         lines: { orderBy: { position: 'asc' } },
@@ -1332,7 +1348,12 @@ export class ProcurementService {
       status: query.status,
       purchaseOrder: {
         projectId: query.projectId,
-        purchaseRequest: { project: this.policy.projectWhere(actor) },
+        purchaseRequest: {
+          project: this.policy.projectWhere(
+            actor,
+            'procurement.proforma_invoice.read',
+          ),
+        },
       },
     };
     const [items, total] = await this.prisma.$transaction([
@@ -1376,7 +1397,12 @@ export class ProcurementService {
         organizationId: actor.organizationId,
         deletedAt: null,
         purchaseOrder: {
-          purchaseRequest: { project: this.policy.projectWhere(actor) },
+          purchaseRequest: {
+            project: this.policy.projectWhere(
+              actor,
+              'procurement.proforma_invoice.read',
+            ),
+          },
         },
       },
       include: {
@@ -1759,7 +1785,11 @@ export class ProcurementService {
     actor: CurrentActor,
     query: SupplierPayablesQuery,
   ) {
-    const projectIds = await this.accessibleProjectIds(actor, query.projectId);
+    const projectIds = await this.accessibleProjectIds(
+      actor,
+      query.projectId,
+      'supplier_payable.read',
+    );
     return this.prisma.supplierPayable.findMany({
       where: {
         organizationId: actor.organizationId,
@@ -1779,12 +1809,18 @@ export class ProcurementService {
     });
   }
 
-  async getSupplierPayable(actor: CurrentActor, id: string) {
+  async getSupplierPayable(
+    actor: CurrentActor,
+    id: string,
+    permission?: string,
+  ) {
     const item = await this.prisma.supplierPayable.findFirst({
       where: {
         id,
         organizationId: actor.organizationId,
-        projectId: { in: await this.accessibleProjectIds(actor) },
+        projectId: {
+          in: await this.accessibleProjectIds(actor, undefined, permission),
+        },
       },
       include: {
         proformaInvoice: true,
@@ -1796,7 +1832,10 @@ export class ProcurementService {
       },
     });
     if (!item) throw new NotFoundException('Supplier payable not found');
-    return item;
+    return {
+      ...item,
+      proformaInvoice: this.redactBankReference(actor, item.proformaInvoice),
+    };
   }
 
   async generateSupplierPayable(
@@ -1975,7 +2014,11 @@ export class ProcurementService {
       where: {
         organizationId: actor.organizationId,
         projectId: {
-          in: await this.accessibleProjectIds(actor, query.projectId),
+          in: await this.accessibleProjectIds(
+            actor,
+            query.projectId,
+            'supplier_payment.read',
+          ),
         },
         supplierId: query.supplierId,
         status: query.status,
@@ -1988,12 +2031,18 @@ export class ProcurementService {
     return items.map((item) => this.redactBankReference(actor, item));
   }
 
-  async getSupplierPayment(actor: CurrentActor, id: string) {
+  async getSupplierPayment(
+    actor: CurrentActor,
+    id: string,
+    permission?: string,
+  ) {
     const item = await this.prisma.supplierPayment.findFirst({
       where: {
         id,
         organizationId: actor.organizationId,
-        projectId: { in: await this.accessibleProjectIds(actor) },
+        projectId: {
+          in: await this.accessibleProjectIds(actor, undefined, permission),
+        },
       },
       include: {
         allocations: { include: { schedule: true } },
@@ -2231,13 +2280,17 @@ export class ProcurementService {
     );
   }
 
-  private async accessibleProjectIds(actor: CurrentActor, projectId?: string) {
+  private async accessibleProjectIds(
+    actor: CurrentActor,
+    projectId?: string,
+    permission?: string,
+  ) {
     if (projectId) {
-      await this.policy.assertView(actor, 'Project', projectId);
+      await this.policy.assertView(actor, 'Project', projectId, permission);
       return [projectId];
     }
     const projects = await this.prisma.project.findMany({
-      where: this.policy.projectWhere(actor),
+      where: this.policy.projectWhere(actor, permission),
       select: { id: true },
     });
     return projects.map((project) => project.id);

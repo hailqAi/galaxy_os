@@ -33,6 +33,7 @@ import { ProjectRisksService } from './project-risks.service';
     PrismaService,
   ],
   exports: [
+    ProjectsService,
     ProjectProductsService,
     ProjectStageOneService,
     ProjectStageTwoService,

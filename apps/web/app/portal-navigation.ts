@@ -260,11 +260,12 @@ const canSee = (
     | 'MANAGED_DEPARTMENTS'
     | 'ORGANIZATION',
 ) =>
-  (!item.requiredPermission || permissions.includes(item.requiredPermission)) &&
-  !(
-    item.href === '/settings/chatgpt-connection' &&
-    administrationScope !== 'SYSTEM'
-  ) &&
+  (item.href === '/settings/chatgpt-connection'
+    ? permissions.includes('ai.invoke') ||
+      (administrationScope === 'SYSTEM' &&
+        permissions.includes('system.settings.read'))
+    : !item.requiredPermission ||
+      permissions.includes(item.requiredPermission)) &&
   !(item.href === '/settings/users' && administrationScope === 'SELF') &&
   (!item.featureFlag || process.env[item.featureFlag] === 'true');
 

@@ -50,7 +50,12 @@ export class AfterSalesService {
   }
 
   async inspections(actor: CurrentActor, projectId: string) {
-    await this.policy.assertView(actor, 'Project', projectId);
+    await this.policy.assertView(
+      actor,
+      'Project',
+      projectId,
+      'inspection.read',
+    );
     return this.prisma.inspection.findMany({
       where: { organizationId: actor.organizationId, projectId },
       include: { items: true, acceptances: true },
@@ -90,7 +95,11 @@ export class AfterSalesService {
     });
   }
 
-  async inspection(actor: CurrentActor, id: string) {
+  async inspection(
+    actor: CurrentActor,
+    id: string,
+    permission = 'inspection.read',
+  ) {
     const item = await this.prisma.inspection.findFirst({
       where: { id, organizationId: actor.organizationId },
       include: {
@@ -99,7 +108,7 @@ export class AfterSalesService {
       },
     });
     if (!item) throw new NotFoundException('Inspection not found');
-    await this.policy.assertView(actor, 'Project', item.projectId);
+    await this.policy.assertView(actor, 'Project', item.projectId, permission);
     return item;
   }
 
@@ -188,7 +197,11 @@ export class AfterSalesService {
     inspectionId: string,
     data: CreateAcceptanceDto,
   ) {
-    const inspection = await this.inspection(actor, inspectionId);
+    const inspection = await this.inspection(
+      actor,
+      inspectionId,
+      'acceptance.manage',
+    );
     if (inspection.status !== 'PASSED')
       throw new ConflictException('Passed inspection required');
     if (
@@ -287,7 +300,7 @@ export class AfterSalesService {
   }
 
   async handovers(actor: CurrentActor, projectId: string) {
-    await this.policy.assertView(actor, 'Project', projectId);
+    await this.policy.assertView(actor, 'Project', projectId, 'handover.read');
     return this.prisma.handover.findMany({
       where: { organizationId: actor.organizationId, projectId },
       include: { _count: { select: { items: true, checklist: true } } },
@@ -306,7 +319,12 @@ export class AfterSalesService {
       },
     });
     if (!item) throw new NotFoundException('Handover not found');
-    await this.policy.assertView(actor, 'Project', item.projectId);
+    await this.policy.assertView(
+      actor,
+      'Project',
+      item.projectId,
+      'handover.read',
+    );
     return item;
   }
 
@@ -561,7 +579,7 @@ export class AfterSalesService {
   }
 
   async warrantyAssets(actor: CurrentActor, projectId: string) {
-    await this.policy.assertView(actor, 'Project', projectId);
+    await this.policy.assertView(actor, 'Project', projectId, 'warranty.read');
     return this.prisma.warrantyAsset.findMany({
       where: { organizationId: actor.organizationId, projectId },
       orderBy: { warrantyEnd: 'asc' },

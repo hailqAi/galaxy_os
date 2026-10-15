@@ -173,9 +173,32 @@ describe.sequential('Sprint 1 API integration', () => {
 
   it('keeps central ChatGPT metadata and checks system-only, including after assignment revocation', async () => {
     const endpoint = '/api/v1/system/settings/chatgpt-connection';
+    const { randomBytes, createHash } = await import('node:crypto');
+    const oldAdminCredential =
+      await prisma.passwordCredential.findUniqueOrThrow({
+        where: { userId: adminId },
+      });
+    await prisma.passwordCredential.update({
+      where: { userId: adminId },
+      data: { mustChangePassword: false },
+    });
+    const adminToken = randomBytes(32).toString('hex');
+    const adminMembership =
+      await prisma.organizationMembership.findFirstOrThrow({
+        where: { userId: adminId, organizationId },
+      });
+    const adminSession = await prisma.session.create({
+      data: {
+        userId: adminId,
+        organizationMembershipId: adminMembership.id,
+        tokenHash: createHash('sha256').update(adminToken).digest('hex'),
+        expiresAt: new Date(Date.now() + 3600000),
+        lastSeenAt: new Date(),
+      },
+    });
     const checked = await request(app.getHttpServer())
       .get(endpoint)
-      .set('x-galaxy-dev-auth', 'admin@galaxy.local')
+      .set('Cookie', `${process.env.SESSION_COOKIE_NAME}=${adminToken}`)
       .expect(200);
     expect(checked.body.tools).toEqual(
       expect.arrayContaining([
@@ -183,15 +206,15 @@ describe.sequential('Sprint 1 API integration', () => {
           name: 'task_list',
           sideEffect: 'READ',
           status: 'DISABLED',
-          reason: 'CHATGPT_NOT_CONFIGURED',
+          reason: 'CHATGPT_NOT_READY',
         }),
       ]),
     );
     expect(checked.body).toMatchObject({
-      status: 'NOT_CONFIGURED',
-      appEligibility: 'ELIGIBILITY_UNCONFIRMED',
+      status: 'AUTH_NOT_STARTED',
+      appEligibility: 'NOT_VERIFIED',
       inferenceGrant: 'NOT_GRANTED',
-      providerScope: 'UNCONFIRMED',
+      providerScope: 'OWNER_ONLY_STAFF_UNCONFIRMED',
       identity: null,
       models: [],
       canConnect: false,
@@ -211,7 +234,6 @@ describe.sequential('Sprint 1 API integration', () => {
     const scopedDepartment = await prisma.department.findFirstOrThrow({
       where: { organizationId, status: 'active' },
     });
-    const { randomBytes, createHash } = await import('node:crypto');
     const token = randomBytes(32).toString('hex');
     const session = await prisma.session.create({
       data: {
@@ -275,10 +297,13 @@ describe.sequential('Sprint 1 API integration', () => {
         .post(endpoint)
         .set('Cookie', cookie)
         .send({})
-        .expect(201);
-      expect(result.body.checkKind).toBe('LOCAL_CONFIGURATION_ONLY');
-      expect(result.body.checkedAt).toEqual(expect.any(String));
-      expect(result.body.models).toEqual([]);
+        .expect(409);
+      expect(result.body.message).toBe('CHATGPT_OWNER_ONLY');
+      await request(app.getHttpServer())
+        .post(endpoint + '/begin')
+        .set('Cookie', cookie)
+        .send({})
+        .expect(409);
       await prisma.userRole.update({
         where: { id: assignment.id },
         data: { scopeType: 'ORGANIZATION' },
@@ -293,6 +318,11 @@ describe.sequential('Sprint 1 API integration', () => {
         .send({})
         .expect(403);
     } finally {
+      await prisma.session.delete({ where: { id: adminSession.id } });
+      await prisma.passwordCredential.update({
+        where: { userId: adminId },
+        data: { mustChangePassword: oldAdminCredential.mustChangePassword },
+      });
       await prisma.userRole.delete({
         where: { id: unrelatedSystemAssignment.id },
       });

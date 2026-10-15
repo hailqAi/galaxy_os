@@ -1,0 +1,438 @@
+# GALAXY OS — E02: SIWC ĐẦY ĐỦ NĂNG LỰC VÀ CÔNG CỤ THỰC THI
+
+Mốc quyết định: 10/10/2026 theo giờ Việt Nam.
+Thư mục prompt/bộ nhớ phát triển: /home/galaxy_os/prompt.
+Chế độ: IMPLEMENT_AND_VERIFY.
+Đích nhận: Codex CLI đang làm việc trên repository Galaxy OS.
+Đây là tài liệu giao việc, không phải báo cáo đã kiểm tra hoặc chỉnh sửa máy chủ.
+
+## 0. QUYẾT ĐỊNH PHẠM VI MỚI — THAY PHẦN WORKSPACE TRONG E01
+
+Tạm dừng hướng ChatGPT Workspace Agents. Tập trung SIWC + công cụ Galaxy để model có thể thực hiện công việc ngay trong Project Chat.
+
+Prompt này thay các yêu cầu tiếp tục kết nối/trigger/model-binding Workspace trong E01, nhưng KHÔNG hủy các yêu cầu tạo file, đọc file, tạo/chỉnh ảnh, web search, workflow, memory, artifacts và nghiệm thu. Các yêu cầu nghiệp vụ Galaxy OS v0.2, Project-centric, IAM, lịch sử và approval nghiệp vụ tiếp tục giữ nguyên.
+
+Tôi chọn Codex CLI trong phiên hiện tại. Cho phép đọc source, sửa code trong phạm vi, test, cài dependency miễn phí cần thiết đã kiểm tra, build và phát hành theo cơ chế Galaxy hiện có khi đủ điều kiện an toàn.
+
+Không mua gói/credits, không bật API-key provider đã paused, không thêm paid fallback, không xây cầu nối Gmail, không điều khiển/scrape ChatGPT web, không tiếp tục remote OAuth.
+
+Tái sử dụng spec/plan và approval P1/E01 còn phù hợp. Ghi delta Workspace -> SIWC tools, không nghiên cứu lại phần đã chứng minh. Không tự nhận đã duyệt một artifact chưa có. Nếu có gate bắt buộc chưa được đáp ứng cho phần mới, chỉ trình đúng quyết định còn thiếu một lần và tiếp tục phần độc lập đã được duyệt; không sửa AGENTS.md để né quyền hoặc an toàn.
+
+Mục tiêu sớm nhất: từ một yêu cầu trong chat, GPT qua SIWC gọi công cụ thật, tạo báo giá nháp XLSX/PDF có hình được phép và trả file tải xuống thật. Song song hoàn thiện web search, đọc file và chất lượng model. Không chờ memory engine mới hoặc image generation mới làm được tài liệu văn phòng.
+
+## 1. TIẾP TỤC ĐÚNG CHECKPOINT, KHÔNG PHÁ PHẦN ĐÃ CHẠY
+
+Đầu mối cần đọc:
+
+- /home/galaxy_os/prompt/README.md.
+- GALAXY_OS_LONG_TERM_MEMORY.md hoặc tài liệu bộ nhớ tương đương.
+- GALAXY_AI_MASTER_PROMPT_v1.0_2026-10-09.md/.txt.
+- GALAXY_AI_PLAN_AND_CHECKPOINT.md.
+- E01_IMPLEMENTATION_PLAN.md và handoff/spec/plan liên quan thực có.
+- AGENTS.md áp dụng và business baseline Galaxy OS v0.2.
+
+Root lịch sử: /home/galaxy_os.
+Worktree lịch sử: /home/galaxy_os/.worktrees/m2-a-20260928.
+Xác minh thực tế, không hardcode nơi làm việc nếu đã thay đổi.
+
+Theo báo cáo người dùng cung cấp: P1-B/phần T1 đã phát hành local-651479a7e9ce; 37 lượt live được báo đúng gpt-6.1-sol; memory private/shared, isolation, citation, history vượt tám lượt và summary đã đạt; 2.120 tests PASS; checkpoint r10. Đây là thông tin cần đối chiếu, không phải bằng chứng mới của phiên này.
+
+Kiểm HEAD, worktree, staged/unstaged/untracked, schema, release manifest và process đang phục vụ 3000/3001/domain. Giữ thay đổi dở và checkpoint khôi phục an toàn. Không checkout lùi, reset/clean/stash tự động hoặc git add toàn repo.
+
+Không xây lại memory P1-B, auth/provider gateway, storage, queue hoặc chat engine nếu đã có nền phù hợp. Không lặp việc quét hàng trăm file chỉ để báo source chưa đổi.
+
+## 2. BỎ PHỤ THUỘC WORKSPACE, GIỮ TOÀN BỘ CREATE VÀ ARTIFACT
+
+Lập dependency map, không xóa theo chuỗi tên file hoặc từ khóa “workspace”. Từ “workspace” còn có thể chỉ thư mục làm việc local, không phải dịch vụ OpenAI Workspace Agents.
+
+Phân loại code:
+A. Chỉ dùng cho Workspace Agents: trigger client, published-agent/API-channel binding, credential UI, polling/reconciliation riêng, cổng kiểm entitlement Workspace.
+B. Dùng chung: AI run, job queue, result schema, artifact receiver, storage, download, Markdown export, create UI, progress, cancellation, memory.
+C. Đã thuộc SIWC/Project/File/Draft domain: giữ nguyên và mở rộng khi cần.
+
+Với A:
+
+- Tắt dispatch, retry/polling nền và đường fallback mới sang Workspace.
+- Kiểm tra job đang có; lưu trạng thái thật, không coi local cancel là provider đã cancel.
+- Đánh dấu WORKSPACE_DEFERRED_BY_USER; không hiển thị như SIWC lỗi.
+- Ẩn/khóa form bắt nhập workspace ID, agent ID, token trong luồng dùng chat.
+- Có thể xóa code/dependency thực sự riêng, không còn caller, sau kiểm tra import/config/tests và lưu checkpoint. Ưu tiên tắt an toàn trước; cleanup không được chặn bàn giao chức năng.
+- Không drop bảng, xóa lịch sử, xóa artifacts hoặc revoke credential dùng chung để dọn code. Schema cũ có thể giữ dormant; migration phá hủy là việc riêng cần quyết định rõ.
+
+Với B/C, bắt buộc bảo toàn hoặc tách khỏi namespace Workspace:
+create_document, revise_draft, artifact generation/edit/preview/download,
+file upload/parser/retrieval, SIWC tool dispatcher, job/result persistence,
+Project context/memory/source ACL, UI Create và thẻ sản phẩm trong chat.
+
+Không được có logic: Workspace OFF => canCreate=false, model list rỗng, file/ảnh bị ẩn hoặc tool không được truyền cho SIWC.
+
+Nghiệm thu negative dependency: tắt toàn bộ Workspace và ngăn outbound tới Workspace endpoints, nhưng chat SIWC, create/read/edit/download, memory và các job local vẫn chạy đúng.
+
+## 3. KIỂM “MỞ HẾT MODEL” VÀ “MAX” TỪ UI ĐẾN REQUEST
+
+Tách ba khái niệm:
+
+1. Catalog: mọi model tài khoản thực sự được phép chọn.
+2. Reasoning mode/effort: khả năng của từng model và route.
+3. Tool capability: model có thể gọi công cụ nào và executor có sẵn không.
+   Một cờ FULL=true hoặc chữ MAX trên UI không chứng minh ba việc trên đã đạt.
+
+### 3.1 Catalog và model match
+
+Đọc hướng dẫn SIWC hiện hành, lấy catalog account-specific bằng credential của đúng connection. Áp dụng visibility/policy hợp lệ của provider; không hiển thị model hidden/ungranted hoặc hardcode danh sách mẫu.
+
+Bỏ filter pilot/Workspace/binding không cần thiết. Không mặc định số model vẫn là bảy. Tất cả model hợp lệ trong catalog phải có thể được lựa chọn theo quyền, không âm thầm chỉ giữ một model.
+
+Model chưa có adapter/capability phải hiện lý do rõ, không giả selectable rồi đổi sang model khác. Context/model cache gắn với connection revision; đổi account/revoke phải vô hiệu cache tương ứng.
+
+Giữ model người dùng chọn. Mặc định ưu tiên chất lượng theo lựa chọn đã chốt, nhưng không xếp “mạnh nhất” bằng thứ tự chữ hoặc tên model. Đổi mặc định không ghi đè lựa chọn cá nhân đang hiệu lực.
+
+### 3.2 MAX phải có hiệu lực thật
+
+Truy toàn chuỗi: setting UI -> persist -> request DTO -> runtime config -> provider adapter -> payload -> phản hồi.
+Ghi requestedModel, requestedEffort/mode, sentModel, sentEffort/mode, observedModel khi provider có trả, accepted status và capability evidence. Field provider không trả phải để UNKNOWN, không dùng lời model tự nhận làm bằng chứng.
+
+Kiểm các nhánh: trả lời text, vòng tool tiếp theo, tạo artifact, retry/resume và ngữ cảnh dài. Không để vòng đầu MAX nhưng sau tool tự về default hoặc model khác.
+
+Chỉ dùng giá trị model/route hỗ trợ. Không mặc định “max”, “xhigh” hoặc “pro” có cùng nghĩa hoặc khả dụng cho tất cả model. Không gửi field không hỗ trợ, không bỏ field âm thầm rồi giữ nhãn MAX. Giá trị thiếu quyền thì báo rõ và giữ yêu cầu, không fallback tự động.
+
+Kiểm UI có nhầm max output tokens/context limit với reasoning effort không. Ưu tiên chất lượng không đồng nghĩa token vô hạn. Không tự thay cách tính phí hoặc mua quyền mới.
+
+Thử ngắn từng model selectable trong hạn mức được phép; một nhóm model/capability đại diện dùng để test sâu. Không làm thử tải tổ hợp mọi model x mọi file lớn làm cạn hạn mức.
+
+### 3.3 Không giữ chặn ứng dụng vô lý
+
+Tìm và bỏ đúng nguyên nhân: business-only whitelist, ép câu trả lời vài dòng, cấm kiến thức chung, ban file/context toàn bộ, tool_choice none cố định, tool list chỉ task_list hoặc điều kiện phải có Workspace.
+
+Giữ nguyên câu hỏi, Unicode, code, bảng và file references theo message revision; context thêm riêng. Không bắt một model yếu viết lại yêu cầu hoặc tóm tắt câu trả lời tốt.
+
+Giữ quyền Project và provider entitlement; tài khoản cá nhân không tự cấp phép dùng chung cho mọi nhân viên. Tạo nháp theo yêu cầu không cần lặp xác nhận mỗi lần READ/DRAFT; gửi ngoài, phê duyệt, tài chính và ghi dữ liệu chính thức vẫn theo workflow.
+
+### 3.4 Context và token profile
+
+Giữ history/memory P1-B đã đạt. Không quay về tám lượt, không đưa toàn bộ Project vào mỗi request. Giữ yêu cầu gốc, quyết định đang hiệu lực và nguồn liên quan.
+
+Đọc đúng định nghĩa token profile UNVERIFIED: không đánh đồng tokenizer/context profile với OAuth token. Không reconnect hoặc xóa credential vì lỗi đếm ngữ cảnh.
+
+Tính budget cả instructions, history, tools, file/image, tool results và phần dành cho reasoning/output. Estimate phải ghi là estimate. Chỉ dùng endpoint đếm token khi route thực hỗ trợ. Không bịa context capacity, không thử giới hạn bằng vòng request khổng lồ. Khi quá dài, truy xuất/chia nguồn, thông báo đúng; không cắt mất điều kiện người dùng.
+
+## 4. GIỮ HỢP ĐỒNG SIWC, XÂY VÒNG TOOL HOÀN CHỈNH
+
+Đọc trực tiếp tài liệu OpenAI; đọc cả phần giới hạn, không chỉ ví dụ API-key:
+
+- https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference
+- https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations
+- https://developers.openai.com/api/docs/guides/function-calling
+- https://developers.openai.com/api/docs/guides/reasoning
+- https://developers.openai.com/api/docs/guides/tools-web-search
+- https://developers.openai.com/api/docs/guides/file-inputs
+
+Nếu không truy cập được tài liệu từ môi trường, ghi đúng thiếu bằng chứng và dùng contract đã kiểm chứng trong repo; không tự đoán giới hạn hoặc endpoint.
+
+Theo contract cần đối chiếu: HTTP store=false, stream=true; input chứa history cần thiết; instructions/developer thay system-message không hợp lệ; function/custom tools theo namespace hoặc additional_tools hợp lệ. Không sao chép toàn bộ cấu hình SDK thông thường vào SIWC.
+
+Không tự dùng hosted file_search, Code Interpreter, image_generation, hosted MCP, tool_search hoặc programmatic_tool_calling nếu SIWC không cho phép. Chạy một công cụ MCP/CLI tại backend Galaxy qua function adapter là cơ chế riêng; không nhầm với hosted tool trên OpenAI.
+
+Tái sử dụng registry/orchestrator:
+model yêu cầu tool -> validate schema -> kiểm actor/Project/source -> executor -> kiểm output -> tool result đúng call ID -> model tiếp tục.
+
+Chỉ thực thi khi đã nhận đủ arguments, không chạy từ delta JSON chưa hoàn chỉnh. Xử lý zero/multiple tool calls, retry/idempotency, timeouts, cancel và lỗi partial. Giữ các response items/trạng thái cần cho continuation theo hợp đồng; không chỉ lưu text rồi bỏ tool call chain.
+
+Registry phải có executor/version/schema/permissions/resource policy. Chỉ đưa tools READY phù hợp vào model; capability chưa có phải báo trung thực. Có cách khám phá tools bằng function/local routing tương thích, không thêm một hosted tool_search bị từ chối chỉ để “mở hết”. Không nhồi mọi schema lớn vào mọi request.
+
+Không bắt READ/DRAFT chờ approval vô ích. Không mở quyền WRITE/DELETE/SEND/APPROVE chỉ vì tạo file cần hoạt động.
+
+Job dài phải có progress bền vững, backpressure, heartbeat và resume theo nền hiện có. Giới hạn số vòng, thời gian và tài nguyên phía Galaxy minh bạch; không retry vô hạn. Một nút Stop không được đánh dấu run đã hủy trong khi vẫn âm thầm tạo thêm sản phẩm.
+
+Phân biệt MODEL_COMPLETED, TOOL_COMPLETED và REQUEST_FULFILLED. Câu hỏi chỉ yêu cầu trả lời có tiêu chuẩn khác câu hỏi yêu cầu ba tệp; response.completed chưa chứng minh tệp tồn tại.
+
+## 5. CHỌN LỌC REPOSITORY THEO CAPABILITY, KHÔNG CÀI TẤT CẢ
+
+Các URL dưới đây là ứng viên, không phải danh sách phải cài. Đối chiếu README, release, code, LICENSE/NOTICE, dependency/model weights, telemetry và data egress ở version sẽ pin. Không dùng các tuyên bố benchmark của tác giả làm nghiệm thu Galaxy.
+
+Chọn từng capability: GAP -> REUSE/ADAPTER -> SANDBOX_TEST -> SELECT/DEFER -> INTEGRATE -> LIVE_VERIFY.
+
+### Nhóm ưu tiên thử sớm
+
+OfficeCLI — https://github.com/iOfficeAI/OfficeCLI
+Thử các chức năng đọc/sửa/tạo Office, merge template, kiểm định dạng và preview. Dùng wrapper có schema và danh sách lệnh/đường dẫn cho phép; không cho model chạy command string bất kỳ. Kiểm riêng việc export PDF và dependency/plugin thực cần. Có thư viện Galaxy đang làm tốt thì tái sử dụng, không buộc thay engine.
+
+AnyDoc — https://github.com/firecrawl/anydoc
+Thử extraction thành Markdown/dữ liệu cho định dạng thông dụng. Kiểm độ đầy đủ, bảng, tiếng Việt, ảnh và source map. Không để chuyển đổi làm mất bản gốc hoặc số liệu rồi vẫn báo AI đọc đủ.
+
+PPT Master — https://github.com/hugohe3/ppt-master
+Chọn template/workflow/renderer hữu ích cho PPT. Đây có thể là skill/pipeline, không tự coi là HTTP service có sẵn. Tách bước GPT sinh nội dung khỏi worker tạo PPTX. Không cần cài thêm giao diện, AI engine hoặc credential khác chỉ để lấy template.
+
+### Nhóm dùng có điều kiện
+
+PptxGenJS — ưu tiên kiểm upstream https://github.com/gitbrent/PptxGenJS.
+Đối chiếu fork người dùng gửi https://github.com/f0rty7/pptxgenjs; chỉ dùng fork khi có lý do/version/patch cần thiết. Không dùng hai renderer để làm cùng một tác vụ nếu không có lợi ích.
+
+Docling — https://github.com/docling-project/docling
+Benchmark với parser đang có cho cấu trúc/bảng/trang. Chỉ thêm khi bù được thiếu sót và không gây quá tải.
+
+MinerU — https://github.com/opendatalab/mineru
+Chỉ dùng cho tài liệu khó/scan/bảng mà parser nhẹ chưa đáp ứng. Kiểm tài nguyên CPU/GPU/RAM/disk, weights và license từng phiên bản; không mặc định tất cả đều thuần Apache/MIT hoặc CPU nhẹ.
+
+RetainPDF — https://github.com/chocolatedesue/retain-pdf
+Dùng phần dịch/khôi phục layout khi phù hợp. Xác minh upstream thực của fork, OCR và luồng dịch có gọi dịch vụ ngoài không. Nếu cần LLM, đi qua ModelGateway Galaxy đúng contract/actor, không truyền raw SIWC token cho app bên ngoài. Không cài cả stack UI/DB riêng chỉ để lấy renderer.
+
+SearXNG — https://github.com/searxng/searxng
+Crawl4AI — https://github.com/unclecode/crawl4ai
+Chỉ triển khai nếu native web/search hiện hữu chưa đáp ứng. Kiểm search backend thật; crawler không tự là search engine. Không public instance hoặc gửi private query ra dịch vụ chưa được phép.
+
+ComfyUI — https://github.com/Comfy-Org/ComfyUI
+Chỉ bật tạo/chỉnh ảnh khi có GPU/engine phù hợp, weights được phép và workflow pin đã review. Không bật custom-node auto-install/download/code execution từ prompt người dùng.
+
+### Nhóm không được chặn mốc tool đầu tiên
+
+TencentDB Agent Memory — https://github.com/TencentCloud/TencentDB-Agent-Memory
+Supermemory — https://github.com/supermemoryai/supermemory
+Giữ memory P1-B làm nguồn chuẩn. Chỉ PoC khi có thiếu sót cụ thể; kiểm server binary/licensing, embedding, outbound, ACL, revoke, version và backup. Không deploy hai memory engine song song hoặc chuyển dữ liệu sang SaaS mặc định. Không coi SDK “OpenAI-compatible” là dùng được SIWC embeddings.
+
+ECC — https://github.com/affaan-m/ecc
+Chọn hướng dẫn/test/review cho Codex nếu cần. Không chồng hooks gây thêm vòng approval, không cho skills đọc .env hoặc credential.
+
+Nuwa — https://github.com/alchaincyf/nuwa-skill
+Chỉ lấy phương pháp chưng cất workflow/heuristic được phép; không coi là database memory hoặc dữ kiện đã được xác nhận.
+
+DeepTutor — https://github.com/HKUDS/DeepTutor
+Tham khảo nghiên cứu nhiều bước và grounded retrieval. Không đem cả nền tảng giáo dục/chat/auth vào Galaxy, không dùng kiểu đăng nhập repo đó thay OAuth Galaxy.
+
+OpenSpace — https://github.com/HKUDS/OpenSpace
+Chọn ý tưởng registry/version/evaluation skill. Không tự sửa prompt/skill production từ lịch sử người dùng khi chưa review/test.
+
+DeepSeek Harness là tư tưởng ranh giới model–tools–session–memory, không phải yêu cầu đổi provider hoặc viết lại backend.
+
+### Gate cài đặt
+
+Ghi capability cụ thể, file/service tích hợp, version/commit, dependency, license/weights, network flow, tài nguyên, test/rollback.
+Cài sandbox tối thiểu trong phạm vi đã được phép; không chạy curl|bash hoặc installer chưa review trên production. Không tải weights nhiều GB trước kiểm disk/hardware/quota. Không mở paid cloud fallback.
+
+Nếu có thể dùng khả năng trong source hiện tại tốt hơn, chọn REUSE. Nếu không phù hợp, ghi DEFERRED/REJECTED có lý do và tiếp tục công việc khác. Không benchmark lan man tất cả engine trước khi nối được một công cụ.
+
+## 6. CREATE PHẢI LÀ CHỨC NĂNG CỦA SIWC, KHÔNG PHỤ THUỘC WORKSPACE
+
+Tìm create_document/revise_draft, File/Draft domain, registry và mọi chỗ “not configured”/“requires Workspace”. Dựng capability matrix từ yêu cầu người dùng tới executor, storage, result và UI.
+
+Luồng bắt buộc:
+GPT lập nội dung có cấu trúc -> worker tạo/sửa -> validator/preview -> storage -> artifact metadata -> tool result -> model trả lời -> chat hiển thị file.
+
+Ưu tiên tool contract đã có. Không dựng create_document_v2 song song không có lý do; nếu phải đổi schema/hành vi, version tương thích và migration/test rõ ràng.
+
+Nếu v1 cố ý nhận số dưới dạng chuỗi chính xác hoặc không cho công thức, không phá contract đó âm thầm để làm Excel. Mở capability/version được kiểm tra riêng cho tính toán/công thức an toàn và cập nhật documentation/tests.
+
+Tạo bản nháp được yêu cầu khác với phát hành báo giá hoặc sửa hợp đồng đã ký. Giữ DRAFT mặc định; không tự ký/đóng dấu/gửi khách. Trong phạm vi có quyền, không yêu cầu owner xác nhận lại từng bước tạo file đã được yêu cầu.
+
+### 6.1 Artifact service
+
+Tái sử dụng các entity/service có thể phục vụ. Metadata tối thiểu: artifact ID, tenant/Project/conversation/actor, source versions, MIME, byte size, sha256, storage key, generator version và visibility.
+
+Trạng thái có GENERATING, VERIFYING, READY, FAILED/CANCELLED theo convention hiện có. READY chỉ khi byte đã lưu và kiểm tra được.
+
+UI giữ Create/composer, file cards, preview, download, edit draft, save/promote to Project. Nút hoặc form không được phụ thuộc Workspace IDs/tokens. PDF/PPT preview lỗi riêng không làm mất file gốc; hiển thị đúng chất lượng kiểm chứng.
+
+Link tải qua backend ACL hoặc cơ chế ký phù hợp, không public storage. Reload phát sinh lại quyền tải khi cần; link hết hạn không làm mất artifact. Không bịa sandbox:/mnt/data hoặc đường dẫn máy chủ trong câu trả lời Galaxy.
+
+Retry cùng run/tool call không tạo thêm bản nháp trùng; revise dùng expectedVersion để không ghi đè thay đổi mới. Lỗi DB/storage có cơ chế reconcile và cleanup có kiểm soát.
+
+### 6.2 Excel và tính toán
+
+Đọc/tạo/sửa nhiều sheet, bảng, ảnh, chart, công thức phù hợp. Tính số tiền bằng Decimal hoặc định dạng chính xác theo nghiệp vụ. Giữ ID dài dưới dạng text; không làm tròn mã sản phẩm hoặc bỏ số 0 đầu.
+
+Phân biệt dữ liệu, formula và cached result. Công thức ghi vào XLSX chưa có nghĩa đã được tính. Kiểm engine hỗ trợ, cached output và lỗi #REF!/#VALUE!; không thực thi macro/external links/DDE hoặc tải tài nguyên workbook ra mạng.
+
+Công thức từ dữ liệu không tin cậy phải được escape; công thức do ứng dụng cho phép có schema riêng. Không sửa file upload gốc; tạo revision và bảng khác biệt.
+
+Kiểm bảng lớn vượt phần provider thường tóm tắt, đọc range/rows theo nguồn đầy đủ. Khi parser không có giá trị tính toán đáng tin, báo chưa tính, không lấy 0 thay lỗi.
+
+### 6.3 Word và PDF
+
+DOCX có styles, header/footer, bảng, ảnh, font tiếng Việt có quyền sử dụng. Sửa được nội dung theo yêu cầu và giữ phần không liên quan.
+
+PDF cần renderer thật, bảng/ngắt trang đúng, Unicode không lỗi, không mất hàng/cột. Không giả PDF bằng đổi đuôi. Render/đọc lại để kiểm và có ảnh preview khi phù hợp.
+
+Báo giá Excel và PDF phải dựa cùng dữ liệu phiên bản, nhưng kiểm tổng và nội dung tệp đầu ra độc lập. Không dùng một assertion chỉ so hai giá trị input giống nhau để chứng minh file đúng.
+
+### 6.4 PowerPoint
+
+PPTX có thành phần chỉnh sửa được, template/ảnh/biểu đồ phù hợp; không xuất toàn bộ slide thành ảnh rồi báo native editable. Có speaker notes khi được yêu cầu. Render từng slide, kiểm tràn chữ/ảnh/độ tương phản/chữ Việt. Xuất PDF dùng pipeline đã xác minh.
+
+Nếu OfficeCLI đủ thì dùng; nếu PPT Master/PptxGenJS bổ sung chất lượng thì chọn phần cần thiết. Không mất nhiều vòng thử engine khi đã đạt acceptance.
+
+## 7. ĐỌC FILE, MARKDOWN VÀ UPLOAD RESUMABLE
+
+Tái sử dụng uploader/storage hiện có. Sửa trọn chuỗi upload -> chat attachment -> parser -> retrieval -> context/tool, không chỉ tăng body size.
+
+Giới hạn 10.000.000.000 bytes mỗi file; quota tổng riêng. Streaming/chunk/resume có hash, idempotency, cancel, cleanup và disk budget. Không đọc toàn tệp lớn vào RAM, base64 10 GB hoặc lưu binary lớn trong PostgreSQL. Test boundary và tải thực an toàn phân biệt rõ; mô phỏng boundary không phải nghiệm thu upload 10 GB live.
+
+File gốc bất biến theo version, file tạm lưu bền vững. Quản lý ba lớp: original -> Markdown/structured/preview -> memory cốt lõi.
+
+Ưu tiên đầu vào PDF, DOCX, XLSX/CSV, PPTX, TXT/MD, JPG/PNG/WEBP; định dạng legacy/ODF/HEIC/CAD/BIM/archive/media mở theo parser đã xác minh. Tách STORED/PREVIEW/EXTRACTED/AI_READABLE; không hứa DWG/RVT/SKP đọc đầy đủ khi chưa có bộ xử lý.
+
+PDF text trước, OCR khi cần; giữ page map. Bảng tính giữ sheet/range; PPT giữ slide/shape; ảnh giữ vùng và bản gốc. Markdown là dẫn xuất có parser version/quality warnings, không phải bản thay thế lossless.
+
+Ưu tiên truyền bản gốc bằng cơ chế SIWC/model hỗ trợ khi nằm trong giới hạn và được phép gửi. Nếu phải dùng bản dẫn xuất hoặc trích đoạn, ghi manifest rõ. Kiểm limits hiện hành, không gọi Files upload API hoặc hosted retrieval chỉ vì có ví dụ API chung.
+
+Tệp nhiều dữ liệu cần tool đọc trang/range hoặc tính cục bộ. Không coi truyền được file là model đã đọc mọi ảnh/formula/row. Với thông tin quan trọng, đối chiếu nguồn và phép tính thật.
+
+Không công khai link tệp để tiện provider fetch. Nếu phải dùng URL, áp dụng scope, TTL, phương thức và domain đã cho phép; lưu dấu vết chia sẻ, không log credential.
+
+File chat có thể đề xuất/được yêu cầu chuyển vào hồ sơ. Promote có kiểm tra quyền/visibility/version; không tự thành approved document. Cleanup không xóa nguồn đang làm bằng chứng mà không có chính sách; lệnh xóa/thu hồi phải làm mất khả năng dùng dẫn xuất trái quyền.
+
+## 8. WEB SEARCH THẬT VÀ CHẤT LƯỢNG NGUỒN
+
+Ưu tiên native web search khi model/connection được phép và phép thử thật đạt. Ghi requested tool, execution, nguồn và terminal event.
+
+Nếu native không khả dụng, kiểm công cụ Galaxy hiện có rồi mới chọn SearXNG/Crawl4AI. Không thêm paid key, không dùng public instance để gửi dữ liệu riêng.
+
+Tách search discovery và open/read trang. Có kết quả tìm không có nghĩa đã đọc đầy đủ nội dung nguồn. Tool cần title, URL, thời điểm truy xuất, ngày nguồn nếu có, đoạn hỗ trợ kết luận và source ID.
+
+AUTO dùng web khi thông tin mới/giá/catalogue/thông số cần xác minh. WEB theo yêu cầu rõ. PROJECT_ONLY không gọi Internet và phải nói chưa đủ nguồn nếu không có. Kiến thức tổng quát không bắt tìm Project để được trả lời.
+
+Không gửi toàn bộ hợp đồng, giá vốn, tên khách hàng hay file làm search query. Chỉ lấy thông số sản phẩm chung cần tra cứu và xử lý theo egress policy; nội dung Project vẫn truyền GPT chỉ trong grant thích hợp.
+
+Chống SSRF qua DNS/redirect/IPv6/metadata IP, private network, localhost và crawler browser subrequests. Chặn loopback, tải file quá lớn, prompt injection và truy cập nội dung không được phép. Web/search service không được giữ credential Galaxy trong env/browser profile.
+
+Citations trên UI phải mở đúng nguồn và đúng span được dùng; nguồn Internet khác citation tài liệu Project. Không tạo URL giả, không bịa giá khi hãng không công bố. Khi tool lỗi, giữ nội dung người dùng và thông báo thật, không giả đã tìm.
+
+## 9. TẠO/CHỈNH ẢNH VÀ KHẢ NĂNG CREATE KHÁC
+
+Giữ Create/Image UI và artifact plumbing nhưng readiness riêng cho từng capability. Không đánh dấu ảnh AI READY chỉ vì đã cài ComfyUI hoặc vì GPT viết được mô tả.
+
+Nếu có image engine được cấp phép và đủ tài nguyên, tích hợp function tool Galaxy vào SIWC. Pin workflow/model/node, giới hạn job, VRAM/disk và network. Không nạp node/plugin tùy ý từ tài liệu hoặc model.
+
+Nếu chưa có engine: image generation là NOT_READY có lý do, phần tạo XLSX/DOCX/PDF/PPTX vẫn hoạt động. Không chuyển sang OpenAI image API có API-key billing riêng hoặc provider paused để đạt PASS.
+
+Có thể làm ghép ảnh/moodboard/crop/resize/annotate bằng công cụ cục bộ phù hợp mà không dùng mô hình sinh ảnh; phải gọi đúng tên thao tác. Giữ ảnh nguồn, quyền dùng, metadata thao tác và sản phẩm mới.
+
+Tạo ảnh ý tưởng không phải ảnh xác thực của sản phẩm chính hãng. Không dùng ảnh sinh thay catalogue để làm bằng chứng model/dimension.
+
+Video giữ khả năng lưu/metadata/ghép tư liệu nếu đã có worker được phép. Sinh video AI là capability riêng cần engine thật; không để mục video chưa có chặn cả Create.
+
+## 10. KHÔNG LÀM MẤT MEMORY VÀ NỘI DUNG
+
+Giữ P1-B làm nguồn chuẩn. Lưu đầy đủ nội dung hỏi/trả lời công khai, nguồn, tool result thích hợp, ảnh/tệp và Markdown lượt chat. Không lưu hidden chain-of-thought hoặc credential trong memory/log.
+
+Core memory trích từ nguồn có trạng thái: user-confirmed, source-backed, AI-proposed, disputed/superseded theo schema hiện tại. Summary không biến đề xuất thành quyết định. Cập nhật có version và provenance; nội dung riêng không tự sang shared.
+
+Mỗi model/tool request lấy đúng Project/conversation/actor. Giữ identity của run khi đổi tab. Thu hồi quyền ảnh hưởng history retrieval, file, preview, cache, index và job chưa hoàn tất; không chỉ check lúc gửi câu hỏi.
+
+Nếu cần memory/embedding bổ sung, dùng khả năng local đã phù hợp hoặc tiếp tục keyword/structured retrieval. Không coi SIWC tự cho embeddings endpoint hoặc giao secret cho memory SaaS. Benchmark engine ngoài là checkpoint sau, không thay dữ liệu P1-B để “thử cho chạy”.
+
+## 11. SANDBOX, QUYỀN VÀ TÀI NGUYÊN
+
+Worker file/CLI chạy quyền thấp, filesystem theo job, input read-only, output dir riêng, CPU/RAM/disk/process/time limits; network off trừ công cụ chuyên web với egress kiểm soát.
+
+Không mount root repo, .env, credential store hoặc Docker socket vào worker. Không chạy root/privileged. Không nội suy shell command từ prompt. Dùng argument/schema allowlist và resolve fileId sang đường dẫn phía server có kiểm tra traversal/symlink.
+
+Nếu cần Python tính toán, dùng API/operations được giới hạn hoặc sandbox thật; AST filter đơn lẻ không phải sandbox. Không cho import/network/subprocess/đọc filesystem tùy ý. Không chạy script từ file upload hoặc thực thi macro.
+
+Quét/kiểm MIME thực, decompression bomb, file quá nhiều trang/objects, malformed documents, external resources. HTML/SVG/Office preview untrusted phải được sandbox/sanitize, không chạy script trong origin ứng dụng.
+
+Không làm đầy WSL disk, tải model nặng hoặc chạy nhiều full suites/build/parser cùng lúc. Xác minh giới hạn thực của host và queue; có concurrency/backpressure. Không thay đồng hồ/WSL/kernel/network nếu không có lỗi liên quan đã chứng minh.
+
+Giữ OAuth SIWC, grants và provider pause. Chỉ thao tác trong quyền actor. Các công cụ tạo tài liệu không tự có quyền sửa hợp đồng, thanh toán, phát hành/gửi tài liệu hoặc thay dữ liệu đã ký.
+
+## 12. TRIỂN KHAI THEO LÁT CÓ THỂ DÙNG, KHÔNG ĐỢI TẤT CẢ REPO
+
+E02-0 — Scope và bảo toàn:
+đối chiếu r10/hiện trạng; tắt Workspace; phân tách dependencies shared; chứng minh SIWC và Create không bị chặn theo Workspace. Hoãn cleanup sâu nếu gây chậm chức năng.
+
+E02-1 — Model/effort và tool loop:
+kiểm MAX, mở catalog hợp lệ, giữ câu hỏi/context, nối read/draft tools thật; làm test vòng gọi công cụ nhiều bước. Không thêm framework mới khi hiện hữu đủ dùng.
+
+E02-2 — Create văn phòng đầu tiên:
+create_document/revise_draft -> XLSX + DOCX + PDF -> validate/preview -> download. Nghiệm thu báo giá nháp có ảnh từ nguồn được phép. Cho phép bộ dữ liệu thử có nhãn rõ để không chờ parser nâng cao.
+
+E02-3 — Web và file input:
+search/read/citation; upload/attachment/parser/retrieval; round-trip một PDF, một Excel nhiều sheet và một ảnh. Web có thể được làm cùng đợt với E02-2 nếu không chạm shared code/running resources.
+
+E02-4 — PPT và chỉnh tài liệu:
+tạo/sửa PPTX native, template; xuất/render PDF; sửa workbook/Word giữ version. Chỉ cài engine bổ sung khi có gap thật.
+
+E02-5 — File lớn và PDF chuyên sâu:
+resumable 10 GB, quota, retention/promote, OCR/layout/dịch catalogue theo nhu cầu; nghiệm thu boundary và tải thực tách biệt.
+
+E02-6 — Ảnh và memory nâng cao:
+engine ảnh nếu đủ điều kiện, moodboard local, cải thiện retrieval/skills có lợi ích đã đo. Không chờ mục này để phát hành các chức năng trước.
+
+Sau mỗi lát: focused tests, security, typecheck/lint/build phù hợp, kiểm run trực tiếp, phát hành theo cơ chế hiện hữu khi đủ gate. Giữ rollback compatible schema/storage. Không create nhiều candidate rồi để domain vẫn phục vụ bản cũ.
+
+Cài package xong không được coi checkpoint đã hoàn tất. Tool phải được gọi từ chính chat đang phục vụ người dùng.
+
+## 13. BỘ NGHIỆM THU BẮT BUỘC
+
+Lập matrix PASS / FAIL / BLOCKED / NOT_RUN; tách unit, integration, browser, provider live, artifact validation và deployed acceptance.
+
+A01. Workspace off: SIWC chat, Create và memory vẫn chạy; không có outbound Workspace.
+A02. Chỉ xóa provider-specific code đã chứng minh unused; shared artifacts/jobs/ACL giữ nguyên.
+A03. Catalog lấy đúng account; mọi model hợp lệ có trạng thái/khả năng rõ, không bị Workspace filter.
+A04. requested/sent/observed model khớp theo evidence; không fallback âm thầm.
+A05. MAX hợp lệ đi qua UI -> persist -> adapter -> request, giữ qua vòng tool/retry. Không supported thì báo đúng.
+A06. Câu hỏi nguyên gốc và điều kiện không mất; input budget có căn cứ; không lẫn Project.
+A07. Owner chat ở hai Project được phép; actor thiếu quyền bị từ chối.
+A08. Multiple tool calls được execute, reinject và kết thúc đúng; lỗi partial không giả SUCCESS.
+A09. Tạo XLSX và PDF báo giá có ảnh thật được phép, số lượng/đơn giá/thuế/tổng đúng; thiếu giá vẫn đánh dấu thiếu.
+A10. Tạo DOCX, đọc/render lại, bảng/ảnh/chữ Việt đúng.
+A11. Tạo PPTX có text/shape chỉnh sửa được; slide preview không tràn; PDF nếu yêu cầu có tệp thật.
+A12. Revise draft không sửa original, kiểm expectedVersion; retry không trùng artifact.
+A13. Download sau reload/restart; quyền download bị thu hồi thì từ chối.
+A14. GPT đọc PDF nhiều trang, dẫn đúng trang; scan nhận trạng thái/OCR phù hợp.
+A15. Excel nhiều sheet/large range, dữ liệu ngoài phần đầu vẫn đọc được; formula/cached values phân biệt đúng.
+A16. Ảnh đầu vào được model có vision phân tích bằng nội dung thật.
+A17. Web search và open nguồn thật; citation hỗ trợ câu trả lời; hỏi giá không công bố không bịa giá.
+A18. Project-only không web; dữ liệu private không lộ vào query/nguồn/citation.
+A19. Upload -> parse -> attachment -> model -> citation chạy đủ; mỗi stage có trạng thái thật.
+A20. Chunk/resume/cancel/checksum; limit=10.000.000.000 được kiểm; big-file live chỉ PASS khi chạy thật an toàn.
+A21. Promote chat file vào hồ sơ kiểm quyền, giữ version/provenance và không tự approved.
+A22. History/Markdown/artifacts/core memory lưu đủ, proposal không biến thành decision; hai tab/cross-Project isolation.
+A23. Image generation chỉ PASS khi có engine/tool call/byte kết quả; unavailable không chặn Create Office.
+A24. Sandbox không đọc được secrets, mạng private, filesystem ngoài job; malformed/malicious file không vượt giới hạn.
+A25. Hủy/disconnect/revoke không có late output trái quyền; idempotency/worker restart không ghi trùng.
+A26. Streaming giữ đầy đủ output/citation; response.failed/incomplete/đứt mạng không giả completed.
+A27. Registry chưa có executor không được quảng cáo usable; model không nói “đã tạo” khi thiếu artifact.
+A28. Regression phần SIWC/P1-B/domain trước đây không hỏng; artifact đang phục vụ đúng tree đã test.
+
+Dùng cùng bộ yêu cầu nghiệp vụ trước/sau, cùng model/effort và nguồn khi so sánh chất lượng. Đánh giá độ đúng, đầy đủ, nguồn, layout, sản phẩm và thời gian; không chỉ số từ hoặc số test.
+
+Không gửi dữ liệu khách hàng không cần thiết vào thử nghiệm; fixture phải có nhãn rõ, không xuất hiện như hồ sơ thật. Smoke của CLI riêng không thay AI tool live từ chat.
+
+## 14. CẬP NHẬT BỘ NHỚ /prompt VÀ BÀN GIAO
+
+Cập nhật, không tạo một bộ tài liệu song song mâu thuẫn:
+
+- README.md: E02 hiện hành, Workspace tạm dừng.
+- GALAXY_OS_LONG_TERM_MEMORY.md: quyết định phạm vi và invariant giữ lại.
+- GALAXY_AI_TOOL_ADOPTION_MATRIX.md: capability, engine, lý do chọn/bỏ, version, evidence.
+- GALAXY_AI_PLAN_AND_CHECKPOINT.md: revision mới nối tiếp thực tế, không tự đặt lùi r10.
+- E02_IMPLEMENTATION_PLAN.md hoặc delta plan đúng convention repo, có source/test commands/rollback.
+
+Giữ spec/plan cũ làm lịch sử; mark phần Workspace DEFERRED, không xóa bằng chứng. Không đưa `.env`, token, hồ sơ khách hàng hoặc file nghiệp vụ vào Git.
+
+Báo riêng:
+WORKSPACE_DECOUPLED
+SIWC_CATALOG
+SIWC_MODEL_MATCH
+SIWC_MAX_EFFORT
+SIWC_TOOL_LOOP
+GENERAL_QA_QUALITY
+WEB_SEARCH_AND_CITATIONS
+FILE_UPLOAD_AND_EXTRACTION
+XLSX_CREATE_EDIT
+DOCX_CREATE_EDIT
+PDF_RENDER
+PPTX_CREATE_EDIT
+ARTIFACT_DOWNLOAD
+LARGE_FILE_10GB
+IMAGE_GENERATION / LOCAL_IMAGE_COMPOSITION
+MEMORY_ISOLATION
+SECURITY / REGRESSION / DEPLOYED_RUNTIME.
+
+Mỗi trạng thái có source changes, test, tool/provider trace đã che secret, artifact IDs trong evidence riêng và giới hạn còn lại. Phân biệt requested/accepted/observed khi không có telemetry.
+
+Ghi CODE_SHA, TESTED_TREE, snapshot digest nếu có, deployed artifact và worktree. Hash snapshot không tự là commit SHA. Không ghi PASS dựa trên test cũ hoặc docs formatting.
+
+Bản báo cáo đầu tiên sau implementation cần có tối thiểu một lát chạy thật hoặc blocker cụ thể; không chỉ liệt kê package đã cài. Không xin lại Workspace ID/token/Business account, vì Workspace đã ngoài phạm vi.
+
+BẮT ĐẦU TỪ SOURCE HIỆN TẠI: TÁCH WORKSPACE, KIỂM MODEL/MAX, NỐI CREATE VÀ WEB VÀO SIWC. HOÀN THÀNH TỪNG CHỨC NĂNG CÓ ĐẦU RA THẬT; KHÔNG CÀI CẢ DANH SÁCH GITHUB VÀ KHÔNG XÂY LẠI GALAXY OS.

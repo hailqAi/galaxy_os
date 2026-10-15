@@ -124,7 +124,9 @@ function worksheetSize(
 ) {
   const xml = xmlBytes.toString('utf8');
   let rows = 0;
-  for (const match of xml.matchAll(/<row(?=[\s/>])[^>]*>/g)) {
+  for (const match of xml.matchAll(
+    /<(?:[A-Za-z_][\w.-]*:)?row(?=[\s/>])[^>]*>/g,
+  )) {
     rows++;
     const reference = /\br="(\d+)"/.exec(match[0]);
     if (rows > maximumRows || Number(reference?.[1] ?? rows) > maximumRows)
@@ -133,17 +135,22 @@ function worksheetSize(
       );
   }
   for (const match of xml.matchAll(
-    /<row(?=[\s/>])(?:[^>]*\/>|[\s\S]*?<\/row>)/g,
+    /<((?:[A-Za-z_][\w.-]*:)?row)(?=[\s/>])(?:[^>]*\/>|[\s\S]*?<\/\1>)/g,
   )) {
     let rowBytes = Buffer.byteLength(match[0]);
     for (const cell of match[0].matchAll(
-      /<c(?=[\s/>])(?:[^>]*\/>|[\s\S]*?<\/c>)/g,
+      /<((?:[A-Za-z_][\w.-]*:)?c)(?=[\s/>])(?:[^>]*\/>|[\s\S]*?<\/\1>)/g,
     )) {
       const serializedCellBytes = Buffer.byteLength(cell[0]);
-      const opening = /^<c(?=[\s/>])[^>]*>/.exec(cell[0])?.[0] ?? '';
+      const opening =
+        /^<(?:[A-Za-z_][\w.-]*:)?c(?=[\s/>])[^>]*>/.exec(cell[0])?.[0] ?? '';
       const shared = /\bt=(?:"s"|'s')/.test(opening);
       const index = shared
-        ? Number(/<v>\s*(\d+)\s*<\/v>/.exec(cell[0])?.[1])
+        ? Number(
+            /<(?:[A-Za-z_][\w.-]*:)?v>\s*(\d+)\s*<\/(?:[A-Za-z_][\w.-]*:)?v>/.exec(
+              cell[0],
+            )?.[1],
+          )
         : undefined;
       const valueBytes = shared ? sharedStringBytes[index!] : undefined;
       if (shared && (!Number.isSafeInteger(index) || valueBytes === undefined))
@@ -156,7 +163,9 @@ function worksheetSize(
       throw new BadRequestException('Workbook row data is too large');
   }
   let cells = 0;
-  for (const match of xml.matchAll(/<c(?=[\s/>])[^>]*>/g)) {
+  for (const match of xml.matchAll(
+    /<(?:[A-Za-z_][\w.-]*:)?c(?=[\s/>])[^>]*>/g,
+  )) {
     cells++;
     const reference = /\br="([A-Z]+)(\d+)"/i.exec(match[0]);
     if (reference && Number(reference[2]) > maximumRows)
@@ -173,7 +182,7 @@ function worksheetSize(
 
 function sharedStringSizes(xmlBytes: Buffer) {
   const xml = xmlBytes.toString('utf8');
-  const root = /<sst(?=[\s/>])[^>]*>/.exec(xml)?.[0];
+  const root = /<(?:[A-Za-z_][\w.-]*:)?sst(?=[\s/>])[^>]*>/.exec(xml)?.[0];
   if (!root)
     throw new BadRequestException('Workbook shared strings are invalid');
   const count = /\bcount="(\d+)"/.exec(root)?.[1];
@@ -184,14 +193,15 @@ function sharedStringSizes(xmlBytes: Buffer) {
   )
     throw new BadRequestException('Workbook has too many shared strings');
   const sizes: number[] = [];
-  for (const match of xml.matchAll(/<si(?=[\s/>])/g)) {
+  for (const match of xml.matchAll(/<((?:[A-Za-z_][\w.-]*:)?si)(?=[\s/>])/g)) {
     if (sizes.length >= maximumSharedStrings)
       throw new BadRequestException('Workbook has too many shared strings');
-    const end = xml.indexOf('</si>', match.index);
+    const closing = `</${match[1]}>`;
+    const end = xml.indexOf(closing, match.index);
     if (end < 0)
       throw new BadRequestException('Workbook shared strings are invalid');
     const size = Buffer.byteLength(
-      xml.slice(match.index, end + '</si>'.length),
+      xml.slice(match.index, end + closing.length),
     );
     if (size > maximumSharedStringBytes)
       throw new BadRequestException('Workbook shared string data is too large');

@@ -66,11 +66,15 @@ const approvedRoots = new Set([
   'departments',
   'health',
   'me',
+  'mcp-auth',
+  'mcp-connection',
   'organization',
   'permissions',
   'ready',
   'roles',
   'system',
+  'workspace-agent-mcp',
+  'workspace-agent-auth',
   'users',
   'uploads',
 ]);
@@ -90,6 +94,7 @@ const responseHeaders = [
   'location',
   'set-cookie',
   'upload-offset',
+  'www-authenticate',
 ] as const;
 
 async function forward(
@@ -103,9 +108,22 @@ async function forward(
   if (!requestOrigin)
     return Response.json({ message: 'Invalid Host' }, { status: 400 });
   const origin = request.headers.get('origin');
-  if (!['GET', 'HEAD'].includes(request.method) && origin !== requestOrigin)
-    return Response.json({ message: 'Forbidden' }, { status: 403 });
   const path = (await params).path;
+  const mcp = path[0] === 'workspace-agent-mcp';
+  const tokenExchange =
+    path.length === 2 &&
+    path[0] === 'workspace-agent-auth' &&
+    path[1] === 'token';
+  const connectorRequest = mcp || tokenExchange;
+  // Unauthenticated MCP initialization must reach the server's OAuth challenge.
+  const serverConnectorRequest = origin === null && (tokenExchange || mcp);
+  if (
+    (origin && origin !== requestOrigin) ||
+    (!['GET', 'HEAD'].includes(request.method) &&
+      origin !== requestOrigin &&
+      !serverConnectorRequest)
+  )
+    return Response.json({ message: 'Forbidden' }, { status: 403 });
   if (
     !path.length ||
     !approvedRoots.has(path[0]!) ||
@@ -125,6 +143,18 @@ async function forward(
   )
     return Response.json({ message: 'Not found' }, { status: 404 });
 
+  const previewRequest =
+    path.length === 7 &&
+    path[0] === 'project-chat' &&
+    path[1] === 'projects' &&
+    path[3] === 'ai' &&
+    path[4] === 'files' &&
+    path[6] === 'preview';
+  const uploadPartRequest =
+    request.method === 'POST' &&
+    path.length === 3 &&
+    path[0] === 'uploads' &&
+    path[2] === 'parts';
   const upstream = new URL(`${apiBaseUrl}/${path.join('/')}`);
   upstream.search = request.nextUrl.search;
   const headers = new Headers();
@@ -136,8 +166,14 @@ async function forward(
   headers.set('x-request-id', identity.requestId);
   for (const name of requestHeaders) {
     const value = request.headers.get(name);
-    if (value) headers.set(name, value);
+    if (value && !(connectorRequest && name === 'cookie'))
+      headers.set(name, value);
   }
+  if (mcp)
+    for (const name of ['authorization', 'mcp-protocol-version']) {
+      const value = request.headers.get(name);
+      if (value) headers.set(name, value);
+    }
   if (
     process.env.TRUST_PROXY === 'true' &&
     requestOrigin.startsWith('https://')
@@ -157,6 +193,9 @@ async function forward(
       body: hasBody ? request.body : undefined,
       cache: 'no-store',
       redirect: 'manual',
+      ...(previewRequest || uploadPartRequest
+        ? { signal: request.signal }
+        : {}),
     };
     if (hasBody) options.duplex = 'half';
     const upstreamResponse = await fetch(upstream, options);
@@ -170,6 +209,10 @@ async function forward(
       if (name === 'set-cookie') continue;
       const value = upstreamResponse.headers.get(name);
       if (value) outgoingHeaders.set(name, value);
+    }
+    if (previewRequest) {
+      const csp = upstreamResponse.headers.get('content-security-policy');
+      if (csp) outgoingHeaders.set('content-security-policy', csp);
     }
     for (const cookie of upstreamResponse.headers.getSetCookie()) {
       const name = cookie.slice(0, cookie.indexOf('='));

@@ -10,12 +10,15 @@ export function ProjectAiWorkspace({ projectId }: { projectId: string }) {
   const query = useSearchParams(),
     ai = useAiSurfaces();
   const conversationId = query.get('ai') ?? undefined;
-  const [resolved, setResolved] = useState<{
-    id: string;
-    scope: string;
-    context?: AiContext;
+  const [metadata, setMetadata] = useState<{
+    projectId: string;
+    conversationId: string;
+    attempt: number;
+    result?: { id: string; scope: string; context?: AiContext };
+    error?: string;
   }>();
   const [error, setError] = useState('');
+  const [metadataAttempt, setMetadataAttempt] = useState(0);
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [search, setSearch] = useState('');
   const [browse, setBrowse] = useState(false);
@@ -48,19 +51,40 @@ export function ProjectAiWorkspace({ projectId }: { projectId: string }) {
     if (!conversationId) return;
     const controller = new AbortController();
     void api<{ id: string; scope: string; context?: AiContext }>(
-      `/project-chat/projects/${projectId}/ai/conversations/${conversationId}`,
+      `/project-chat/projects/${projectId}/ai/conversations/${conversationId}/metadata`,
       { signal: controller.signal },
     )
       .then((result) => {
-        if (!controller.signal.aborted) setResolved(result);
+        if (!controller.signal.aborted)
+          setMetadata({
+            projectId,
+            conversationId,
+            attempt: metadataAttempt,
+            result,
+          });
       })
       .catch(() => {
         if (!controller.signal.aborted)
-          setError('Không mở được hội thoại hoặc quyền đã thay đổi.');
+          setMetadata({
+            projectId,
+            conversationId,
+            attempt: metadataAttempt,
+            error: 'Không mở được hội thoại hoặc quyền đã thay đổi.',
+          });
       });
     return () => controller.abort();
-  }, [projectId, conversationId]);
-  const history = resolved?.id === conversationId ? resolved : undefined;
+  }, [projectId, conversationId, metadataAttempt]);
+  const currentMetadata =
+    metadata?.projectId === projectId &&
+    metadata?.conversationId === conversationId &&
+    metadata?.attempt === metadataAttempt
+      ? metadata
+      : undefined;
+  const history =
+    currentMetadata?.result?.id === conversationId
+      ? currentMetadata?.result
+      : undefined;
+  const historyError = currentMetadata?.error;
   const scope = history?.scope ?? query.get('scope') ?? 'ALL';
   const context = history?.context ?? initialContext;
   return (
@@ -98,6 +122,17 @@ export function ProjectAiWorkspace({ projectId }: { projectId: string }) {
       </aside>
       {(error || ai?.access?.error) && (
         <p role="alert">{error || ai?.access?.error}</p>
+      )}
+      {historyError && (
+        <div role="alert">
+          <p>{historyError}</p>
+          <button
+            type="button"
+            onClick={() => setMetadataAttempt((value) => value + 1)}
+          >
+            Thử tải lại hội thoại
+          </button>
+        </div>
       )}
       {(!conversationId || history) && (
         <AiMount

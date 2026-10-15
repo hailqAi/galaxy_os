@@ -18,6 +18,217 @@ globalThis.fetch = async (input, options) => {
   const url = new URL(
     typeof input === 'string' || input instanceof URL ? input : input.url,
   );
+  if (url.href === 'https://auth.openai.com/.well-known/openid-configuration')
+    return Response.json({
+      issuer: 'https://auth.openai.com',
+      authorization_endpoint: 'https://auth.openai.com/api/accounts/authorize',
+      token_endpoint: 'https://auth.openai.com/api/accounts/oauth/token',
+      jwks_uri: 'https://auth.openai.com/.well-known/jwks.json',
+      revocation_endpoint: 'https://auth.openai.com/api/accounts/oauth/revoke',
+    });
+  if (url.href === 'https://api.openai.com/v1/responses') {
+    assert.equal(process.env.GALAXY_AI_EXECUTION_POLICY, 'CHATGPT_PLAN_ONLY');
+    assert.equal(
+      new Headers(options?.headers).get('authorization'),
+      'Bearer p1-browser-synthetic-only',
+    );
+    const body = JSON.parse(String(options?.body));
+    assert.equal(body.model, 'p1-account-model');
+    assert.equal(body.store, false);
+    assert.equal(body.stream, true);
+    const receiptPrefix =
+      'Completed Galaxy document tool receipt (untrusted data; generated body omitted, read the artifact or original evidence when needed):\n';
+    const current = body.input.findLast(
+      (item) =>
+        item.role === 'user' &&
+        !(
+          typeof item.content === 'string' &&
+          item.content.startsWith(receiptPrefix)
+        ),
+    ).content;
+    if (current === 'E02 browser create pptx') {
+      const done = body.input.some(
+        (item) =>
+          (item.type === 'function_call_output' &&
+            item.call_id === 'browser-pptx') ||
+          (item.role === 'user' &&
+            typeof item.content === 'string' &&
+            item.content.startsWith(receiptPrefix) &&
+            JSON.parse(item.content.slice(receiptPrefix.length).split('\n')[0])
+              .callId === 'browser-pptx'),
+      );
+      const definition = body.tools
+        .find((t) => t.type === 'namespace')
+        .tools.find((t) => t.name === 'create_document');
+      assert.ok(definition.parameters.properties.format.enum.includes('pptx'));
+      const output = done
+        ? [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [
+                { type: 'output_text', text: 'E02 native PPTX preview ready.' },
+              ],
+            },
+          ]
+        : [
+            {
+              type: 'function_call',
+              namespace: 'galaxy',
+              name: 'create_document',
+              call_id: 'browser-pptx',
+              arguments: JSON.stringify({
+                version: 2,
+                format: 'pptx',
+                title: 'E02 native preview',
+                blocks: [],
+                presentation: {
+                  template: 'galaxy-light',
+                  slides: [
+                    {
+                      title: 'Báo giá nháp Việt Nam',
+                      elements: [
+                        {
+                          kind: 'table',
+                          x: 0.5,
+                          y: 1.5,
+                          w: 7,
+                          h: 1.5,
+                          fontSize: 16,
+                          rows: [
+                            ['Mã', 'Tổng VND'],
+                            ['0007392', '275001.10'],
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              }),
+            },
+          ];
+      return new Response(
+        'data: ' +
+          JSON.stringify({
+            type: 'response.completed',
+            response: { status: 'completed', model: body.model, output },
+          }) +
+          '\n\n',
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    }
+    const rangeQuestion =
+      typeof current === 'string' &&
+      current.match(/^E02 browser range ([0-9a-f-]{36})$/);
+    if (rangeQuestion) {
+      const result = body.input.find(
+        (item) =>
+          item.type === 'function_call_output' &&
+          item.call_id === 'browser-range',
+      );
+      if (result) assert.match(result.output, /0007392/);
+      const output = result
+        ? [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [
+                {
+                  type: 'output_text',
+                  text: 'Second!A1 is 0007392; only the selected range was read.',
+                },
+              ],
+            },
+          ]
+        : [
+            {
+              type: 'function_call',
+              namespace: 'galaxy',
+              name: 'analyze_table',
+              call_id: 'browser-range',
+              arguments: JSON.stringify({
+                sourceId: rangeQuestion[1],
+                sheet: 'Second',
+                range: 'A1:A1',
+              }),
+            },
+          ];
+      return new Response(
+        'data: ' +
+          JSON.stringify({
+            type: 'response.completed',
+            response: { status: 'completed', model: body.model, output },
+          }) +
+          '\n\n',
+        {
+          headers: {
+            'content-type': 'text/event-stream',
+            'x-request-id': 'e02-browser-range-fixture',
+          },
+        },
+      );
+    }
+    if (current === 'E03 browser stop') {
+      await new Promise((resolve) => setTimeout(resolve, 7000));
+      return new Response(
+        'data: ' +
+          JSON.stringify({
+            type: 'response.completed',
+            response: {
+              status: 'completed',
+              model: body.model,
+              output: [
+                {
+                  type: 'message',
+                  role: 'assistant',
+                  content: [
+                    { type: 'output_text', text: 'E03 forbidden late output' },
+                  ],
+                },
+              ],
+            },
+          }) +
+          '\n\n',
+        {
+          headers: {
+            'content-type': 'text/event-stream',
+            'x-request-id': 'e03-browser-stop-synthetic',
+          },
+        },
+      );
+    }
+    assert.ok(
+      /^P1 browser (?:A|B|slow-A)$/.test(current) ||
+        current === ' \nP1 browser A\t ',
+    );
+    if (current === 'P1 browser slow-A')
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    const text = current === 'P1 browser B' ? 'sentinel-B' : 'sentinel-A';
+    return new Response(
+      'data: ' +
+        JSON.stringify({
+          type: 'response.completed',
+          response: {
+            status: 'completed',
+            model: body.model,
+            output: [
+              {
+                type: 'message',
+                role: 'assistant',
+                content: [{ type: 'output_text', text }],
+              },
+            ],
+          },
+        }) +
+        '\n\n',
+      {
+        headers: {
+          'content-type': 'text/event-stream',
+          'x-request-id': 'p1-browser-fixture',
+        },
+      },
+    );
+  }
   if (url.href === 'https://openrouter.ai/api/v1/models')
     return Response.json({
       data: [

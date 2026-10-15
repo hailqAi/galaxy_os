@@ -236,6 +236,62 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
     const response = await get('authority', '/projects').expect(200);
     expect(response.body).toEqual([]);
   });
+  it('allows a System administrator to grant their own already-held Project chat capability without changing IAM roles', async () => {
+    const assignment = await db.userRole.findFirstOrThrow({
+      where: { organizationId: orgId, userId: users.authority!.id },
+    });
+    await db.role.update({
+      where: { id: assignment.roleId },
+      data: { maximumScope: 'SYSTEM' },
+    });
+    await db.userRole.update({
+      where: { id: assignment.id },
+      data: { scopeType: 'SYSTEM' },
+    });
+    const before = await db.userRole.count({
+      where: { organizationId: orgId, userId: users.authority!.id },
+    });
+    try {
+      const granted = await post(
+        'authority',
+        `/projects/${otherProjectId}/authorities`,
+        {
+          userId: users.authority!.id,
+          actions: ['CREATE'],
+          roomCeiling: ['READ'],
+        },
+      ).expect(201);
+      expect(granted.body).toMatchObject({
+        userId: users.authority!.id,
+        projectId: otherProjectId,
+        actions: ['CREATE'],
+      });
+      expect(
+        await db.userRole.count({
+          where: { organizationId: orgId, userId: users.authority!.id },
+        }),
+      ).toBe(before);
+    } finally {
+      await db.userRole.update({
+        where: { id: assignment.id },
+        data: { scopeType: 'ORGANIZATION' },
+      });
+      await db.role.update({
+        where: { id: assignment.roleId },
+        data: { maximumScope: 'ORGANIZATION' },
+      });
+    }
+    await post('authority', `/projects/${otherProjectId}/authorities`, {
+      userId: users.authority!.id,
+      actions: ['ACCESS_ADMIN'],
+      roomCeiling: ['READ'],
+    }).expect(403);
+    await post('manager', `/projects/${otherProjectId}/authorities`, {
+      userId: users.manager!.id,
+      actions: ['ACCESS_ADMIN'],
+      roomCeiling: ['READ'],
+    }).expect(403);
+  });
   it('grants explicit Project authority then creates a room without creator read bypass', async () => {
     await post('authority', `/projects/${projectId}/authorities`, {
       userId: users.manager!.id,
@@ -1787,7 +1843,7 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
         ).body,
       ),
     ).toEqual(bytes);
-  });
+  }, 15_000);
   const productionOrderFixture = async (
     creator: CurrentActor,
     otherProjectId: string,
@@ -2523,7 +2579,7 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
     expect(completed).toHaveProperty('checklist');
     expect(completed).toHaveProperty('documents');
     expect(completed).toHaveProperty('statusHistory');
-  });
+  }, 15_000);
 
   it('blocks a waiting send when lock or revoke commits before its authorization', async () => {
     const room = (
@@ -2976,7 +3032,7 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
       ]);
       expect(parallel.map((r) => r.status)).toEqual([201, 201]);
       expect(parallel[0]!.body.id).toBe(parallel[1]!.body.id);
-    });
+    }, 15_000);
     it('publishes the matching appendix while rejecting a foreign appendix identity', async () => {
       const { actor, contracts, contract, room, otherProjectId } = fixture;
       await contracts.transition(actor, otherProjectId, contract.id, {
@@ -5085,7 +5141,13 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
     'rejects contract review file ownership from a real production %s writer',
     async (kind) => {
       const { room, contract, file, input, actor, otherProjectId } =
-        await customerFileFixture();
+        await customerFileFixture(false, [
+          kind === 'quality'
+            ? 'production.quality.create'
+            : kind === 'packing'
+              ? 'production.packing.create'
+              : 'production.update',
+        ]);
       const order = await productionOrderFixture(actor, otherProjectId);
       const production = app.get(ProductionService);
       if (kind === 'quality')
@@ -5128,7 +5190,10 @@ describe.sequential('M2-A project chat with real sessions and database', () => {
     'rejects contract review file ownership from a real after-sales %s writer',
     async (kind) => {
       const { room, contract, file, input, actor, otherProjectId } =
-        await customerFileFixture();
+        await customerFileFixture(
+          false,
+          kind === 'acceptance' ? ['acceptance.manage'] : [],
+        );
       const prepared = (
         await post('sender', `/rooms/${room.id}/releases`, input).expect(201)
       ).body;

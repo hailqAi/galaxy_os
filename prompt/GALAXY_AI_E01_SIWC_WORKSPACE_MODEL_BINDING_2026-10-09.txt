@@ -1,0 +1,272 @@
+# GALAXY AI — E01: SIWC ĐẦY ĐỦ NĂNG LỰC + WORKSPACE AGENTS + RÀNG BUỘC MODEL
+
+Ngày: 09/10/2026.
+Đích nhận: Codex CLI trong repository Galaxy OS.
+Thư mục tài liệu chuẩn: /home/galaxy_os/prompt.
+Chế độ: IMPLEMENT_AND_VERIFY cho phạm vi E01 dưới đây.
+Kế thừa: GALAXY-AI-ARCH-20261009-v1.0 và các quyết định bổ sung đã lưu.
+
+## 0. YÊU CẦU THỰC THI VÀ GIỚI HẠN
+
+Tôi chuyển từ RECORD_AND_PLAN sang triển khai E01: bỏ các chặn ứng dụng không cần thiết trên SIWC và xây cầu nối Galaxy Project Chat → Workspace Agent → kết quả trở về đúng chat.
+
+Tôi chọn thực thi trực tiếp bằng Codex CLI trong phiên hiện tại. Tái sử dụng spec/plan P1 và approval còn hiệu lực; không hỏi lại mục tiêu hoặc phương thức đã chọn. Với phần kiến trúc mới còn gate bắt buộc, chỉ hoàn tất và trình đúng phần thiếu; không sửa AGENTS.md để né gate, không tự nhận tài liệu chưa tồn tại đã được duyệt. Phần mới đang chờ không chặn công việc độc lập đã được duyệt.
+
+Cho phép chuẩn bị và triển khai code, kiểm thử, migration bổ sung tương thích và phát hành đúng cơ chế hiện hữu sau các gate an toàn. Cho phép chuẩn bị một hoặc số tối thiểu Workspace Agent pilot riêng; chỉ publish khi cấu hình model, quyền, công cụ và đích nhận kết quả đã được kiểm tra. Không sửa agent khác hoặc chia sẻ toàn tổ chức. Tài khoản, consent, credential và ngân sách phải thực sự có; không tự mua gói/credit hay dùng dữ liệu thật trước khi đủ quyền.
+
+“Mở full” = khai thác đầy đủ capability hợp lệ, không khóa Showroom, không whitelist chủ đề, không cắt history tám lượt, không cấm file/context một cách tổng quát. Không có nghĩa bỏ IAM, ACL, source policy, giới hạn an toàn/hạn mức hoặc điều kiện nhà cung cấp.
+
+Không thay OAuth/callback/refresh SIWC đã hoạt động. Remote OAuth vẫn ngoài phạm vi. Auth riêng cho Workspace/MCP được thiết kế riêng, không sửa đăng nhập Galaxy để đi đường tắt. Bốn provider API-key đang paused tiếp tục paused.
+
+Kết quả bắt buộc: SIWC hoạt động ở Project được phép; một yêu cầu từ Galaxy đi Workspace và có câu trả lời thật quay lại; lựa chọn model không bị đổi ngầm. Không coi trigger accepted là đã hoàn thành.
+
+## 1. ĐỌC CHECKPOINT VÀ BẮT ĐẦU ĐÚNG CHỖ
+
+Đọc /home/galaxy_os/prompt/README.md, GALAXY_OS_LONG_TERM_MEMORY.md, GALAXY_AI_PLAN_AND_CHECKPOINT.md và Master v1.0 nếu có. Đọc AGENTS.md, spec/plan/handoff mới nhất và source liên quan.
+
+Root lịch sử: /home/galaxy_os.
+Worktree lịch sử: /home/galaxy_os/.worktrees/m2-a-20260928.
+Phải xác minh đường dẫn và runtime hiện tại, không mặc định vẫn như báo cáo cũ.
+
+Các lỗi từng được báo: pilot chỉ Showroom, SIWC chỉ task_list, history tám lượt, từ chối file/context. Kiểm tra đã được sửa chưa; không tái làm phần đã đạt. Tái sử dụng provider, orchestrator, tool registry, Project/Task/File domain, queue, storage và release hiện có.
+
+Kiểm HEAD/diff/untracked/schema/artifact và bảo toàn thay đổi dở. Không reset/clean/stash tự động, không git add toàn repo, không mở stack/DB thứ hai.
+
+Ghi task map ngắn có file/function/test thật. Không quét hàng trăm file chỉ để chứng minh chưa viết code. Sau bước đối chiếu tối thiểu, bắt đầu failing test của lỗi đã được duyệt.
+
+## 2. MODEL ĐƯỢC CHỌN LÀ CAM KẾT THỰC THI
+
+Yêu cầu người dùng: model chọn trên Galaxy phải là model chủ lực thực hiện trên nhánh Workspace. Không đổi model, effort hoặc route âm thầm.
+
+Tách ba dữ liệu:
+- requestedModel: lựa chọn của người dùng.
+- configuredModel: model của cấu hình provider/agent đã được xác minh.
+- observedModel: model được provider báo cho run thực tế, nếu có; không có thì null.
+
+Không điền observedModel từ requestedModel. Không hỏi AI “bạn là model gì” làm bằng chứng. Nhãn giao diện, tên agent hoặc chuỗi tên model trong prompt không chứng minh model thực.
+
+### 2.1. SIWC
+
+Lấy catalog của đúng tài khoản kết nối. Hiển thị tên từ catalog, gửi đúng slug. Chọn mặc định chất lượng cao nhất phù hợp sau đánh giá capability; không xếp hạng bằng thứ tự chữ hoặc số trong tên.
+
+Giữ model/effort người dùng chọn nếu hợp lệ. Nếu không được cấp, hết quota hoặc không hỗ trợ công việc, báo đúng lỗi, không fallback. Effort chỉ gửi khi schema/model cho phép; không tự suy ra high/xhigh có ở mọi model.
+
+### 2.2. Workspace: bắt buộc kiểm hợp đồng, không bịa model parameter
+
+Schema trigger công khai đang mô tả input và conversation_key, không có tham số model mỗi request. Đọc lại tài liệu hiện hành trước khi viết adapter. Không nhầm ChatGPT Workspace Agents với OpenAI Agents API/Agents SDK.
+
+Nếu có API chính thức mới hỗ trợ model mỗi run, chỉ dùng khi schema và phép thử xác nhận. Nếu vẫn chọn model ở cấu hình agent, dùng mapping model → published agent/API channel tương ứng.
+
+Đề xuất WorkspaceModelBinding có workspace/credential scope, requested model, published agent/channel, model/effort đã cấu hình, config revision/digest nếu lấy được, capability, thời điểm và nguồn kiểm chứng. Tái sử dụng schema phù hợp; không bắt tạo bảng trùng.
+
+Nếu Codex có plugin Workspace Agents chính thức, dùng để đọc draft VÀ published configuration. Kiểm plugin/tool thật đang có; không bịa lệnh. Draft đổi model chưa publish không có nghĩa agent live đã đổi.
+
+Chỉ map khi model identity khớp qua căn cứ chính thức. Display name giống nhau hoặc cùng “họ GPT” chưa đủ; alias/snapshot phải có mapping được kiểm chứng.
+
+Không chọn Auto/Default để giả đảm bảo một model cụ thể. Không dùng chung một agent rồi republish đổi model trước mỗi tin nhắn: hai người/hai tab có thể chạy sai model. Dùng binding đã phát hành ổn định, không tự tạo hàng loạt agent trước khi có nhu cầu.
+
+Model picker của SIWC không bị thu hẹp chỉ vì Workspace thiếu mapping. Trong chế độ Workspace, cho biết model nào đã sẵn sàng, chưa map, hoặc không thể ràng buộc; không cho gửi rồi chạy bằng model khác.
+
+### 2.3. Mức bằng chứng và xử lý giới hạn
+
+Phân biệt CONFIG_VERIFIED với RUN_MODEL_VERIFIED. Nếu provider không báo model từng run, ghi rõ runtime chưa được quan sát; không nâng mức bằng chứng.
+
+Nếu có thể ràng buộc bằng published configuration và hợp đồng provider, thực thi theo binding và công bố đúng mức xác minh. Nếu provider chỉ cho Auto, có thể tự đổi model hoặc không có cơ chế đảm bảo yêu cầu, giữ strict Workspace route BLOCKED bằng MODEL_BINDING_UNSUPPORTED/UNVERIFIED. Hoàn thiện connector và SIWC độc lập; không hứa chỉnh frontend sẽ giải quyết giới hạn provider.
+
+Không tự nới yêu cầu “đúng model” để báo PASS. Báo riêng cấu hình đúng và model thực quan sát được. Nếu người dùng muốn thử đường không đảm bảo exact model, đó là thay đổi yêu cầu cần xác nhận riêng.
+
+Đổi model trong composer chỉ tác động lượt mới. Mỗi job giữ snapshot model, route, binding và effort; kết quả cũ không được đổi nhãn theo selection mới. Phát hiện drift cấu hình thì vô hiệu mapping liên quan, không tự cập nhật thành model khác.
+
+Model chủ lực khác engine của công cụ tạo ảnh/render; ghi riêng khi có thông tin, không nói mọi công cụ nội bộ đều chạy cùng GPT.
+
+## 3. MỞ ĐẦY ĐỦ SIWC THEO CAPABILITY THẬT
+
+Sửa đúng lớp chặn pilot; giữ entitlement tài khoản và quyền actor/Project/source. Không tự biến owner connection thành quyền dùng chung cho nhân viên.
+
+Cho phép hỏi đáp tổng quát, kỹ thuật, lập trình, nghiên cứu, viết và phân tích; thiếu dữ liệu Project không phải lý do từ chối câu hỏi kiến thức chung.
+
+Loại bỏ prompt ép trả lời quá ngắn, chỉ nói về Galaxy hoặc không dùng kiến thức bên ngoài. Không tạo bộ lọc “ngoài nghiệp vụ” mới.
+
+Giữ nguyên câu hỏi và message revision, không cho model rẻ tóm tắt thay thế. Bổ sung context riêng: Project, memory được phép, hội thoại liên quan, tài liệu và source version. Test yêu cầu nguyên gốc sau serialize/deserialize không mất ký tự hoặc điều kiện.
+
+Thay giới hạn tám lượt bằng context budget theo model, recent turns + retrieval + summary có nguồn. Không gửi toàn bộ Project hoặc tóm tắt mất yêu cầu bắt buộc. Project/conversation identity do backend xác thực.
+
+Nối read/draft tools có executor và ACL thật vào SIWC. Không truyền mọi tool/write action chỉ vì registry có tên. Danh mục lớn cần chọn/discover công cụ theo cơ chế route hỗ trợ và ngân sách context, không ép gửi tất cả.
+
+Đọc hợp đồng SIWC trước khi tái sử dụng Responses adapter: store=false, stream=true, input array; instructions/developer phù hợp; history do Galaxy quản lý. Không bật hosted tools/fields bị route từ chối. Function/custom tools qua namespace hoặc cơ chế được hỗ trợ, thực thi rồi đưa kết quả lại model.
+
+Kiểm web search thật với model/tài khoản. Có kết quả và citation mới ghi LIVE_VERIFIED; không hỗ trợ thì ghi lỗi chính xác và tiếp tục chat thường. Không đổi provider-key.
+
+Không chặn file/ảnh toàn bộ: nhận định dạng model/route hỗ trợ. Giữ original tại Galaxy; truyền đúng giới hạn và ghi original/derivative/excerpts thực đã gửi. Không hứa đưa nguyên 10 GB vào một request. E01 tái sử dụng uploader/parser, không chờ xây mọi parser mới được mở SIWC.
+
+Giữ câu trả lời đầy đủ, nguồn và trạng thái response.completed. Error/incomplete/stream mất kết nối không báo hoàn thành. Không thêm bước viết lại bằng model khác mặc định.
+
+## 4. KHỞI TẠO KẾT NỐI WORKSPACE RIÊNG
+
+Tạo phần quản trị Workspace bên cạnh SIWC, không thay trang đăng nhập hiện tại.
+
+Kiểm thật workspace entitlement, quyền tạo/publish/run, model/effort, tool và usage. Token Workspace được tạo qua Admin Access tokens với scope phù hợp; đây không phải token SIWC hay Platform API key.
+
+UI quản trị nhận credential bằng kênh an toàn, lưu mã hóa phía backend, trả masked metadata. Không xin token/mật khẩu/OTP trong chat hoặc log. Secret không nằm trong NEXT_PUBLIC, browser storage hoặc Git. Không probe credential bằng một API không thuộc scope được cấp.
+
+Nếu thiếu quyền tạo token, cấu hình app hoặc consent: hoàn thành code/setup packet trước, rồi hướng dẫn đúng thao tác cần người dùng thực hiện. Không coi login SIWC đã đủ điều kiện Workspace.
+
+Dùng plugin quản trị Workspace trong Codex nếu thực sự có; nếu thiếu thì phân biệt khả năng tạo draft, publish, preview/run và lấy response. Không coi plugin builder là runtime executor.
+
+Agent pilot chỉ có scope tối thiểu để đọc job/source được cấp và nộp bản nháp vào Galaxy. Không gắn Gmail/Drive hoặc kho Project rộng chỉ để thử kết nối. Không tự mở app write approvals toàn cục.
+
+Workspace có thể có conversation phía ChatGPT; không hứa phiên ẩn. Dùng dữ liệu tổng hợp vô hại cho probe; xác minh người dùng chấp nhận visibility/retention trước khi chuyển dữ liệu Project thật.
+
+## 5. XÂY ĐƯỜNG NHẬN KẾT QUẢ TRƯỚC KHI GỌI LIVE
+
+Triển khai Galaxy-owned result destination/MCP theo khả năng platform; không giả định trigger trả answer hoặc webhook tự tồn tại.
+
+Tái sử dụng public HTTPS os.galaxycentre.vn và cơ chế tích hợp hợp lệ. Chỉ mở endpoint cần cho connector, không public API nội bộ, database, Redis hoặc CDP. Giữ auth riêng của tích hợp, không sửa SIWC callback.
+
+Các hợp đồng logic, đặt tên theo convention hiện có:
+- get_job_context(jobId): nội dung nguyên gốc và context manifest được phép.
+- read_job_source(jobId, sourceRef, range): phần nguồn được phép.
+- submit_job_result(jobId, result): nộp văn bản/nguồn/tệp đã đăng ký.
+- upload/finalize artifact: chỉ thêm khi thực sự có đường chuyển byte hợp lệ.
+
+Một jobId/correlation ID trong prompt KHÔNG phải authorization. Không chấp nhận actorId/projectId do model khai báo để cấp quyền. Principal connector phải được backend ánh xạ tới đúng integration và phạm vi job/Project được cấp.
+
+Không dùng một credential rộng có thể đọc mọi job rồi chỉ dựa vào prompt nhắc đừng đọc chéo. Nếu chưa có per-job authorization đáng tin cậy, giới hạn pilot theo phạm vi tách biệt và chưa bật multi-Project Workspace. SIWC đa Project vẫn tiếp tục.
+
+Input/output tool phải kiểm schema, độ lớn, quyền hiện hành, job revision, replay/idempotency và trạng thái cancel/revoke. Không nhúng access token hoặc bearer download credential trong prompt.
+
+Result envelope tối thiểu: answerMarkdown, sourceRefs, warnings, artifactRefs, memoryProposals và contractVersion. Job/model/Project/actor thật được server gắn, không tin self-report của agent.
+
+Tệp phải được đưa về storage Galaxy bằng luồng được hỗ trợ, scan/kiểm MIME/hash và cấp artifactId. Không coi sandbox path, URL bất kỳ hoặc chuỗi base64 trong câu trả lời là đã chuyển tệp. Chống SSRF, không fetch tùy ý link do agent đưa.
+
+Đợt đầu bắt buộc nhận văn bản; file/ảnh phải khai báo capability riêng. Không hứa video hoặc mọi định dạng. Chỉ báo FILE_ROUNDTRIP_PASS khi đã nhận byte, đọc/preview được và tải lại sau reload.
+
+## 6. DISPATCHER BẤT ĐỒNG BỘ, PHIÊN VÀ ĐỘ TIN CẬY
+
+Từ Galaxy Chat, backend tạo job bền vững trước khi gọi provider. Giữ actor/tenant/Project/conversation/message revision, câu hỏi gốc/hash, context manifest, requested model/effort, binding snapshot, credential revision và idempotency key.
+
+Worker/queue không phụ thuộc tab Chrome hay process phiên Codex. Không dùng /tmp làm kho checkpoint cuối.
+
+Hợp đồng trigger cần đối chiếu hiện hành:
+POST https://api.chatgpt.com/v1/workspace_agents/{agtch_id}/trigger
+Body: {"input":"...","conversation_key":"..."}
+Idempotency-Key giữ nguyên khi retry cùng sự kiện.
+
+Không thêm model/conversation/history/file fields không có trong schema. Gói câu hỏi và context trong input theo cấu trúc rõ; nguồn lớn đọc qua tool được cấp.
+
+202 = accepted, không phải câu trả lời. Nếu beta workspace_agent_runs=v1 được hỗ trợ, lưu agent_trigger_run_id và poll đúng endpoint; không có beta thì chờ output destination với timeout/reconciliation. Polling completed không đồng nghĩa đã nhận đủ đầu ra.
+
+conversation_key do server tạo, chứa hoặc ánh xạ scope tenant/Project/conversation/visibility/model-binding/session epoch. Không dùng chung khóa giữa Project hay hai miền quyền. Thay model/binding hoặc quyền làm context cũ không an toàn thì tạo epoch mới với context hợp lệ.
+
+Không gắn file hoặc bật memory Workspace dùng chung cho nhiều Project nếu chưa chứng minh isolation. Với một conversation, tuần tự hóa lượt có phụ thuộc; không dùng timestamp duy nhất để quyết định thứ tự.
+
+State nội bộ phân biệt: PREPARED, QUEUED, RUNNING, WAITING_APPROVAL, RESULT_RECEIVED, VALIDATING, COMPLETED, FAILED, CANCELLED, TIMED_OUT; thêm trạng thái cần thiết khi timeout không rõ provider đã nhận. Không bịa tiến độ không quan sát được.
+
+Retry có giới hạn/backoff. Timeout sau POST phải reconcile với cùng idempotency key, không tạo job mới mù. Chấp nhận callback đến trước poll bằng state transition hợp lệ. Kết quả trùng không tạo hai message hoặc hai tệp.
+
+Cancel cục bộ phải chặn output mới; không báo provider đã hủy nếu chưa có cơ chế xác nhận. Output đến muộn đưa quarantine/không công bố; quyền phải kiểm lại khi nhận và khi đọc.
+
+## 7. GALAXY CHAT LÀ NƠI ĐIỀU KHIỂN
+
+Giao diện có đường xử lý: Tự động / SIWC trực tiếp / Workspace Agent.
+
+Model picker giữ lựa chọn người dùng. Chế độ Workspace chỉ gửi khi có binding khả dụng; thiếu mapping phải giải thích rõ. Chế độ SIWC không phụ thuộc Workspace có sẵn hay không.
+
+Trong Auto, yêu cầu rõ như tìm web/tạo tệp cần kiểm capability thật. Không âm thầm đổi model hoặc phát sinh usage Workspace ngoài ngân sách. Nếu không có nhánh đáp ứng, báo khả năng còn thiếu, không giả câu trả lời bằng mô tả công cụ.
+
+Không bắt gọi SIWC chỉ để viết lại một yêu cầu Workspace đã đủ rõ. Nếu SIWC đề xuất delegate, policy backend vẫn kiểm selected model, source, entitlement và budget.
+
+Một job có thẻ ngay trong chat: nhánh, model requested/configured/observed theo mức bằng chứng, trạng thái, nguồn/tệp và lỗi có thể xử lý. Refresh trang vẫn thấy job và kết quả. Lượt chạy ở Project A trả về A dù người dùng chuyển sang B.
+
+Workspace nộp nội dung cuối → Galaxy kiểm tra → hiển thị trực tiếp, không bắt SIWC tóm tắt lại. Markdown được sanitize, citation và link file được kiểm tra; dữ liệu nhạy cảm không được hiển thị trái quyền.
+
+Model change chỉ áp dụng lượt mới. Không đổi nhãn của message đã chạy.
+
+## 8. LƯU ĐẦY ĐỦ VÀ MEMORY TỐI THIỂU
+
+Giữ nguyên câu hỏi, câu trả lời công khai đầy đủ, nguồn, route/model evidence, ảnh/tệp và trạng thái. Tạo Markdown snapshot có nguồn gốc và version, liên kết original/artifact.
+
+Không lưu token, raw credential hoặc hidden chain-of-thought vào memory/Git. Các encrypted continuation items chỉ bảo quản theo API và scope hợp lệ nếu đã hỗ trợ.
+
+Tái sử dụng memory P1 nếu có. Nếu chưa có, lưu history/context + memory proposal trong storage có ACL, không tuyên bố long-term memory đã hoàn thiện. Không để việc chọn Supermemory/TencentDB trì hoãn bridge.
+
+Memory proposal có source, visibility, version và trạng thái; không tự thành shared decision. Câu trả lời hoàn thành không phụ thuộc memory worker xong, nhưng lượt tiếp theo phải có recent history. Revoke/delete xử lý cả cache/derived data tương ứng.
+
+Tài liệu phát triển lưu /prompt; dữ liệu công trình ở DB/storage, không đưa vào Git.
+
+## 9. CHỈ CÀI PHẦN CẦN THIẾT
+
+E01 không phải đợt cài mọi repo trong Master.
+
+Ưu tiên tool/executor đã có. Package hoặc plugin mới chỉ khi giải quyết dependency cụ thể, tương thích model/route/stack, được kiểm license/luồng dữ liệu/tài nguyên và thử cách ly. Không coi “OpenAI-compatible” là dùng được SIWC.
+
+Không cài ECC, Nuwa, OpenSpace hoặc memory engine chỉ để gọi Workspace. Không dựng ComfyUI/GPU/video pipeline để làm bài text round-trip. Chỉ mở web/file/image tool mà provider và đích nhận đã kiểm chứng.
+
+## 10. THỨ TỰ TASK VÀ NGHIỆM THU
+
+T1 — SIWC: model/context/pilot và tool loop.
+TDD rồi live ít nhất hai Project có quyền; câu hỏi tổng quát và đọc Project. Phát hành độc lập nếu đủ gate, không chờ Workspace.
+
+T2 — Model binding + cấu hình Workspace + credential store.
+Kiểm published config, model/effort mapping, auth/usage và UI trạng thái. Sai/thiếu quyền không được báo connected.
+
+T3 — Result receiver/MCP + job persistence + fake provider contract tests.
+Kiểm auth, project isolation, replay, cancel, input unchanged. Fake provider chỉ chứng minh test, không phải live.
+
+T4 — Workspace text round-trip trên dữ liệu tổng hợp.
+Gọi đúng agent binding; nhận kết quả qua destination, lưu và hiển thị đúng chat sau reload. Nếu thiếu credential/tool/điều kiện, giao phần code đã làm được và đúng setup cần người dùng, không quay lại discovery.
+
+T5 — Nguồn và sản phẩm đầu ra.
+Đọc một nguồn cho phép; kết quả có citation. Nếu có capability, nhận một tệp và một ảnh thật; nếu chưa có thì ghi trạng thái riêng, không chặn text đã đạt.
+
+T6 — Kiểm hồi quy, domain và release.
+Kiểm login/quyền, SIWC cũ, tool hiện có, queue/stream qua TLS Edge, migration compatibility, backup và rollback. Không publish bản chưa qua gate an toàn.
+
+Các bài bắt buộc:
+A01: Không còn hardcode Showroom; ít nhất hai Project chat SIWC live.
+A02: Người không có quyền bị từ chối; không rò context qua cache/tool.
+A03: Câu hỏi gốc nguyên vẹn, model SIWC khớp selection.
+A04: Web được yêu cầu có call và citation thật hoặc lỗi đúng, không giả.
+A05: SIWC vẫn chạy khi Workspace disabled/thiếu quyền.
+A06: Workspace mapping kiểm published, không nhầm draft/Auto.
+A07: Chọn model A không dispatch sang binding B; thiếu mapping không fallback.
+A08: observedModel không bịa; config và run evidence tách riêng.
+A09: 202 và provider completed nhưng thiếu result chưa thành chat completed.
+A10: Kết quả thật quay về cùng Project/conversation; reload giữ kết quả.
+A11: Hai tab/model khác nhau và đổi selection khi đang chạy không lẫn.
+A12: Retry/duplicate/callback sớm không sinh hai kết quả.
+A13: Cancel/revoke/quyền thay đổi chặn kết quả đến muộn và nguồn cũ.
+A14: MCP identity/job scope được thực thi server-side, không dựa vào jobId.
+A15: Answer/source/Markdown được lưu; proposal không tự thành quyết định chung.
+A16: File/ảnh có byte, ACL và download thật khi đánh dấu capability PASS.
+A17: Không token trong browser/log/Git; nguyên câu hỏi/file không bị gửi trái quyền.
+A18: Domain đang phục vụ đúng artifact đã kiểm, SIWC và data cũ không hỏng.
+
+## 11. BÀN GIAO VÀ ĐIỂM TIẾP TỤC
+
+Cập nhật /home/galaxy_os/prompt/GALAXY_AI_PLAN_AND_CHECKPOINT.md và bộ nhớ phát triển, thêm quyết định “model selection ràng buộc Workspace published configuration; runtime evidence tách riêng”. Không sửa âm thầm Master gốc.
+
+Mỗi checkpoint có source changed, test command/result, live evidence đã che secret, CODE_SHA/TESTED_TREE/artifact deployed thật. Nếu có uncommitted changes, ghi snapshot và không giả SHA sạch.
+
+Báo riêng:
+SIWC_CAPABILITIES, CROSS_PROJECT, ORIGINAL_CONTEXT, SIWC_MODEL_MATCH,
+WORKSPACE_AUTH, WORKSPACE_BINDING_CONFIG, WORKSPACE_MODEL_RUNTIME,
+WORKSPACE_TRIGGER, RESULT_RECEIVER, CHAT_ROUNDTRIP,
+FILE_IMAGE_ROUNDTRIP, MEMORY_ARCHIVE, ACL_SECURITY, DEPLOYED_RUNTIME.
+
+Dùng PASS/FAIL/BLOCKED/NOT_RUN và UNVERIFIED khi thiếu bằng chứng; không gộp cấu hình với thực thi. Test cũ không chứng minh chức năng mới.
+
+Nếu không đảm bảo được model Workspace bằng cơ chế chính thức, báo ngay bằng chứng và mức kiểm soát thực có; không đổi yêu cầu để đạt PASS. SIWC và phần bridge không phụ thuộc vẫn hoàn thiện.
+
+Không kết thúc chỉ bằng “đã lưu thiết kế” khi task hiện tại đã có đủ approval để code. Không cần chờ đủ mọi tính năng GitHub. Kết quả đầu tiên phải là SIWC tốt hơn trên runtime thật và một đường Workspace round-trip đúng quyền, đúng mức ràng buộc model đã kiểm chứng.
+
+## 12. TÀI LIỆU CHÍNH THỨC PHẢI ĐỌC LẠI
+
+https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference
+https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations
+https://developers.openai.com/workspace-agents/authentication
+https://developers.openai.com/workspace-agents/trigger-runs
+https://developers.openai.com/cookbook/examples/chatgpt/workspace_agents/workspace-agents-api-trigger
+https://help.openai.com/en/articles/20001143-chatgpt-workspace-agents-for-enterprise-and-business
+
+Đối chiếu hợp đồng thực tế ngày triển khai; khác biệt giữa tài liệu phải ghi rõ. Không tự đoán field, endpoint hay model ID từ tên hiển thị.

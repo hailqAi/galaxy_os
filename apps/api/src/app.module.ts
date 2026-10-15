@@ -40,6 +40,7 @@ import { InstallationModule } from './installation/installation.module';
 import { AfterSalesModule } from './after-sales/after-sales.module';
 import { ProjectChatModule } from './project-chat/project-chat.module';
 import { projectChatEnabled } from './config/project-chat-runtime';
+import { McpModule } from './mcp/mcp.module';
 
 const chatEnabled = projectChatEnabled();
 
@@ -80,6 +81,9 @@ const chatEnabled = projectChatEnabled();
     InstallationModule,
     AfterSalesModule,
     ...(chatEnabled ? [ProjectChatModule] : []),
+    ...(chatEnabled && process.env.FEATURE_GALAXY_MCP === 'true'
+      ? [McpModule]
+      : []),
     ...(process.env.FEATURE_MARKETING === 'true' ? [MarketingModule] : []),
   ],
   controllers: [HealthController, MeController],

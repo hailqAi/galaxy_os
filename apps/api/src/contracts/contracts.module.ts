@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma.service';
 import { ContractsController } from './contracts.controller';
 import { ContractsService } from './contracts.service';
 @Module({
+  exports: [ContractsService],
   imports: [AccessControlModule],
   controllers: [ContractsController],
   providers: [ContractsService, PrismaService],

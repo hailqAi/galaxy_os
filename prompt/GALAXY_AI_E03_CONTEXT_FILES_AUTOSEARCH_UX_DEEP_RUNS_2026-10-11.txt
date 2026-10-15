@@ -1,0 +1,443 @@
+# GALAXY OS — E03: NGỮ CẢNH, FILE, TÌM KIẾM ĐA NGUỒN VÀ CHAT HOÀN CHỈNH
+
+Mốc yêu cầu: 11/10/2026 theo giờ Việt Nam.
+Đích: Codex CLI đang làm Galaxy OS.
+Thư mục prompt/bộ nhớ phát triển: /home/galaxy_os/prompt.
+Chế độ: IMPLEMENT_AND_VERIFY.
+Đây là yêu cầu triển khai tiếp từ E02 R8, không phải báo cáo đã sửa máy chủ.
+
+## 0. QUYẾT ĐỊNH VÀ PHẠM VI
+
+Tôi yêu cầu tiếp tục sửa sản phẩm đang chạy, không chỉ viết thêm tài liệu. Phạm vi:
+1. Sửa lỗi file PDF khoảng 1,3 MB bị chặn bởi thông báo giới hạn context; xác định và sử dụng đúng dung lượng ngữ cảnh model/route thực có.
+2. Sửa upload/đính kèm/đọc file lớn, đặc biệt lỗi người dùng gặp ở file khoảng 50 MB.
+3. Mặc định tìm kiếm kết hợp Web + Project hiện tại + tệp + memory + những nguồn khác đã kết nối và được cấp quyền; không bắt người dùng gõ/xác nhận truy vấn công khai ở mọi câu hỏi.
+4. Kiểm kê đúng công cụ GitHub đã cài, đã nối runtime và đã được model gọi thật; tích hợp chọn lọc những capability còn thiếu, ưu tiên tìm kiếm và xử lý tài liệu.
+5. Hoàn thiện giao diện trả lời: Markdown được render, câu hỏi và file đi cùng trong message, ảnh và tệp đầu ra thật, nguồn trình bày gọn.
+6. Chế độ phân tích chuyên sâu với ngân sách công việc tối đa 30 phút, job bền vững, kiểm chứng kết quả; không giả thời gian suy nghĩ hay cam kết đúng tuyệt đối.
+
+Giữ Workspace OFF, không quay lại Business/Workspace/Gmail bridge, không sửa OAuth/callback/refresh SIWC đang chạy, không bật lại các API-key provider đã paused. Giữ P1-B memory/isolation, Create và các chức năng E02 đã đạt.
+
+Cho phép sửa code, test, dependency miễn phí cần thiết đã được kiểm tra, build và release theo cơ chế hiện hữu trong phạm vi. Không tự mua credits, thêm dịch vụ trả phí, đổi toàn bộ hệ thống memory hoặc cài tất cả repository.
+
+Tái sử dụng spec/plan và approval còn hiệu lực. Đây là thay đổi rõ đối với UX tìm kiếm cũ: bỏ điều kiện bắt buộc publicQueryConfirmed trên mọi truy vấn an toàn. Đây không phải cho phép gửi bí mật Project lên search engine. Nếu một phần mới còn quyết định bắt buộc chưa được phê duyệt, trình đúng phần đó một lần, không chặn các bugfix độc lập đã đủ căn cứ. Không sửa AGENTS.md để né bảo mật/approval nghiệp vụ. Không hỏi lại mục tiêu đã được chốt.
+
+## 1. CHECKPOINT VÀ CA LỖI THẬT
+
+Thông tin do người dùng chuyển, phải đối chiếu với runtime:
+- E02 R8: local-2837e21d800f; main READY ở 3000/3001.
+- Workspace OFF; SIWC/Create/file/web/citations/Project Memory được báo hoạt động.
+- Đã có tool live tạo XLSX/PDF báo giá, kiểm số tiền/ảnh, preview/download sau reload.
+- 2.305 tests, 14 bài browser và 5 kiểm tra chuẩn được báo PASS.
+- Matrix E02: 27 PASS, A23 BLOCKED — image generation thiếu engine đã kiểm chứng.
+- CODE_SHA: dd66c64046bcfcd5a40bdbf4bfa8df15d80ff04e.
+- TESTED_TREE: d6ecacdfbea565e16f398782242fccd2db044d90.
+- Chưa commit/push. Không coi Git HEAD đơn độc là toàn bộ code đã chạy.
+- .runtime/releases/e02-tools-20261010-r8/release.json.
+- prompt/E02_RELEASE_HANDOFF.md.
+- Context token capacity vẫn UNVERIFIED.
+
+Ca người dùng đang gặp:
+- Project ID: d44348d5-89aa-46b2-8590-57c596275b28.
+- File ID: 9b911163-46af-4e10-b826-8f8b8ec5b5f2.
+- Tên: BÁO GIÁ NỘI THẤT NHẬP KHẨU INDOOR 18.08.2026 2.pdf.
+- UI hiển thị 1373 KB và “Sẵn sàng”.
+- Lỗi: “Ngữ cảnh vượt giới hạn xử lý đã xác minh. Thu gọn yêu cầu hoặc mở hội thoại mới.”
+- UI model: gpt-6.1-sol; effort yêu cầu max; provider báo chưa xác minh.
+- Người dùng còn báo file khoảng 50 MB không đọc được/báo lỗi. Chưa có ID và response lỗi của file thứ hai; tìm có giới hạn trong dữ liệu được phép, không đoán là cùng nguyên nhân.
+
+Đọc README/memory/plan trong /home/galaxy_os/prompt, AGENTS.md áp dụng, source/file domain và handoff E02. Xác định đúng repo/worktree, uncommitted changes, manifest, process và DB. Giữ snapshot khôi phục; không reset/clean/stash tự động, không quét rồi sửa toàn repo hoặc git add tất cả.
+
+Tái hiện đúng file bằng tài khoản được phép trên Galaxy. Không gửi URL riêng hoặc nội dung báo giá lên công cụ web công khai. Không thay bằng một PDF cùng tên gần giống; ghi hash/version/size thật. Nếu không có quyền hoặc chưa lấy được file, chỉ rõ ca chưa chạy; dùng fixture bổ sung có nhãn, không báo ca thật PASS.
+
+## 2. TÁCH LỖI CONTEXT KHỎI LỖI UPLOAD VÀ PARSER
+
+Truy nguyên chính xác chuỗi lỗi trong source. Xác định chỗ quyết định từ chối: browser, Galaxy preflight, uploader/storage, parser, context assembler, reverse proxy, HTTP client hay provider.
+
+Ghi evidence có redaction cho từng lần thử:
+runId/messageId, sourceFileId/version/hash, received bytes, pages/sheets nếu đọc được, stage, error origin/code/status, thời điểm, request ID provider nếu có, có thực sự gửi tới provider hay chưa.
+
+Không gán 413, lỗi parse, timeout, thiếu quyền file, URL download 401, vượt byte request hoặc context không xác minh thành cùng một thông báo “ngữ cảnh quá dài”. Đặt error code theo lớp và giữ nguyên input/attachment để người dùng thử lại.
+
+Với PDF 1,3 MB, lập các giả thuyết và kiểm riêng:
+- Guard đang dùng giới hạn tạm nhỏ hoặc UNKNOWN/0 bị biến thành hard stop.
+- Đếm token trên toàn JSON/file_data/base64 thay vì nội dung model thực xử lý.
+- Đưa nguyên binary vào input_text hoặc đưa base64 vào Markdown/tool result.
+- Lặp cùng file nhiều lần trong current message/history/tool continuation.
+- Gửi đồng thời original PDF, toàn OCR, Markdown, mọi ảnh trang và toàn memory dù không cần.
+- PDF text extraction/OCR bị nhân bản, số trang/ảnh quá nhiều hoặc chọn visual detail không hợp lý.
+- Tool schema/skill instructions/history dài chiếm hết budget.
+- File URL cần cookie Galaxy nhưng provider không truy cập được.
+- Sai model adapter/serialization hoặc provider thật sự từ chối.
+
+Giữ một failing regression test phản ánh nguyên nhân đã tái hiện, sau đó sửa tối thiểu. So sánh cùng file ở hội thoại ngắn và hội thoại đang lỗi để phân biệt file input với history accumulation. Không mặc định 1,3 MB chắc chắn ít token, cũng không mặc định model chỉ đọc nổi 1,3 MB.
+
+## 3. MỞ ĐÚNG NGỮ CẢNH VÀ MAX — KHÔNG TĂNG CỜ MÙ
+
+### 3.1 Nguồn xác định dung lượng
+
+Đọc catalog thật của connection và tài liệu model/route hiện hành. Tách rõ:
+- modelDeclaredContextWindow: thông số tài liệu model.
+- route/accountLimit: giới hạn xác nhận cho đường SIWC/tài khoản nếu có.
+- configuredInputBudget: chính sách ứng dụng đang dùng.
+- estimatedInputTokens: ước tính của request cụ thể.
+- reservedReasoningAndOutput: phần dành cho xử lý và đầu ra theo model.
+- evidence: nguồn, version, ngày và mức VERIFIED/DECLARED/ESTIMATED/UNKNOWN.
+
+Không dùng giới hạn 128K/256K/1M tùy ý. Thông số public API không tự chứng minh mọi route SIWC có cùng quyền hoặc giới hạn. Một request nhỏ chạy được không xác minh toàn bộ context window. Không binary-search bằng hàng loạt request khổng lồ gây cạn quota.
+
+Nếu có giới hạn model/route rõ và cấu hình Galaxy đang thấp không cần thiết, nâng effective budget phù hợp và test. Nếu chưa xác minh đầy đủ, vẫn phải xử lý đầu vào nhỏ theo một kế hoạch bounded có căn cứ hoặc chuyển sang đọc nguồn từng phần; không chặn toàn bộ chỉ vì profile UNKNOWN. Không sửa flag VERIFIED=true để vượt gate.
+
+### 3.2 Ước lượng đúng thành phần
+
+Lập ledger theo instructions, user text, history, memory, skill/tool definitions, tool results, source excerpts và ảnh/PDF input. Phân biệt request bytes với model tokens.
+
+Không tokenize chuỗi JSON chứa base64 để coi đó là lượng ngữ nghĩa model nhận. Đồng thời không tính token ảnh/file là 0: dùng thông tin chính thức/estimator tương ứng khi có và ghi mức không chắc chắn.
+
+Không gửi lại file binary trong mọi lượt nếu chỉ cần tra cứu nội dung đã parse ở Galaxy. Khi chuyển sang retrieval, lưu source handles và cho model đọc lại qua tool. Đừng giả định OpenAI tự nhớ file cũ khi HTTP không có persistent state.
+
+### 3.3 Context admission planner
+
+Bảo toàn nguyên câu hỏi và điều kiện của người dùng. Khi request vượt budget:
+1. Bỏ nguồn lặp, log/debug và schema không liên quan.
+2. Giữ history cần thiết, memory có nguồn và quyết định còn hiệu lực; dùng summary P1-B cho phần cũ.
+3. Chọn excerpt/trang/vùng ô phù hợp với câu hỏi; ưu tiên file vừa gửi, không memory chung vô hạn.
+4. Với yêu cầu đọc/so sánh toàn bộ tài liệu, lập kế hoạch duyệt toàn bộ phạm vi theo nhiều bước, có coverage map; không chỉ top-k vài đoạn rồi tuyên bố đọc đủ.
+5. Nếu vẫn quá giới hạn, chuyển job phân tích tài liệu dài và thông báo đúng. Không buộc mở hội thoại mới như cách chữa chính.
+
+Giữ output dài bằng cơ chế lưu/hiển thị phù hợp; không tự cắt mất phần kết luận.
+
+### 3.4 MAX và bằng chứng
+
+Kiểm UI -> persist -> DTO -> adapter -> payload trên lượt đầu, lượt sau tool và resume. Giữ model được chọn; không đổi sang model khác vì file khó.
+
+Tách requested, sent, accepted và provider-observed. Provider không trả effort thì không thể ghi observed=max. Có thể hiển thị “Yêu cầu MAX; đã gửi; provider không cung cấp xác nhận riêng”, thay vì giả telemetry.
+
+Reasoning effort không phải context window hay thời gian chờ. Không tăng temperature để “sáng tạo hơn”, không thêm max_output_tokens/background/multi_agent/truncation/previous_response_id nếu route SIWC hiện hành không hỗ trợ. Kiểm đúng contract trước từng tính năng mới. Giới hạn workflow quản lý ở Galaxy, không nhét tham số không hợp lệ vào provider.
+
+## 4. LUỒNG CHAT: UPLOAD TRƯỚC, GỬI MESSAGE KÈM FILE, SAU ĐÓ PHÂN TÍCH
+
+Yêu cầu UX:
+A. Chọn/kéo file: upload original bằng uploader hiện có, hiển thị tiến độ, preview và tên; người dùng tiếp tục soạn câu hỏi.
+B. Bấm Gửi: lưu nguyên câu hỏi + các attachment refs thành user message bền vững và hiển thị đúng vị trí trong hội thoại.
+C. Assistant job bắt đầu hoặc tiếp tục chờ scan/parse; UI hiện trạng thái thật “Đang đọc tài liệu…”, “Đang tìm thông tin…” phù hợp.
+D. Sau đó model đọc nguồn, gọi tools và trả lời; lỗi không xóa user message/file.
+
+Không bắt parse toàn bộ file hoặc hoàn tất retrieval mới cho user message xuất hiện. Scan/kiểm an toàn vẫn phải hoàn tất trước khi feed nguồn vào model/executor. Có thể pre-parse ở background sau upload, nhưng không để pre-parse làm đảo thứ tự message hoặc gửi câu hỏi thiếu file.
+
+Nếu upload chưa xong khi nhấn Gửi, queue trạng thái rõ hoặc chờ hoàn tất; không gửi text-only âm thầm. Chỉ xóa draft composer sau khi server xác nhận message đã được lưu; retry phải idempotent.
+
+Không chỉ để chip file trong composer mà mất file khỏi message đã gửi. Attachment hiện ở user message; ảnh/tệp được tạo hiện ở assistant message. Hai loại giữ đúng source/output relationship.
+
+Tách trạng thái:
+upload: CREATED/UPLOADING/STORED/FAILED/CANCELLED;
+content: QUARANTINED/SCANNING/PROCESSING/PARTIAL/READY/UNSUPPORTED/FAILED;
+run: WAITING_FILE/RUNNING/VERIFYING/COMPLETED/PARTIAL/FAILED/CANCELLED.
+
+“Sẵn sàng” phải có nghĩa rõ: đã tải lên hay đã có nội dung có thể phân tích. Chưa đọc được thì không báo AI_READABLE. Cho phép lưu original an toàn ngay cả khi parser không hỗ trợ, có download đúng quyền.
+
+Reload/restart/two tabs không mất message, attachment hoặc progress. Retry lỗi context/parse tạo attempt mới dưới cùng yêu cầu, không nhân đôi tin nhắn/nghĩa vụ.
+
+## 5. FILE 50 MB VÀ FILE LỚN: TÁCH CỔNG TIẾP NHẬN KHỎI CỔNG INFERENCE
+
+Giữ yêu cầu Galaxy tiếp nhận tối đa 10.000.000.000 byte/file. Không đặt giới hạn uploader theo file-input của provider.
+
+Đối chiếu mọi tầng: frontend validators, Next routes/server actions nếu có, API multipart, uploader chunk, proxy Edge, reverse proxy nội bộ, storage, workers, job deadlines và SIWC request. Không chỉ tăng bodySizeLimit lên 10 GB.
+
+Upload dùng chunks/stream, không giữ cả file trong RAM, không base64 toàn file ở frontend hoặc đưa binary lớn vào PostgreSQL. Kiểm tổng bytes thực, checksum cuối, quota, disk free, concurrency và session expiry. Resume sau mất mạng/reload/restart, duplicate chunk, out-of-order và cancel có kiểm quyền mỗi bước.
+
+Phân biệt 50.000.000 bytes và 50 MiB trong tests/UI. Một limit provider có thể là strict less-than; kiểm contract chính xác. File 50 MB hoặc lớn hơn vẫn phải lưu được trong Galaxy nếu quota cho phép, rồi phân tích bằng pipeline phù hợp, không trả lỗi chung vì không thể gửi trực tiếp.
+
+Original-first khi model/route và budget hỗ trợ. Original luôn giữ ở Galaxy; khi phải gửi derivative/excerpts/chunks phải ghi chế độ thực tế và coverage, không nói đã gửi nguyên toàn bộ.
+
+Không gửi đường download riêng cần cookie cho provider rồi mặc định provider đọc được. Dùng đường truyền dữ liệu được route hỗ trợ. Nếu dùng URL có quyền hạn tạm, URL đó chỉ cấp tới đúng nguồn theo thời hạn phù hợp, không xuất lên web search/log/Git; không biến storage thành public.
+
+Không đồng nhất hợp lệ byte-size với hợp lệ context. PDF nhiều ảnh có thể tạo lượng input lớn; ngược lại file nén lớn không tự đồng nghĩa nhiều tokens. Tính theo nội dung và nhu cầu xử lý.
+
+## 6. PIPELINE TÀI LIỆU VÀ ĐỘ BAO PHỦ
+
+Tái sử dụng E02 File/Artifact domain. Mỗi nguồn giữ fileId/version/hash, Project/visibility, parser version, trang/sheet/slide/range và processing status.
+
+PDF:
+- Extract text/layout theo trang, kiểm extraction lặp và bảng.
+- Dùng OCR cho phần scan thật sự cần, không OCR toàn bộ file có text tốt.
+- Ảnh/bảng quan trọng có preview vùng/trang để model đọc; tránh raster toàn bộ nhiều lần.
+- Với toàn bộ báo giá, tạo bảng dòng hàng đầy đủ có nguồn và kiểm tổng bằng chương trình.
+
+Excel/CSV:
+- Dùng parser/range tools của Galaxy cho tất cả dòng cần đọc, không dựa vào summary provider để tuyên bố đọc toàn workbook.
+- Bảo toàn số, mã, đơn vị, formula/cached values; không thực thi macro/external link.
+- Tổng hợp toàn bộ bằng engine dữ liệu và Decimal/rules nghiệp vụ, không chỉ cho LLM đoán phép cộng.
+
+Word/PPT:
+- Text/bảng/slide có source locator; biểu đồ/hình có bản render phù hợp khi cần.
+- Không giả nội dung ảnh đã được đọc chỉ vì đã trích được text.
+
+Ảnh:
+- Dùng vision thật nếu có; original và metadata được giữ.
+- Chi tiết quá nhỏ: đọc crop/region phù hợp, không mất ảnh gốc.
+
+Coverage ledger cho yêu cầu exhaustive:
+expected pages/sheets/rows; processed; failed; skipped có lý do; pending; source version; output mapping.
+Có trang/vùng chưa đọc thì report PARTIAL, không tuyên bố đã kiểm toàn bộ.
+
+Readiness test phải dựa vào dữ liệu từ file thật, không câu trả lời kiến thức chung. Không dùng upload 200 làm AI_READ_PASS.
+
+## 7. TÌM KIẾM MẶC ĐỊNH: AUTO ĐA NGUỒN, KHÔNG FORM XÁC NHẬN MỖI LẦN
+
+Default mới: “Tự động — Web + dự án + tài liệu”.
+Phạm vi khả dụng: câu hỏi, attachment hiện tại, history/memory đúng Project, nguồn nghiệp vụ actor có quyền, thư viện dùng chung được cấp phép, connected sources đã có quyền và web công khai.
+
+“Mọi nguồn” không phải đọc tất cả Project, tài khoản hoặc email riêng. Không thay invariant cách ly Project. Nguồn chưa kết nối không được quảng cáo đã tìm.
+
+Model chủ động dùng các nguồn cần thiết. Câu hỏi thông tin hiện tại/giá/thông số/website/xác minh phải tìm web khi phù hợp. Câu hỏi đơn giản không cần bị buộc gọi mọi công cụ gây chậm/quota. Khi người dùng nói “tìm tất cả nguồn liên quan”, có kế hoạch coverage qua các nguồn được phép.
+
+Bỏ trường “Truy vấn công khai” và checkbox bắt buộc khỏi composer mặc định. Có thể giữ preview truy vấn trong cài đặt nâng cao/chi tiết theo yêu cầu; nó không phải gate toàn cục.
+
+Giữ lựa chọn “Chỉ Project — không web” hoặc “Tìm trên web” trong menu phụ, không ép người dùng chuyển tay để hỏi thông thường.
+
+### Chính sách egress tự động
+
+Thay manual gate phổ quát bằng policy phía server:
+- Truy vấn kiến thức chung, tên hãng/model công khai, thông số không bí mật: được phép tìm tự động.
+- Từ câu hỏi có dữ liệu riêng: tạo truy vấn công khai tối thiểu, bỏ tên khách hàng, địa chỉ riêng, giá vốn, mã hợp đồng, URL/token nội bộ và nội dung thương mại riêng không cần thiết.
+- Nếu không thể làm truy vấn an toàn mà vẫn đúng yêu cầu, hỏi xác nhận cụ thể cho dữ liệu cần tiết lộ hoặc chỉ dùng nguồn nội bộ. Không block toàn bộ chat.
+
+Giữ câu hỏi gốc nguyên vẹn trong run. Truy vấn public là derivative có scope riêng, không thay yêu cầu.
+
+Nếu native web tool tự tạo query mà Galaxy không chặn được từng query, không đưa full hồ sơ mật vào cùng pha search đó. Tách pha public research với input đã tối thiểu hóa, sau đó synthesize với nguồn riêng. Hoặc dùng local function web_search có validator trước outbound. Không coi chỉ nhắc model “đừng lộ bí mật” là kiểm soát đủ.
+
+Ghi nguồn nào đã query, lỗi, thiếu quyền, query an toàn và phiên bản chính sách trong evidence riêng có ACL. Không log dữ liệu nhạy cảm ra console/Git.
+
+Chống SSRF/DNS rebinding/redirect vào private IP/metadata service, prompt injection, tải quá lớn, crawl vô hạn. Không dùng crawler công khai để đọc URL Galaxy riêng. Tôn trọng điều kiện truy cập website; không vượt đăng nhập hoặc biện pháp bảo vệ.
+
+Khi search backend lỗi, báo rõ trạng thái; có thể tiếp tục phần nội bộ. Không bịa nguồn, giá, kết quả tìm hoặc nói đã tìm khi không có tool call.
+
+## 8. FIRECRAWL VÀ SKILLS: CÓ EXECUTOR THÌ MỚI LÀ CAPABILITY
+
+Cài plugin trong ChatGPT hoặc Codex không tự cài công cụ vào Galaxy runtime. Skill là hướng dẫn/quy trình và assets được phép dùng; tool/API/worker mới tạo ra hành động thật.
+
+Đánh giá Firecrawl theo ba lựa chọn tách biệt:
+1. Công cụ web hiện có của Galaxy đã đủ: reuse và bổ sung phần thiếu.
+2. Firecrawl self-host hoặc MCP/client trỏ đúng backend đã kiểm: chọn capability scrape/crawl/search thực cần, kiểm dependency và service requirements của release.
+3. Firecrawl Cloud: cần credential/usage/data-flow riêng; chỉ bật khi đã được cho phép. Không lấy token SIWC/Codex làm Firecrawl token và không tự mua credits.
+
+Self-host không tự có tất cả capability Cloud. Đọc LICENSE/NOTICE ở version pin, dependency, telemetry, engine phụ và outbound. Không đưa Compose mặc định không auth ra public hoặc tạo stack trùng cổng/DB của Galaxy.
+
+Không cài Firecrawl chỉ vì plugin có trên ChatGPT. Dùng bài thử chung để so sánh với SearXNG+Crawl4AI/công cụ hiện hữu: tìm nguồn chính thức -> đọc đúng nội dung -> trích nguồn -> trả cho SIWC -> trả lời trong chat. Chọn phương án đáp ứng tốt với ít hạ tầng bổ sung.
+
+Nếu dùng skill nguồn mở, review instructions/scripts/license, map tool names sang registry Galaxy, nạp metadata trước và nội dung skill cần thiết theo request. Không nhồi mọi SKILL.md vào mỗi prompt gây nổ context; không cho hook/script tự chạy shell quyền cao.
+
+Không sao chép skill nội bộ không được cấp quyền hoặc giả rằng SIWC tự mang các plugin tài khoản ChatGPT vào request. Hosted tools/skills chỉ dùng khi route thực hỗ trợ; không thay bằng field API không hợp lệ.
+
+## 9. KIỂM KÊ GITHUB THẬT TRÊN BẢN ĐANG PHỤC VỤ
+
+Đọc E02_RELEASE_HANDOFF, adoption matrix, dependency lockfiles, build manifest, container/process/worker đúng scope, adapter và tool registry. Không xác nhận “đã cài” chỉ vì tìm thấy tên trong /prompt, package cache hoặc máy dev.
+
+Bảng bắt buộc từng capability:
+repo/upstream; selected function; version/commit/image digest; installed location/environment; runtime config; executor path; ready/health; tool exposed to model; actual invocation ID; result artifact/source; last live verification; data egress; license/resource; next action.
+
+Trạng thái tách:
+CANDIDATE / INSTALLED_DEV / INSTALLED_RUNTIME / WIRED / READY / LIVE_VERIFIED / DISABLED / NOT_INSTALLED / DEFERRED / BLOCKED.
+
+Nhóm phải kiểm:
+- Firecrawl: https://github.com/firecrawl/firecrawl — search/scrape adapter cần thiết.
+- SearXNG: https://github.com/searxng/searxng — search discovery; không phải parser mọi file.
+- Crawl4AI: https://github.com/unclecode/crawl4ai — lấy/đọc trang; từ “svgCrawl4AI” trong yêu cầu là link Crawl4AI này, không cài package phỏng đoán.
+- Supermemory: https://github.com/supermemoryai/supermemory — chỉ thêm memory capability có gap đã đo, kiểm SDK/server/backend/data-flow/license thực.
+- Nuwa: https://github.com/alchaincyf/nuwa-skill — tham khảo skill chưng cất quy trình; không coi một skill là DB memory hoặc huấn luyện model.
+- DeepTutor: https://github.com/HKUDS/DeepTutor — chọn pattern nghiên cứu/đọc nguồn/kiểm tra, không cài nguyên nền tảng thay Galaxy.
+- ComfyUI: https://github.com/Comfy-Org/ComfyUI — chỉ READY khi engine/model/workflow/hardware/license thực có và đã tạo ảnh.
+
+Kiểm lại phần E02 liên quan:
+OfficeCLI https://github.com/iOfficeAI/OfficeCLI;
+AnyDoc https://github.com/firecrawl/anydoc;
+PPT Master https://github.com/hugohe3/ppt-master;
+Docling https://github.com/docling-project/docling;
+MinerU https://github.com/opendatalab/mineru;
+RetainPDF https://github.com/chocolatedesue/retain-pdf;
+TencentDB Agent Memory https://github.com/TencentCloud/TencentDB-Agent-Memory;
+PptxGenJS upstream https://github.com/gitbrent/PptxGenJS;
+ECC https://github.com/affaan-m/ecc;
+OpenSpace https://github.com/HKUDS/OpenSpace.
+
+Danh sách này là inventory/ứng viên, không phải bắt cài toàn bộ. Memory P1-B đang chạy phải giữ; không tự thay engine bằng Supermemory hoặc TencentDB, không chạy hai nguồn memory có thẩm quyền xung đột. Một thư viện không cần dùng có thể DEFERRED với lý do; capability đã có cách khác vẫn có thể PASS.
+
+Ưu tiên chức năng người dùng: đọc đúng PDF, tìm được nguồn, tạo/tải được file. Inventory không được biến thành một đợt nghiên cứu không có bugfix. Chưa có engine ảnh thì A23 giữ BLOCKED, không báo AI full đã tạo ảnh.
+
+## 10. GIAO DIỆN TRẢ LỜI NHƯ MỘT ỨNG DỤNG CHAT HOÀN CHỈNH
+
+Giữ nhận diện Galaxy và navigation hiện có; cải thiện chất lượng hiển thị, không sao chép thương hiệu ChatGPT.
+
+Truy nguồn lỗi raw **, dấu escape, HTML entities hoặc chuỗi JSON bị in trực tiếp. Không chữa bằng regex xóa mọi dấu * hoặc dấu ...: sẽ phá code, nội dung nguyên gốc và ý nghĩa.
+
+Dùng renderer Markdown/GFM phù hợp stack đã có, sanitize HTML và URI. Hỗ trợ heading vừa phải, bold, paragraph, bảng scroll ngang, list, code fences, copy code, link và math khi thật sự cần. Streaming parse không được làm mất chữ/đúp token; final rendering phải khớp nội dung đã lưu.
+
+Tách raw response/structured events khỏi display projection. Không hiển thị JSON tool calls, source IDs, model internals, hashes, telemetry hay chain-of-thought trong answer body.
+
+Có structured content blocks cho text, images, artifacts, tables và status. File/ảnh lấy từ artifact registry thực, không tin URL do model tự bịa. Download/preview check quyền mỗi lần, signed URL hết hạn được refresh hợp lệ.
+
+Typography có khoảng thở, đọc tiếng Việt tốt, desktop/mobile; nội dung không bị composer che, bảng không làm vỡ màn hình. Không ép mọi câu trả lời theo mẫu nhiều dấu **, bullet hoặc hàng chục tiêu đề. Giữ nguyên code và dữ liệu của người dùng.
+
+Ảnh đầu vào nằm ở user message; ảnh đầu ra hiển thị inline/gallery phù hợp. File đầu ra có tên, loại, size, trạng thái và nút tải, không chỉ markdown text mô tả đã tạo.
+
+Model/effort/usage/diagnostics chuyển vào “Chi tiết lượt trả lời” gọn; thông báo rủi ro/lỗi quan trọng vẫn hiển thị. Không dùng giấu UI để che context/model chưa xác minh.
+
+## 11. NGUỒN TRÌNH BÀY GỌN, KHÔNG XÓA PROVENANCE
+
+Không tự đẩy bảng “Nguồn trích dẫn/Nguồn tham chiếu” dài, raw tool traces hoặc UUID xuống cuối mọi câu trả lời. Mặc định ẩn bảng metadata nội bộ trong phần Chi tiết/Nguồn có thể mở.
+
+Giữ provenance phía server để kiểm đúng/sai, memory và audit. Citation không được lộ tên/nội dung nguồn mà actor không có quyền.
+
+Với native web search OpenAI, giữ inline citations nhỏ, rõ và bấm được theo yêu cầu hiển thị của provider; không giấu toàn bộ attribution vào phần đóng hoặc xóa để giao diện gọn. Loại panel lặp không cần thiết, không loại attribution bắt buộc.
+
+Nguồn nội bộ có thể là chip ngắn hoặc chỉ mở khi người dùng cần theo UX đã chốt; dữ kiện rủi ro vẫn có đường kiểm nguồn. Không sửa answer text khiến các citation offsets trỏ sai.
+
+Không biến câu trả lời thiếu nguồn thành “đã kiểm chứng”. Với file/giá/chính sách chưa rõ, giữ cảnh báo cần xác nhận và liên kết kiểm tra phù hợp.
+
+## 12. PHÂN TÍCH CHUYÊN SÂU TỐI ĐA 30 PHÚT
+
+Tôi chấp nhận công việc khó chạy lâu, tới 30 phút để đọc đủ nguồn và kiểm tra. Đây là max wall-clock budget của workflow, không bắt mọi câu hỏi chờ 30 phút và không hứa suy nghĩ lâu tự thành đúng.
+
+Chế độ Auto hoàn thành việc đơn giản nhanh. Chế độ “Phân tích chuyên sâu” cho workflow dài với cùng model/effort được chọn trong quyền thực.
+
+Dùng queue/job manager hiện có, không giữ một request HTTP browser 30 phút. Lưu user message trước, trả runId/trạng thái, worker thực hiện; browser nhận events và có thể reconnect/reload. Heartbeat/checkpoint theo phase; không giữ DB transaction qua cuộc gọi mạng dài.
+
+Phases có thể gồm: lập kế hoạch ngắn có thể kiểm tra; đọc nguồn; search công khai; tính toán/extract; đối chiếu; tạo sản phẩm; kiểm sản phẩm; trả lời. Chỉ hiển thị phase và tiến độ thật, không chain-of-thought hoặc timer giả.
+
+Tách deadline toàn job, per-tool timeout, per-call provider timeout, idle network timeout và quota. Giữ model/effort qua continuation; không đổi provider để cứu job. SIWC hiện không hỗ trợ background field thì orchestrate job phía Galaxy; không bật OpenAI background trái contract.
+
+Dùng monotonic clock cho duration, UTC cho timestamp; không sửa OS clock vì task này nếu không có lỗi đã chứng minh. Deadlines/resource caps phải có cấu hình và audit, không hardcode chặn 60 giây ở một tầng quên cập nhật.
+
+Có retry có căn cứ, backoff, maximum attempts và idempotency. Worker restart: tiếp tục các bước đã commit; inference bị ngắt không được giả tiếp tục nếu provider không có resume hợp lệ. Run mới/attempt mới ghi rõ, không tạo hai báo giá.
+
+Nút Stop thực sự dừng scheduling/tool mới; request không hủy được từ xa phải ghi trạng thái thật và chặn late publication. Revoke quyền khi đang chạy phải có hiệu lực trước đọc, ghi và hiển thị.
+
+Đến 30 phút chưa xong: giữ các artifact/phần đã kiểm, trả PARTIAL với phần còn thiếu, cho phép người dùng quyết định tiếp tục. Không tự mua thêm thời gian/credits, không tiếp tục ngầm vô hạn, không báo completed giả.
+
+Không dùng toàn bộ 30 phút cho demo nếu tác vụ xong sớm. Test long-run bằng controlled delays cho infrastructure, còn live quality test dùng khối lượng công việc thực; không lấy mock 30 phút làm bằng chứng model đã suy luận 30 phút.
+
+## 13. “CHUẨN” PHẢI CÓ TIÊU CHÍ KIỂM CHỨNG
+
+response.completed là model hoàn thành một lượt, không tự chứng minh yêu cầu người dùng đã đầy đủ/đúng.
+
+Kiểm tách:
+- Correct scope: đúng Project/actor/source version.
+- Coverage: đã đọc đủ phần cần cho yêu cầu chưa.
+- Factual support: kết luận có nguồn hoặc giả định được ghi rõ.
+- Deterministic checks: số lượng, giá, thuế, đơn vị, tổng và đối chiếu tệp.
+- Artifact integrity: mở/render được, không mất trang/sheet/hình, preview/download hoạt động.
+- Presentation: không raw markup, không tràn hoặc cắt câu trả lời.
+
+Dùng same selected capable model để rà soát khi cần; không model yếu viết lại toàn bộ kết quả. Reviewer phải chỉ lỗi cụ thể cùng căn cứ. Giữ bản gốc và revisions, không tự đổi con số để trông hợp lý.
+
+Giá thiếu không bịa; phát sinh điều kiện chưa xác minh báo rõ. File AI tạo là DRAFT theo workflow. Tác vụ phát hành/gửi ngoài/phê duyệt nghĩa vụ phải có approval nghiệp vụ riêng.
+
+Chỉ lưu core memory từ thông tin có nguồn với trạng thái phù hợp. Không học lại toàn output như sự thật; proposal không thành approved, nguồn bị xóa/thu hồi phải propagate đến derived content và retrieval.
+
+## 14. TRIỂN KHAI THEO LÁT, KHÔNG ĐỢI CÀI ĐỦ GITHUB
+
+E03-A — Tái hiện ca PDF 1,3 MB, trace guard/token/payload và sửa lỗi nhỏ trước. Nghiệm thu chính file đó trên runtime thật.
+E03-B — Upload/message order + error separation + file 50 MB/lớn theo pipeline. Bảo toàn original, retry và hiển thị.
+E03-C — Auto multi-source mặc định + public query policy + search/retrieval thật. Native/engine hiện có trước, Firecrawl/SearXNG/Crawl4AI khi cần.
+E03-D — Markdown/rich output/file/image UX + panel nguồn gọn, không mất citations bắt buộc.
+E03-E — Workflow sâu tới 30 phút, checkpoint/resume/cancel và kiểm chất lượng.
+E03-F — Inventory evidence tất cả công cụ; nối capability cần thiết chưa chạy. Không thay memory engine/ComfyUI deployment khi chưa đủ điều kiện, không chặn A–E.
+
+A có thể phát hành riêng khi đủ gate. Inventory read-only có thể làm trong lúc điều tra nhưng không cài nhiều stack/build/test nặng đồng thời. Giữ tài nguyên WSL/DB/Redis/Edge.
+
+Chỉ có dependency cần cho đường sửa hiện tại mới cài. Các phần mới cần quyết định hạ tầng/tài chính/license thì tách đúng blocker. Phần không liên quan tiếp tục an toàn.
+
+## 15. BỘ NGHIỆM THU E03
+
+Mỗi test ghi UNIT/INTEGRATION/BROWSER/PROVIDER_LIVE/ARTIFACT/DEPLOYED; không gộp mock thành live.
+
+A01. Tái hiện đúng PDF 1373 KB theo fileId/version/hash, ghi vị trí lỗi cũ.
+A02. File đó đọc được trong hội thoại ngắn và hội thoại người dùng đang lỗi; ít nhất ba dữ kiện có căn cứ từ file, có đối chiếu phạm vi hỏi.
+A03. Token ledger không tính base64 như text; file/ảnh vẫn có dự toán đúng loại.
+A04. Không nhân file/Markdown/history theo số lượt hoặc số vòng tool.
+A05. UNKNOWN capacity không thành hard stop cho request bounded hợp lệ; vượt limit thật xử lý đúng, không flag giả.
+A06. Model/MAX requested/sent/accepted/observed ghi đúng, giữ qua tool/retry; không fallback âm thầm.
+A07. Nguyên câu hỏi và các điều kiện không đổi sau context compaction.
+A08. Khi input lớn, tự plan chunk/retrieval; không bắt mở chat mới làm đường xử lý mặc định.
+A09. User message + attachments hiển thị và lưu trước khi AI phân tích hoàn tất.
+A10. Upload chưa xong/Gửi nhiều lần/reload không mất draft hoặc gửi thiếu file/nhân message.
+A11. STORED/PROCESSING/READY có nghĩa rõ; parse fail không mất download original.
+A12. Các file quanh mốc 50 MB/50 MiB và >50 MB upload được vào Galaxy trong quota; đọc theo phương án hợp lệ, không vượt provider bằng mánh đổi size.
+A13. Resume/mất mạng/duplicate chunks/cancel/checksum và server-side 10.000.000.000-byte boundary.
+A14. Bài file lớn thật tách với boundary simulation; không báo 10GB_LIVE nếu chỉ test validator.
+A15. Exhaustive PDF/Excel task đọc đủ trang/dòng cần thiết; lỗi một phần phải có coverage và PARTIAL đúng.
+A16. Tệp gốc giữ hash, bản dẫn xuất/ảnh/PDF có nguồn, không ghi đè.
+A17. Mặc định Auto multi-source được persist cho session mới và migration setting đúng; Project-only user đã chọn rõ không bị bỏ qua âm thầm.
+A18. Câu hỏi giá/thông số hiện tại tự search, không cần publicQuery textbox/checkbox.
+A19. Câu hỏi có bí mật dùng public query đã tối thiểu hóa; test xác nhận giá vốn/tên riêng/token không đi ra search.
+A20. Project-only không outbound web; nguồn chưa nối/quyền thiếu báo đúng.
+A21. Không cross-Project/private shared leakage qua search/memory/worker/cache hoặc citation.
+A22. Native web sources có inline link bắt buộc; không panel nguồn/UUID dài lặp dưới mọi câu trả lời.
+A23. Markdown tiếng Việt/bold/table/code/math nếu có render đúng lúc stream và sau reload; không ** bị escape hoặc tool JSON lộ.
+A24. Sanitization chống XSS/unsafe links/SVG, giữ nguyên code hợp lệ; không regex xóa bừa dấu *.
+A25. Question attachments, generated images và artifact cards đúng bên, preview/download sau reload/expiry.
+A26. Long job survive disconnect/reload/worker restart và trả đúng Project; không đúp output.
+A27. 30-minute policy/per-tool timeout/retry/stop/deadline chạy đúng; không `background` field trái SIWC.
+A28. Quyền bị thu hồi hoặc run cancel ngăn late output; ngân sách không vượt vô hạn.
+A29. End-to-end: đúng PDF báo giá -> đối chiếu nguồn hãng công khai -> bản phân tích có dữ liệu thật -> XLSX/PDF DRAFT có ảnh hợp lệ -> tổng khớp -> tải được.
+A30. Inventory phân biệt package trong dev, runtime, tool wired và live; không repo nào được ghi ACTIVE chỉ từ docs.
+A31. Firecrawl hoặc phương án search chọn đạt search + fetch + model usage thật; mọi egress/license/service dependency được ghi.
+A32. Nuwa/DeepTutor/skills không tự cấp quyền hoặc được báo là model đã train; memory hiện hữu không regression.
+A33. Image generation giữ BLOCKED khi thiếu engine; nếu PASS phải có model/workflow/execution và image bytes thật.
+A34. SIWC OAuth, Workspace OFF, Create, P1-B và danh sách provider paused không hỏng.
+A35. Manifest/source tree/tested artifact và domain user đang mở khớp; giữ rollback bảo toàn dữ liệu.
+A36. So sánh trước/sau trên câu hỏi thật: độ đúng, đầy đủ, nguồn, độ bao phủ, tệp, trình bày và thời gian; không chỉ số tests hoặc độ dài câu trả lời.
+
+Tự kiểm tra lại E02 A06/A14/A19/A20/A26 có bị đánh giá quá rộng trước đây không. Nếu ca người dùng thất bại trong phạm vi đã PASS, ghi regression và sửa bằng chứng, không giữ nhãn PASS vì fixture khác từng chạy được.
+
+## 16. PHÁT HÀNH VÀ BÀN GIAO
+
+Build/test theo gate repo, tài nguyên có giới hạn; không chạy nhiều full suites song song. Backup/schema compatibility/rollback trước migration, giữ original/upload/artifact DB. Không xóa volume, reset DB hoặc thay clock/network vô căn cứ.
+
+Domain nghiệm thu: https://os.galaxycentre.vn. Kiểm đúng origin, actor, nguồn và artifact đã phát hành; localhost pass chưa tự là domain pass.
+
+Cập nhật /home/galaxy_os/prompt thay vì tạo nhiều bộ nhớ mâu thuẫn:
+- README và GALAXY_OS_LONG_TERM_MEMORY: default Auto multi-source, nguồn gọn, long-run, các ranh giới giữ lại.
+- GALAXY_AI_PLAN_AND_CHECKPOINT: tiếp revision mới từ thực tế, giữ R8.
+- GALAXY_AI_TOOL_ADOPTION_MATRIX: inventory thực và quyết định chức năng.
+- E03_CONTEXT_FILES_AUTOSEARCH_HANDOFF.md: root causes, changes, tests, acceptance, rollback và bước tiếp theo.
+
+Không đưa PDF báo giá riêng, nội dung hợp đồng, tokens, .env hoặc signed URLs vào Git. Bằng chứng nội dung nhạy cảm giữ runtime evidence có quyền, tài liệu chỉ liên kết định danh an toàn.
+
+Báo riêng:
+PDF_1_3MB_ACTUAL_CASE;
+CONTEXT_ACCOUNTING / CONTEXT_CAPACITY_EVIDENCE / CONTEXT_ADMISSION;
+MODEL_EFFORT_EVIDENCE;
+UPLOAD_50MB_PLUS / RESUMABLE_10GB_POLICY / LARGE_FILE_LIVE;
+MESSAGE_ATTACHMENT_ORDER / DOCUMENT_COVERAGE;
+AUTO_MULTISOURCE_SEARCH / QUERY_PRIVACY;
+FIRECRAWL_OR_SEARCH_ADAPTER / TOOL_RUNTIME_INVENTORY;
+CHAT_RENDERING / ARTIFACT_DISPLAY / COMPACT_CITATIONS;
+DEEP_RUN_30MIN / CANCELLATION_RECOVERY;
+MEMORY_ISOLATION / IMAGE_ENGINE;
+SECURITY / REGRESSION / DEPLOYED_RUNTIME.
+
+Mỗi mục PASS/FAIL/BLOCKED/NOT_RUN hoặc PARTIAL có phạm vi rõ, kèm source change, test, live run/artifact và hạn chế. Tách requested/sent/observed; provider không trả không bịa.
+
+Ghi CODE_SHA, TESTED_TREE, snapshot digest và deployed artifact thật. Git HEAD cũ + uncommitted changes không được trình bày như một commit mới đã bao gồm toàn bộ bản sửa.
+
+Báo mốc đầu khi PDF người dùng đã đọc được và câu hỏi/file hiển thị đúng; không chỉ gửi số lượng test. Cần nêu chính xác nguồn nào đã được tra và phần nào chưa đọc đủ, nhưng không đưa panel kỹ thuật rườm rà vào câu trả lời thông thường.
+
+## 17. TÀI LIỆU ĐỐI CHIẾU
+
+Các nguồn dưới đây là căn cứ công khai tham khảo; không chứng minh quyền account/runtime Galaxy. Đọc lại nội dung hiện hành khi triển khai, không bịa endpoint nếu một trang không truy cập được. Link chuyển hướng cần theo tới trang chính thức.
+
+S1. Model catalog: https://developers.openai.com/api/docs/models
+S2. Model comparison: https://developers.openai.com/api/docs/models/compare
+S3. SIWC models/inference: https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference
+S4. SIWC limits: https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations
+S5. File inputs: https://developers.openai.com/api/docs/guides/file-inputs
+S6. Web search và citations: https://developers.openai.com/api/docs/guides/tools-web-search
+S7. Reasoning: https://developers.openai.com/api/docs/guides/reasoning
+S8. Plugin skills: https://developers.openai.com/plugins/concepts/skills
+S9. Firecrawl: https://github.com/firecrawl/firecrawl
+S10. Firecrawl self-host: https://docs.firecrawl.dev/contributing/self-host
+S11. Các upstream tại mục 9 và giấy phép/version được pin.
+
+BẮT ĐẦU BẰNG CA FILE THẬT VÀ SOURCE HIỆN TẠI. SỬA NGUYÊN NHÂN, KHÔNG TĂNG GIỚI HẠN MÙ. KHÔNG QUAY LẠI WORKSPACE. GIỮ CREATE VÀ MEMORY, TRIỂN KHAI TỪNG LÁT CÓ THỂ DÙNG.

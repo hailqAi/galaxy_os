@@ -7,6 +7,9 @@ import ExcelJS from 'exceljs';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { Readable } from 'node:stream';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import JSZip from 'jszip';
 import { describe, expect, it, vi } from 'vitest';
 import { CurrentActor } from '../access-control/current-actor';
 import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
@@ -19,7 +22,11 @@ import {
 } from '../projects/project-stage-two.dto';
 import { importUploadLimits } from './imports.controller';
 import { ImportMappingDto } from './imports.dto';
-import { ImportsService, parseStageTwoWorkbook } from './imports.service';
+import {
+  ImportsService,
+  parseStageTwoWorkbook,
+  assertBoundedWorkbook,
+} from './imports.service';
 
 const actor = {
   organizationId: 'organization',
@@ -1286,5 +1293,84 @@ describe('Import admission and domain authorization', () => {
     expect(remap.status).toBe('rejected');
     expect(status).toBe('COMPLETED');
     expect(customerCreate).toHaveBeenCalledOnce();
+  });
+});
+
+describe('prefixed OOXML workbook bounds', () => {
+  const original = () =>
+    readFileSync(
+      join(__dirname, '../../test/fixtures/e05-work-generated.xlsx'),
+    );
+
+  it('accepts the unchanged actual Work workbook with namespace-prefixed elements', () => {
+    expect(assertBoundedWorkbook(original())).toBe(1);
+  });
+
+  it.each([
+    [
+      'row',
+      '<x:row r="1002"><x:c r="A1002"><x:v>1</x:v></x:c></x:row>',
+      'rows',
+    ],
+    [
+      'column',
+      '<x:row r="1"><x:c r="XFD1"><x:v>1</x:v></x:c></x:row>',
+      'columns',
+    ],
+    [
+      'cell',
+      '<x:row r="1"><x:c r="A1"><x:f>' +
+        'x'.repeat(65537) +
+        '</x:f></x:c></x:row>',
+      'cell data',
+    ],
+    [
+      'string index',
+      '<x:row r="1"><x:c r="A1" t="s"><x:v>9999</x:v></x:c></x:row>',
+      'shared strings',
+    ],
+  ])('retains %s bounds for prefixed cells', async (_kind, rows, error) => {
+    const zip = await JSZip.loadAsync(original());
+    zip.file(
+      'xl/worksheets/sheet1.xml',
+      '<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheetData>' +
+        rows +
+        '</x:sheetData></x:worksheet>',
+    );
+    const bytes = await zip.generateAsync({ type: 'nodebuffer' });
+    expect(() => assertBoundedWorkbook(bytes)).toThrow(error);
+  });
+
+  it('retains the row byte limit when valid prefixed shared-string references expand', async () => {
+    const zip = await JSZip.loadAsync(original());
+    zip.file(
+      'xl/sharedStrings.xml',
+      '<x:sst xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:si><x:t>' +
+        'x'.repeat(64000) +
+        '</x:t></x:si></x:sst>',
+    );
+    const cells = ['A1', 'B1', 'C1', 'D1', 'E1']
+      .map((address) => '<x:c r="' + address + '" t="s"><x:v>0</x:v></x:c>')
+      .join('');
+    zip.file(
+      'xl/worksheets/sheet1.xml',
+      '<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:sheetData><x:row r="1">' +
+        cells +
+        '</x:row></x:sheetData></x:worksheet>',
+    );
+    const bytes = await zip.generateAsync({ type: 'nodebuffer' });
+    expect(() => assertBoundedWorkbook(bytes)).toThrow('row data');
+  });
+
+  it('retains the shared-string byte limit with prefixed strings', async () => {
+    const zip = await JSZip.loadAsync(original());
+    zip.file(
+      'xl/sharedStrings.xml',
+      '<x:sst xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:si><x:t>' +
+        'x'.repeat(65537) +
+        '</x:t></x:si></x:sst>',
+    );
+    const bytes = await zip.generateAsync({ type: 'nodebuffer' });
+    expect(() => assertBoundedWorkbook(bytes)).toThrow('shared string data');
   });
 });

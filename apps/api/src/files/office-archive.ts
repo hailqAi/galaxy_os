@@ -9,7 +9,10 @@ const zipSignature = {
   local: 0x04034b50,
 } as const;
 
-export function boundedOfficeParts(bytes: Buffer) {
+export function boundedOfficeParts(
+  bytes: Buffer,
+  budget = { bytes: 0, entries: 0 },
+) {
   if (bytes.length < 22)
     throw new BadRequestException('Invalid Excel workbook');
   let end = -1;
@@ -34,13 +37,13 @@ export function boundedOfficeParts(bytes: Buffer) {
     bytes.readUInt16LE(end + 6) !== 0 ||
     bytes.readUInt16LE(end + 8) !== entries ||
     !entries ||
-    entries > maximumWorkbookEntries ||
+    budget.entries + entries > maximumWorkbookEntries ||
     centralSize > 1024 * 1024 ||
     centralOffset + centralSize !== end
   )
     throw new BadRequestException('Invalid Excel workbook');
   let cursor = centralOffset;
-  let expanded = 0;
+  budget.entries += entries;
   const parts = new Map<string, Buffer>();
   for (let entry = 0; entry < entries; entry++) {
     if (
@@ -68,7 +71,7 @@ export function boundedOfficeParts(bytes: Buffer) {
       disk !== 0 ||
       compressedSize === 0xffffffff ||
       declaredSize === 0xffffffff ||
-      declaredSize > maximumExpandedWorkbookBytes ||
+      declaredSize > maximumExpandedWorkbookBytes - budget.bytes ||
       localOffset + 30 > centralOffset ||
       bytes.readUInt32LE(localOffset) !== zipSignature.local
     )
@@ -99,13 +102,16 @@ export function boundedOfficeParts(bytes: Buffer) {
           : inflateRawSync(
               bytes.subarray(dataOffset, dataOffset + compressedSize),
               {
-                maxOutputLength: maximumExpandedWorkbookBytes - expanded,
+                maxOutputLength: Math.max(
+                  1,
+                  maximumExpandedWorkbookBytes - budget.bytes,
+                ),
               },
             );
-      expanded += content.length;
+      budget.bytes += content.length;
       if (
         content.length !== declaredSize ||
-        expanded > maximumExpandedWorkbookBytes
+        budget.bytes > maximumExpandedWorkbookBytes
       )
         throw new Error('expanded workbook mismatch');
       if (parts.has(name))

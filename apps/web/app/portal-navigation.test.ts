@@ -7,7 +7,7 @@ import {
 } from './portal-navigation';
 
 describe('permission-aware portal navigation', () => {
-  it('shows ChatGPT management only to system administrators with read permission', () => {
+  it('shows ChatGPT connection to AI users and to system administrators with read permission', () => {
     const hrefs = (
       scope: 'SYSTEM' | 'ORGANIZATION' | 'MANAGED_DEPARTMENTS' | 'SELF',
       permissions = ['system.settings.read'],
@@ -23,6 +23,9 @@ describe('permission-aware portal navigation', () => {
     ] as const)
       expect(hrefs(scope)).not.toContain('/settings/chatgpt-connection');
     expect(hrefs('SYSTEM', [])).not.toContain('/settings/chatgpt-connection');
+    expect(hrefs('SELF', ['ai.invoke'])).toContain(
+      '/settings/chatgpt-connection',
+    );
   });
   it.each([
     '/installations',

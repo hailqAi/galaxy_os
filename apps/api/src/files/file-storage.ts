@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import {
   mkdir,
+  link,
   open,
   opendir,
   readFile,
@@ -16,7 +17,7 @@ import {
   stat,
 } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -25,7 +26,7 @@ import { readEnvironment } from '../config/env';
 const claimIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const storageKeyPattern =
-  /^(?:[0-9a-f-]+\/\d{4}\/\d{2}\/[0-9a-f-]+|[0-9a-f-]+\/[0-9a-f-]+\.(?:pdf|docx|xlsx|csv|zip|jpe?g|png|mp4|dwg))$/;
+  /^(?:[0-9a-f-]+\/\d{4}\/\d{2}\/[0-9a-f-]+|[0-9a-f-]+\/[0-9a-f-]+\.(?:pdf|docx|xlsx|pptx|csv|zip|jpe?g|png|mp4|dwg))$/;
 
 export async function ensurePrivateDirectory(path: string) {
   await mkdir(path, { recursive: true, mode: 0o700 });
@@ -82,6 +83,20 @@ export class FileStorage implements OnModuleInit, OnModuleDestroy {
   }>;
   async onModuleInit() {
     await ensurePrivateDirectory(this.root);
+    const readers = join(this.root, '.readers');
+    await ensurePrivateDirectory(readers);
+    const entries = await this.openDirectory(readers);
+    if (entries) {
+      let checked = 0;
+      for await (const entry of entries) {
+        if (++checked > 100) break;
+        if (!entry.isDirectory() || !claimIdPattern.test(entry.name)) continue;
+        const path = join(readers, entry.name);
+        const modified = await this.modifiedAt(path);
+        if (modified && modified.getTime() < Date.now() - 86_400_000)
+          await rm(path, { recursive: true, force: true });
+      }
+    }
   }
   createKey(organizationId: string, now = new Date()) {
     return `${organizationId}/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, '0')}/${randomUUID()}`;
@@ -270,12 +285,71 @@ export class FileStorage implements OnModuleInit, OnModuleDestroy {
     if (!data) throw new NotFoundException();
     return data;
   }
-  async stream(key: string) {
+  async withVerifiedPath<T>(
+    key: string,
+    size: number,
+    checksum: string,
+    read: (path: string) => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    signal?.throwIfAborted();
+    if (
+      !Number.isSafeInteger(size) ||
+      size < 1 ||
+      size > this.maximumBytes ||
+      !/^[0-9a-f]{64}$/.test(checksum)
+    )
+      throw new NotFoundException();
+    const source = this.safePath(key);
+    const readers = join(this.root, '.readers');
+    await ensurePrivateDirectory(readers);
+    const directory = join(readers, randomUUID());
+    await mkdir(directory, { mode: 0o700 });
+    const path = join(directory, 'source');
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      // A private hard link pins the verified inode without copying the original.
+      await link(source, path);
+      handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const before = await handle.stat();
+      if (
+        !before.isFile() ||
+        before.size !== size ||
+        (process.getuid && before.uid !== process.getuid())
+      )
+        throw new NotFoundException();
+      const verifyHash = async () => {
+        const hash = createHash('sha256');
+        for await (const part of handle!.createReadStream({
+          autoClose: false,
+          start: 0,
+        })) {
+          signal?.throwIfAborted();
+          hash.update(part);
+        }
+        if (hash.digest('hex') !== checksum) throw new NotFoundException();
+      };
+      await verifyHash();
+      signal?.throwIfAborted();
+      const result = await read(path);
+      const after = await handle.stat();
+      if (after.size !== before.size || after.mtimeMs !== before.mtimeMs)
+        throw new NotFoundException();
+      // Filesystem timestamps can miss fast writes; verify bytes again before publication.
+      await verifyHash();
+      signal?.throwIfAborted();
+      return result;
+    } finally {
+      await handle?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+  async stream(key: string, start = 0) {
     const path = this.safePath(key);
     await stat(path).catch(() => {
       throw new NotFoundException();
     });
-    return createReadStream(path);
+    return createReadStream(path, { start });
   }
   async remove(key: string) {
     let path: string;

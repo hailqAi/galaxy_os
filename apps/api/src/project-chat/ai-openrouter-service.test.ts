@@ -1,3 +1,4 @@
+import { ProjectsService } from '../projects/projects.service';
 import { afterAll, afterEach, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -34,6 +35,11 @@ const service = new ProjectAiService(
   null as never,
   null as never,
   null as never,
+  null as never,
+  null as never,
+  null as never,
+  null as never,
+  {} as ProjectsService,
 );
 afterEach(() => vi.unstubAllEnvs());
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
@@ -76,7 +82,7 @@ it.each(['COMPLETED', 'FAILED'])(
     } as unknown as ChatAiAnswer;
     const tx = {
       chatAiAnswerDependency: { findMany: async () => [] },
-      chatAiAnswer: { findMany: async () => [] },
+      chatAiAnswer: { findMany: async () => [], count: async () => 0 },
     } as unknown as Prisma.TransactionClient;
     expect(
       await service['view'](tx, actor, 'project', answer, 'grant'),
@@ -280,6 +286,11 @@ it.each(['BACKOFF', 'CANCELLED'])(
       null as never,
       null as never,
       null as never,
+      null as never,
+      null as never,
+      null as never,
+      null as never,
+      {} as ProjectsService,
     );
     vi.stubGlobal('fetch', async (url: string) => {
       if (url.endsWith('/models'))

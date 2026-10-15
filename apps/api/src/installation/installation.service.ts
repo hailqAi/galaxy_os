@@ -383,7 +383,12 @@ export class InstallationService {
   }
 
   async plans(actor: CurrentActor, projectId: string) {
-    await this.policy.assertView(actor, 'Project', projectId);
+    await this.policy.assertView(
+      actor,
+      'Project',
+      projectId,
+      'installation.read',
+    );
     return this.prisma.installationPlan.findMany({
       where: { organizationId: actor.organizationId, projectId },
       include: {

@@ -13,7 +13,9 @@
   "dependencies": {
     "next": "16.2.10",
     "react": "19.1.1",
-    "react-dom": "19.1.1"
+    "react-dom": "19.1.1",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
   },
   "devDependencies": {
     "@next/env": "16.2.10",

@@ -7,6 +7,7 @@ import { InstallationController } from './installation.controller';
 import { InstallationService } from './installation.service';
 
 @Module({
+  exports: [InstallationService],
   imports: [AccessControlModule, InventoryModule, FilesModule],
   controllers: [InstallationController],
   providers: [PrismaService, InstallationService],

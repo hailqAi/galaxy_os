@@ -39,6 +39,31 @@ import {
   routeProject,
   visibleStageOneDocumentWhere,
 } from './project-stage-one.rules';
+export type ProjectListQuery = {
+  page: number;
+  pageSize: number;
+  search?: string;
+  customerId?: string;
+  phase?: ProjectPhase;
+  status?: 'PLANNING' | 'ACTIVE' | 'ON_HOLD' | 'COMPLETED' | 'CANCELLED';
+  health?: 'ON_TRACK' | 'AT_RISK' | 'OFF_TRACK';
+  projectManagerId?: string;
+  departmentId?: string;
+  from?: Date;
+  to?: Date;
+  sort?:
+    | 'code'
+    | 'name'
+    | 'updatedAt'
+    | 'expectedCompletionDate'
+    | 'estimatedValue';
+  direction?: 'asc' | 'desc';
+  currentStage?: VisualProjectStage;
+  mine?: boolean;
+  active?: boolean;
+  commitment?: 'POTENTIAL' | 'SIGNED';
+};
+
 const phases: ProjectPhase[] = [
   'SURVEY',
   'REQUIREMENT',
@@ -187,32 +212,9 @@ export class ProjectsService {
       )
     );
   }
-  async list(
+  private listWhere(
     actor: CurrentActor,
-    q: {
-      page: number;
-      pageSize: number;
-      search?: string;
-      customerId?: string;
-      phase?: ProjectPhase;
-      status?: 'PLANNING' | 'ACTIVE' | 'ON_HOLD' | 'COMPLETED' | 'CANCELLED';
-      health?: 'ON_TRACK' | 'AT_RISK' | 'OFF_TRACK';
-      projectManagerId?: string;
-      departmentId?: string;
-      from?: Date;
-      to?: Date;
-      sort?:
-        | 'code'
-        | 'name'
-        | 'updatedAt'
-        | 'expectedCompletionDate'
-        | 'estimatedValue';
-      direction?: 'asc' | 'desc';
-      currentStage?: VisualProjectStage;
-      mine?: boolean;
-      active?: boolean;
-      commitment?: 'POTENTIAL' | 'SIGNED';
-    },
+    q: Omit<ProjectListQuery, 'page' | 'pageSize'>,
   ) {
     if (q.commitment && !actor.permissions.includes('contract.read'))
       throw new ForbiddenException('Contract permission required');
@@ -221,7 +223,7 @@ export class ProjectsService {
       !this.hasUnscopedPermission(actor, 'estimate.read')
     )
       throw new ForbiddenException('Estimate permission required');
-    const where: Prisma.ProjectWhereInput = {
+    return {
       AND: [
         this.visibleWhere(actor),
         q.active ? { status: { in: ['PLANNING', 'ACTIVE'] } } : {},
@@ -273,7 +275,35 @@ export class ProjectsService {
         : undefined,
       expectedCompletionDate:
         q.from || q.to ? { gte: q.from, lte: q.to } : undefined,
+    } satisfies Prisma.ProjectWhereInput;
+  }
+  async count(
+    actor: CurrentActor,
+    q: Omit<ProjectListQuery, 'page' | 'pageSize'> = {},
+    db: Pick<Prisma.TransactionClient, 'project'> = this.prisma,
+  ) {
+    if (!actor.permissions.includes('project.read'))
+      throw new ForbiddenException('Project permission required');
+    const count = await db.project.count({
+      where: this.listWhere(actor, q),
+    });
+    return {
+      count,
+      entity_type: 'Project' as const,
+      scope: {
+        organization_id: actor.organizationId,
+        visibility: 'AUTHORIZED_PROJECTS' as const,
+      },
+      filters: {
+        ...q,
+        deleted: 'excluded' as const,
+        archived: 'not_implemented' as const,
+      },
+      queried_at: new Date().toISOString(),
     };
+  }
+  async list(actor: CurrentActor, q: ProjectListQuery) {
+    const where = this.listWhere(actor, q);
     const [items, total] = await this.prisma.$transaction([
       this.prisma.project.findMany({
         where,

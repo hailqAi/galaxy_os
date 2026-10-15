@@ -1,0 +1,11 @@
+{
+  "fixture": "E05_ONLY_NOT_PRODUCTION_PRICE_RULES",
+  "currency": "VND",
+  "memory_rule": "Chiết khấu 10% trên tổng tiền hàng; sau đó tính VAT 8% trên số tiền sau chiết khấu. Không làm tròn trung gian.",
+  "line_totals": [300000, 300000],
+  "subtotal": 600000,
+  "discount": 60000,
+  "taxable": 540000,
+  "vat": 43200,
+  "grand_total": 583200
+}

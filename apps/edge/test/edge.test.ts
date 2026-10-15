@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { createServer, request as httpRequest, type Server } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { connect } from 'node:tls';
@@ -138,6 +138,198 @@ async function listen(server: Server) {
 }
 
 describe('Galaxy edge', () => {
+  it('closes its upstream health transport before reporting readiness', async () => {
+    const upstream = await listen(
+      createServer((_request, response) => {
+        // Exercise a backend that advertises keep-alive despite the request header.
+        response.writeHead(200, {
+          'content-type': 'application/json',
+          connection: 'keep-alive',
+          'content-length': '2',
+        });
+        response.end('{}');
+      }),
+    );
+    running.push({
+      stop: () => {
+        upstream.closeAllConnections();
+        return new Promise<void>((resolve) => upstream.close(() => resolve()));
+      },
+    });
+    const edge = createEdge(config(address(upstream), false), () => {});
+    running.push(edge);
+    await edge.start();
+    for (let i = 0; i < 3; i++) {
+      expect(
+        (await get(address(edge.http), '/health', 'localhost')).status,
+      ).toBe(200);
+      expect(
+        execFileSync(
+          'ss',
+          [
+            '-H',
+            '-tan',
+            'state',
+            'established',
+            `sport = :${address(upstream)}`,
+          ],
+          { encoding: 'utf8' },
+        ).trim(),
+      ).toBe('');
+    }
+  });
+
+  it('closes oversized and stalled health responses without reporting readiness', async () => {
+    let stalled = false;
+    const upstream = await listen(
+      createServer((_request, response) => {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        if (stalled) response.flushHeaders();
+        else response.end(Buffer.alloc(65537, 'x'));
+      }),
+    );
+    running.push({
+      stop: () => {
+        upstream.closeAllConnections();
+        return new Promise<void>((resolve) => upstream.close(() => resolve()));
+      },
+    });
+    const edge = createEdge(config(address(upstream), false), () => {});
+    running.push(edge);
+    await edge.start();
+    for (const value of [false, true]) {
+      stalled = value;
+      expect(
+        (await get(address(edge.http), '/health', 'localhost')).status,
+      ).toBe(503);
+      expect(
+        execFileSync(
+          'ss',
+          [
+            '-H',
+            '-tan',
+            'state',
+            'established',
+            `sport = :${address(upstream)}`,
+          ],
+          { encoding: 'utf8' },
+        ).trim(),
+      ).toBe('');
+    }
+  });
+
+  it('drains all new writes at ingress and exposes admitted requests only through local health', async () => {
+    const gate = join(temporary, 'gate');
+    const upstream = await listen(
+      createServer((_req, res) => {
+        res.setHeader('content-type', 'application/json');
+        res.end('{"ready":true}');
+      }),
+    );
+    running.push({
+      stop: () =>
+        new Promise<void>((resolve) => upstream.close(() => resolve())),
+    });
+    const edge = createEdge(
+      { ...config(address(upstream)), deploymentGate: gate },
+      (entry) => logs.push(entry),
+    );
+    running.push(edge);
+    await edge.start();
+    writeFileSync(gate, 'drain');
+    expect(
+      (
+        await secure(address(edge.https!), {
+          path: '/api/v1/uploads/initiate',
+          method: 'POST',
+        })
+      ).status,
+    ).toBe(503);
+    expect(
+      (await secure(address(edge.https!), { path: '/mcp', method: 'POST' }))
+        .status,
+    ).toBe(200);
+    for (const path of [
+      '/mcp/oauth/token',
+      '/api/v1/project-chat/projects/p/ai/answers/a/mcp/cancel',
+    ])
+      expect(
+        (await secure(address(edge.https!), { path, method: 'POST' })).status,
+      ).toBe(200);
+    expect(
+      (
+        await secure(address(edge.https!), {
+          path: '/api/v1/project-chat/projects/p/ai/answers/a/mcp/retry',
+          method: 'POST',
+        })
+      ).status,
+    ).toBe(503);
+    const health = JSON.parse(
+      (await get(address(edge.http), '/health', 'localhost')).body,
+    );
+    expect(health.admission).toBe('drain');
+    expect(health.inFlight).toBe(0);
+    writeFileSync(gate, 'closed');
+    expect(
+      (await secure(address(edge.https!), { path: '/mcp', method: 'POST' }))
+        .status,
+    ).toBe(503);
+    expect(
+      (
+        await secure(address(edge.https!), {
+          path: '/mcp/oauth/token',
+          method: 'POST',
+        })
+      ).status,
+    ).toBe(503);
+    expect(
+      (await secure(address(edge.https!), { path: '/health' })).body,
+    ).not.toContain('inFlight');
+    rmSync(gate);
+  });
+  it('routes MCP and OAuth discovery directly to API while ordinary pages use Web', async () => {
+    const web = await listen(
+      createServer((_request, response) => {
+        response.writeHead(307, { location: '/login' });
+        response.end('web');
+      }),
+    );
+    const api = await listen(
+      createServer((request, response) => {
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify({ path: request.url }));
+      }),
+    );
+    for (const server of [web, api])
+      running.push({
+        stop: () =>
+          new Promise<void>((resolve) => server.close(() => resolve())),
+      });
+    const options = {
+      ...config(address(web)),
+      mcpUpstream: new URL(`http://127.0.0.1:${address(api)}`),
+    };
+    const edge = createEdge(options, (entry) => logs.push(entry));
+    running.push(edge);
+    await edge.start();
+    for (const path of [
+      '/mcp',
+      '/mcp/oauth/token',
+      '/.well-known/oauth-protected-resource/mcp',
+      '/.well-known/oauth-authorization-server',
+    ]) {
+      const response = await secure(address(edge.https!), { path });
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toBe('application/json');
+      expect(JSON.parse(response.body)).toEqual({ path });
+    }
+    expect(
+      (await secure(address(edge.https!), { path: '/projects' })).status,
+    ).toBe(307);
+    expect(
+      (await secure(address(edge.https!), { path: '/mcp-lookalike' })).status,
+    ).toBe(307);
+  });
   it('keeps public access closed for normal and prefetch requests until enabled', async () => {
     let reads = 0;
     const upstream = await listen(
@@ -186,7 +378,7 @@ describe('Galaxy edge', () => {
     expect((await get(port, '/', 'attacker.example')).status).toBe(400);
     expect(await get(port, '/health', 'localhost')).toMatchObject({
       status: 503,
-      body: '{"ready":false,"tls":false,"upstream":false}',
+      body: '{"ready":false,"tls":false,"upstream":false,"admission":"open","inFlight":0,"releaseId":"development"}',
     });
     expect(await get(port, '/login?returnTo=%2F')).toMatchObject({
       status: 308,

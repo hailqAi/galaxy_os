@@ -52,7 +52,14 @@ const config: NextConfig = {
     },
   },
   async headers() {
-    return [{ source: '/(.*)', headers }];
+    return [
+      { source: '/(.*)', headers },
+      {
+        source:
+          '/api/v1/project-chat/projects/:projectId/ai/files/:sourceId/preview',
+        headers: [{ key: 'X-Frame-Options', value: 'SAMEORIGIN' }],
+      },
+    ];
   },
   async redirects() {
     return [

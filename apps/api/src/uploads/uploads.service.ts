@@ -11,14 +11,15 @@ import {
   PayloadTooLargeException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, UploadSession, FileAsset } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { FileHandle, open, readdir, rm, rmdir, stat } from 'node:fs/promises';
 import { dirname, extname, join, resolve } from 'node:path';
-import { finished, pipeline } from 'node:stream/promises';
+import { pipeline } from 'node:stream/promises';
 import { Readable, Transform } from 'node:stream';
 import { CurrentActor } from '../access-control/current-actor';
+import { PROJECT_CHAT_TRANSACTION_TIMEOUT_MS } from '../access-control/project-chat.policy';
 import { readEnvironment } from '../config/env';
 import {
   createPrivateWriteStream,
@@ -26,8 +27,10 @@ import {
   FileStorage,
 } from '../files/file-storage';
 import { safeFilename } from '../files/filename';
+import { FilesService } from '../files/files.service';
 import {
   assertFileCapacity,
+  assertUploadDiskSpace,
   lockOrganizationFileCapacity,
 } from '../files/file-quota';
 import { PrismaService } from '../prisma.service';
@@ -37,9 +40,10 @@ import {
   InitiateUploadDto,
   RecoverUploadsQuery,
   SubmitUploadsDto,
+  UploadConstraintsQuery,
 } from './uploads.dto';
 
-const uploadTypes = {
+export const uploadTypes = {
   '.pdf': { canonical: 'application/pdf', declared: ['application/pdf'] },
   '.docx': {
     canonical:
@@ -56,6 +60,21 @@ const uploadTypes = {
     ],
   },
   '.csv': { canonical: 'text/csv', declared: ['text/csv'] },
+  '.txt': {
+    canonical: 'text/plain',
+    declared: ['text/plain', 'application/octet-stream'],
+  },
+  '.md': {
+    canonical: 'text/markdown',
+    declared: ['text/markdown', 'text/plain', 'application/octet-stream'],
+  },
+  '.pptx': {
+    canonical:
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    declared: [
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    ],
+  },
   '.zip': {
     canonical: 'application/zip',
     declared: ['application/zip', 'application/x-zip-compressed'],
@@ -74,9 +93,10 @@ const uploadTypes = {
     ],
   },
 } as const;
-const allowedExtensions = Object.keys(
-  uploadTypes,
-) as (keyof typeof uploadTypes)[];
+const chatExtensions = Object.keys(uploadTypes) as (keyof typeof uploadTypes)[];
+const allowedExtensions = chatExtensions.filter(
+  (extension) => !['.txt', '.md', '.pptx'].includes(extension),
+);
 const maximumZipCentralDirectoryBytes = 1_048_576;
 const uploadSessionExpiry = () => new Date(Date.now() + 24 * 60 * 60 * 1000);
 const uploadSessionMaximumLifetimeMs = 7 * 24 * 60 * 60 * 1000;
@@ -212,7 +232,7 @@ function zip64EntryMetadata(
 
 async function validOpenXmlContainer(
   path: string,
-  requiredDirectory: 'word/' | 'xl/',
+  requiredDirectory: 'word/' | 'xl/' | 'ppt/',
 ) {
   try {
     const details = await stat(path);
@@ -381,28 +401,13 @@ async function validOpenXmlContainer(
   }
 }
 
-async function validUtf8Csv(path: string) {
-  const decoder = new TextDecoder('utf-8', { fatal: true });
-  try {
-    for await (const chunk of createReadStream(path)) {
-      const bytes = Buffer.from(chunk);
-      if (bytes.includes(0)) return false;
-      decoder.decode(bytes, { stream: true });
-    }
-    decoder.decode();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function validUploadContent(
+export async function validUploadContent(
   extension: keyof typeof uploadTypes,
   path: string,
 ) {
-  if (extension === '.csv') return validUtf8Csv(path);
   if (extension === '.docx') return validOpenXmlContainer(path, 'word/');
   if (extension === '.xlsx') return validOpenXmlContainer(path, 'xl/');
+  if (extension === '.pptx') return validOpenXmlContainer(path, 'ppt/');
   const header = Buffer.alloc(4_096);
   const file = await open(path, 'r');
   const { bytesRead } = await file
@@ -461,10 +466,13 @@ function hasValidUploadPartGeometry(session: {
   );
 }
 
-export function uploadConstraints(configuredMaximumBytes: number) {
+export function uploadConstraints(
+  configuredMaximumBytes: number,
+  chat = false,
+) {
   return {
     maxBytes: configuredMaximumBytes,
-    allowedExtensions: [...allowedExtensions],
+    allowedExtensions: [...(chat ? chatExtensions : allowedExtensions)],
   };
 }
 
@@ -487,6 +495,9 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     @Optional()
     @Inject(ProjectStageOneService)
     private readonly stageOne?: ProjectStageOneService,
+    @Optional()
+    @Inject(FilesService)
+    private readonly files?: FilesService,
   ) {}
 
   async onModuleInit() {
@@ -675,9 +686,15 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
           id: session.fileAssetId,
           organizationId: session.organizationId,
         },
-        select: { id: true, deletedAt: true },
+        select: {
+          id: true,
+          deletedAt: true,
+          aiSources: { take: 1, select: { id: true } },
+          aiProjectSources: { take: 1, select: { id: true } },
+        },
       });
       if (!file) return false;
+      if (file.aiSources?.length || file.aiProjectSources?.length) return false;
       const referenced = (
         await Promise.all([
           tx.entityAttachment.findFirst({
@@ -1098,25 +1115,73 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       ...value,
       declaredSize: session.declaredSize.toString(),
       uploadedBytes: session.uploadedBytes.toString(),
-      uploadedParts: completed
-        ? undefined
-        : (parts?.map(({ partNumber, size, checksum }) => ({
-            partNumber,
-            size,
-            checksum,
-          })) ?? []),
-      constraints: uploadConstraints(this.environment.UPLOAD_MAX_FILE_BYTES),
+      uploadedParts:
+        completed &&
+        !('aiConversationId' in session && session.aiConversationId)
+          ? undefined
+          : (parts?.map(({ partNumber, size, checksum }) => ({
+              partNumber,
+              size,
+              checksum,
+            })) ?? []),
+      constraints: uploadConstraints(
+        'aiConversationId' in session && session.aiConversationId
+          ? Math.min(10_000_000_000, this.environment.UPLOAD_MAX_FILE_BYTES)
+          : this.environment.UPLOAD_MAX_FILE_BYTES,
+        Boolean('aiConversationId' in session && session.aiConversationId),
+      ),
     };
   }
 
-  private completedView(session: {
-    fileAssetId: string | null;
-    uploadedBytes: bigint;
-  }) {
+  private async completedView(
+    actor: CurrentActor,
+    session: Pick<
+      UploadSession,
+      | 'fileAssetId'
+      | 'uploadedBytes'
+      | 'checksum'
+      | 'originalFilename'
+      | 'mimeType'
+      | 'aiConversationId'
+      | 'idempotencyKey'
+      | 'projectId'
+      | 'requiredDocumentId'
+      | 'stageOneDocumentId'
+    >,
+  ) {
+    const source = session.aiConversationId
+      ? await this.prisma.$transaction(
+          async (tx) => {
+            await this.assertTargetInTransaction(tx, actor, session);
+            const replay = await this.files!.replayAiUpload(
+              actor,
+              session.aiConversationId!,
+              session.idempotencyKey!,
+              createHash('sha256')
+                .update(
+                  JSON.stringify([
+                    session.checksum,
+                    session.originalFilename,
+                    session.mimeType,
+                  ]),
+                )
+                .digest('hex'),
+              tx,
+            );
+            if (!replay || replay.fileAssetId !== session.fileAssetId)
+              throw new NotFoundException();
+            return replay;
+          },
+          { timeout: PROJECT_CHAT_TRANSACTION_TIMEOUT_MS },
+        )
+      : null;
     return {
       status: 'AVAILABLE' as const,
       fileAssetId: session.fileAssetId,
       uploadedBytes: session.uploadedBytes.toString(),
+      ...(source
+        ? { sourceId: source.id, version: source.version, label: source.label }
+        : {}),
     };
   }
 
@@ -1167,13 +1232,25 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       throw new ForbiddenException('Required permission is missing');
   }
 
-  constraints(actor: CurrentActor) {
+  constraints(actor: CurrentActor, query?: UploadConstraintsQuery) {
+    if (query?.aiConversationId)
+      return this.target(actor, {
+        projectId: query.projectId ?? null,
+        requiredDocumentId: null,
+        stageOneDocumentId: null,
+        aiConversationId: query.aiConversationId,
+        idempotencyKey: randomUUID(),
+      }).then(() =>
+        uploadConstraints(
+          Math.min(10_000_000_000, this.environment.UPLOAD_MAX_FILE_BYTES),
+          true,
+        ),
+      );
     this.assertPermissions(actor);
     return uploadConstraints(this.environment.UPLOAD_MAX_FILE_BYTES);
   }
 
   private async owned(actor: CurrentActor, id: string, terminalRead = false) {
-    this.assertPermissions(actor);
     const session = await this.prisma.uploadSession.findFirst({
       where: {
         id,
@@ -1185,10 +1262,14 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     if (!session) throw new NotFoundException('Upload session not found');
     if (
       !session.projectId ||
-      Boolean(session.requiredDocumentId) ===
-        Boolean(session.stageOneDocumentId)
+      [
+        session.requiredDocumentId,
+        session.stageOneDocumentId,
+        session.aiConversationId,
+      ].filter(Boolean).length !== 1
     )
       throw new NotFoundException('Upload session not found');
+    if (!session.aiConversationId) this.assertPermissions(actor);
     await this.target(actor, session);
     const now = new Date();
     if (
@@ -1264,12 +1345,26 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       projectId: string | null;
       requiredDocumentId: string | null;
       stageOneDocumentId: string | null;
+      aiConversationId?: string | null;
+      idempotencyKey?: string | null;
     },
-    db?: Pick<
-      Prisma.TransactionClient,
-      'project' | 'projectRequiredDocument' | 'projectStageOneDocument'
-    >,
+    db?: Prisma.TransactionClient,
   ) {
+    if (session.aiConversationId) {
+      if (!this.files) throw new NotFoundException('Upload session not found');
+      return this.files
+        .assertAiUpload(
+          actor,
+          session.aiConversationId,
+          session.idempotencyKey ?? undefined,
+          db ?? this.prisma,
+        )
+        .then((conversation) => {
+          if (conversation.projectId !== session.projectId)
+            throw new NotFoundException('Upload session not found');
+          return conversation;
+        });
+    }
     if (session.stageOneDocumentId) {
       const args = [
         actor,
@@ -1297,6 +1392,8 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       projectId: string | null;
       requiredDocumentId: string | null;
       stageOneDocumentId: string | null;
+      aiConversationId?: string | null;
+      idempotencyKey?: string | null;
     },
   ) {
     const project = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
@@ -1314,11 +1411,20 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     await this.target(actor, session, tx);
   }
 
-  async initiate(actor: CurrentActor, data: InitiateUploadDto) {
-    this.assertPermissions(actor);
-    const idempotencyKey = (
+  async initiate(
+    actor: CurrentActor,
+    data: InitiateUploadDto,
+    mcpArtifactId?: string,
+  ) {
+    if (mcpArtifactId && !actor.mcpAuthorizationId)
+      throw new ForbiddenException();
+    if (!data.aiConversationId) this.assertPermissions(actor);
+    const suppliedKey = (
       data.idempotencyKey ?? data.stageOneDocument?.idempotencyKey
     )?.trim();
+    const idempotencyKey = data.aiConversationId
+      ? suppliedKey?.toLowerCase()
+      : suppliedKey;
     if (
       !idempotencyKey ||
       (data.idempotencyKey &&
@@ -1327,6 +1433,14 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
           data.stageOneDocument.idempotencyKey.trim())
     )
       throw new UnprocessableEntityException('Invalid upload initiation key');
+    if (data.aiConversationId)
+      await this.target(actor, {
+        projectId: data.projectId,
+        requiredDocumentId: data.requiredDocumentId ?? null,
+        stageOneDocumentId: null,
+        aiConversationId: data.aiConversationId,
+        idempotencyKey,
+      });
     const originalFilename = safeFilename(data.originalFilename);
     if (!originalFilename)
       throw new UnprocessableEntityException('Invalid filename');
@@ -1337,7 +1451,10 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
         data.requiredDocumentId,
       );
     const constraints = uploadConstraints(
-      this.environment.UPLOAD_MAX_FILE_BYTES,
+      data.aiConversationId
+        ? Math.min(10_000_000_000, this.environment.UPLOAD_MAX_FILE_BYTES)
+        : this.environment.UPLOAD_MAX_FILE_BYTES,
+      Boolean(data.aiConversationId),
     );
     if (!Number.isSafeInteger(data.declaredSize) || data.declaredSize < 1)
       throw new UnprocessableEntityException(
@@ -1347,7 +1464,7 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       throw new PayloadTooLargeException('Object exceeds configured limit');
     const extension = extname(originalFilename).toLowerCase();
     if (
-      !allowedExtensions.includes(
+      !constraints.allowedExtensions.includes(
         extension as (typeof allowedExtensions)[number],
       )
     )
@@ -1370,6 +1487,8 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       actorId: actor.userId,
       projectId: data.projectId,
       requiredDocumentId: data.requiredDocumentId,
+      aiConversationId: data.aiConversationId,
+      mcpArtifactId,
       submittingOfficerId: data.stageOneDocument?.submittedOfficerId,
       idempotencyKey,
       originalFilename,
@@ -1381,92 +1500,154 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       checksum: data.checksum,
       expiresAt: uploadSessionExpiry(),
     };
-    const result = await this.prisma.$transaction(async (tx) => {
-      await lockOrganizationFileCapacity(tx, actor.organizationId);
-      if (data.requiredDocumentId) {
-        const project = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+    const result = await this.prisma
+      .$transaction(
+        async (tx) => {
+          await lockOrganizationFileCapacity(tx, actor.organizationId);
+          if (data.aiConversationId)
+            await this.assertTargetInTransaction(tx, actor, {
+              ...sessionData,
+              requiredDocumentId: null,
+              stageOneDocumentId: null,
+            });
+          if (data.requiredDocumentId) {
+            const project = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
           SELECT "id" FROM "Project"
           WHERE "id" = ${data.projectId}::uuid
             AND "organizationId" = ${actor.organizationId}::uuid
             AND "deletedAt" IS NULL
           FOR UPDATE
         `);
-        if (!project.length)
-          throw new NotFoundException({
-            category: 'PROJECT_NOT_FOUND_OR_NOT_VISIBLE',
-            message: 'Dự án đã bị xóa hoặc không còn khả dụng.',
+            if (!project.length)
+              throw new NotFoundException({
+                category: 'PROJECT_NOT_FOUND_OR_NOT_VISIBLE',
+                message: 'Dự án đã bị xóa hoặc không còn khả dụng.',
+              });
+            await this.products.assertDocumentUpload(
+              actor,
+              data.projectId,
+              data.requiredDocumentId,
+            );
+          }
+          const stageOneDocument = data.stageOneDocument
+            ? await this.stageOne!.createUploadTargetInTransaction(
+                tx,
+                actor,
+                data.projectId,
+                { ...data.stageOneDocument, idempotencyKey },
+              )
+            : null;
+          const currentSessionData = {
+            ...sessionData,
+            stageOneDocumentId: stageOneDocument?.id,
+          };
+          const existing = await tx.uploadSession.findFirst({
+            where: {
+              organizationId: actor.organizationId,
+              projectId: data.projectId,
+              requiredDocumentId:
+                stageOneDocument || data.aiConversationId
+                  ? null
+                  : data.requiredDocumentId,
+              stageOneDocumentId: stageOneDocument?.id ?? null,
+              aiConversationId: data.aiConversationId ?? null,
+              idempotencyKey,
+              ...(!data.aiConversationId
+                ? {
+                    status: { notIn: ['ABORTED', 'EXPIRED'] },
+                    OR: [
+                      { status: 'AVAILABLE' },
+                      { status: 'VERIFYING', fileAssetId: { not: null } },
+                      { expiresAt: { gt: new Date() } },
+                    ],
+                  }
+                : {}),
+            },
+            include: {
+              parts: { orderBy: { partNumber: 'asc' } },
+            },
+            orderBy: { createdAt: 'desc' },
           });
-        await this.products.assertDocumentUpload(
-          actor,
-          data.projectId,
-          data.requiredDocumentId,
-        );
-      }
-      const stageOneDocument = data.stageOneDocument
-        ? await this.stageOne!.createUploadTargetInTransaction(
-            tx,
-            actor,
-            data.projectId,
-            { ...data.stageOneDocument, idempotencyKey },
+          if (existing) {
+            if (
+              data.aiConversationId &&
+              ['ABORTED', 'EXPIRED'].includes(existing.status)
+            )
+              throw new ConflictException(
+                'Upload đã kết thúc; cần khóa upload mới',
+              );
+            if (
+              existing.actorId !== actor.userId ||
+              existing.originalFilename !==
+                currentSessionData.originalFilename ||
+              existing.declaredSize !== currentSessionData.declaredSize ||
+              existing.mimeType !== currentSessionData.mimeType ||
+              (existing.submittingOfficerId ?? undefined) !==
+                currentSessionData.submittingOfficerId ||
+              (currentSessionData.checksum !== undefined &&
+                existing.checksum !== currentSessionData.checksum)
+            )
+              throw new ConflictException({
+                category: 'IDEMPOTENCY_CONFLICT',
+                message: 'Khóa tải tệp đã được dùng cho tệp khác.',
+              });
+            return { session: existing, created: false };
+          }
+          if (
+            data.aiConversationId &&
+            (await tx.chatAiSourceIndex.findUnique({
+              where: {
+                conversationId_clientKey: {
+                  conversationId: data.aiConversationId,
+                  clientKey: idempotencyKey,
+                },
+              },
+            }))
           )
-        : null;
-      const currentSessionData = {
-        ...sessionData,
-        stageOneDocumentId: stageOneDocument?.id,
-      };
-      const existing = await tx.uploadSession.findFirst({
-        where: {
-          organizationId: actor.organizationId,
-          projectId: data.projectId,
-          requiredDocumentId: stageOneDocument ? null : data.requiredDocumentId,
-          stageOneDocumentId: stageOneDocument?.id ?? null,
-          idempotencyKey,
-          status: { notIn: ['ABORTED', 'EXPIRED'] },
-          OR: [
-            { status: 'AVAILABLE' },
-            { status: 'VERIFYING', fileAssetId: { not: null } },
-            { expiresAt: { gt: new Date() } },
-          ],
-        },
-        include: {
-          parts: { orderBy: { partNumber: 'asc' } },
-        },
-        orderBy: { createdAt: 'desc' },
-      });
-      if (existing) {
-        if (
-          existing.actorId !== actor.userId ||
-          existing.originalFilename !== currentSessionData.originalFilename ||
-          existing.declaredSize !== currentSessionData.declaredSize ||
-          existing.mimeType !== currentSessionData.mimeType ||
-          (existing.submittingOfficerId ?? undefined) !==
-            currentSessionData.submittingOfficerId ||
-          (currentSessionData.checksum !== undefined &&
-            existing.checksum !== currentSessionData.checksum)
-        )
-          throw new ConflictException({
-            category: 'IDEMPOTENCY_CONFLICT',
-            message: 'Khóa tải tệp đã được dùng cho tệp khác.',
+            throw new ConflictException('Khóa upload đã dùng cho file khác');
+          await assertFileCapacity(tx, {
+            organizationId: actor.organizationId,
+            actorId: actor.userId,
+            incomingBytes: currentSessionData.declaredSize,
+            staging: true,
+            organizationLimitBytes: BigInt(
+              this.environment.UPLOAD_ORGANIZATION_QUOTA_BYTES,
+            ),
+            globalLimitBytes: BigInt(
+              this.environment.UPLOAD_GLOBAL_QUOTA_BYTES,
+            ),
+            unmeasuredFileBytes: BigInt(this.environment.UPLOAD_MAX_FILE_BYTES),
+            actorStagingLimit: this.environment.UPLOAD_ACTOR_STAGING_LIMIT,
           });
-        return { session: existing, created: false };
-      }
-      await assertFileCapacity(tx, {
-        organizationId: actor.organizationId,
-        actorId: actor.userId,
-        incomingBytes: currentSessionData.declaredSize,
-        staging: true,
-        organizationLimitBytes: BigInt(
-          this.environment.UPLOAD_ORGANIZATION_QUOTA_BYTES,
-        ),
-        globalLimitBytes: BigInt(this.environment.UPLOAD_GLOBAL_QUOTA_BYTES),
-        unmeasuredFileBytes: BigInt(this.environment.UPLOAD_MAX_FILE_BYTES),
-        actorStagingLimit: this.environment.UPLOAD_ACTOR_STAGING_LIMIT,
+          if (data.aiConversationId)
+            await assertUploadDiskSpace(
+              tx,
+              this.environment.LOCAL_UPLOAD_PATH,
+              currentSessionData.declaredSize,
+            );
+          return {
+            session: await tx.uploadSession.create({
+              data: currentSessionData,
+            }),
+            created: true,
+          };
+        },
+        data.aiConversationId
+          ? { timeout: PROJECT_CHAT_TRANSACTION_TIMEOUT_MS }
+          : undefined,
+      )
+      .catch((error: unknown) => {
+        this.logger.error({
+          event: 'UPLOAD_INITIATE_FAILED',
+          phase: 'TRANSACTION',
+          databaseError:
+            error instanceof Prisma.PrismaClientKnownRequestError &&
+            /^P\d{4}$/.test(error.code)
+              ? error.code
+              : 'UNKNOWN',
+        });
+        throw error;
       });
-      return {
-        session: await tx.uploadSession.create({ data: currentSessionData }),
-        created: true,
-      };
-    });
     if (result.created)
       try {
         await ensurePrivateDirectory(this.stagingPath(id));
@@ -1478,14 +1659,84 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
         await this.releaseStaging(id).catch(() => false);
         throw error;
       }
+    if (
+      result.session.aiConversationId &&
+      result.session.status === 'AVAILABLE'
+    )
+      await this.completedView(actor, result.session);
     return this.view(result.session);
   }
 
   async get(actor: CurrentActor, id: string) {
-    return this.view(await this.owned(actor, id, true));
+    const session = await this.owned(actor, id, true);
+    if (session.aiConversationId && session.status === 'AVAILABLE')
+      await this.completedView(actor, session);
+    return this.view(session);
+  }
+
+  private async assertTransferCapacity(
+    actor: CurrentActor,
+    session: Pick<
+      UploadSession,
+      | 'projectId'
+      | 'requiredDocumentId'
+      | 'stageOneDocumentId'
+      | 'aiConversationId'
+      | 'idempotencyKey'
+    >,
+  ) {
+    if (!session.aiConversationId) return;
+    await this.prisma.$transaction(async (tx) => {
+      await lockOrganizationFileCapacity(tx, actor.organizationId);
+      await this.target(actor, session, tx);
+      await assertUploadDiskSpace(tx, this.environment.LOCAL_UPLOAD_PATH);
+    });
   }
 
   async recover(actor: CurrentActor, query: RecoverUploadsQuery) {
+    if (query.aiConversationId) {
+      await this.target(actor, {
+        projectId: query.projectId,
+        requiredDocumentId: null,
+        stageOneDocumentId: null,
+        aiConversationId: query.aiConversationId,
+        idempotencyKey: randomUUID(),
+      });
+      const sessions = await this.prisma.uploadSession.findMany({
+        where: {
+          organizationId: actor.organizationId,
+          actorId: actor.userId,
+          projectId: query.projectId,
+          aiConversationId: query.aiConversationId,
+          status: { in: ['INITIATED', 'UPLOADING', 'VERIFYING', 'FAILED'] },
+          expiresAt: { gt: new Date() },
+          AND: [
+            {
+              OR: [
+                { fileAssetId: null },
+                { fileAsset: { is: { deletedAt: null } } },
+              ],
+            },
+          ],
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+        take: 101,
+      });
+      await this.target(actor, {
+        projectId: query.projectId,
+        requiredDocumentId: null,
+        stageOneDocumentId: null,
+        aiConversationId: query.aiConversationId,
+        idempotencyKey: randomUUID(),
+      });
+      return {
+        truncated: sessions.length > 100,
+        items: sessions.slice(0, 100).map((session) => ({
+          ...this.recoveryView(session),
+          aiConversationId: session.aiConversationId,
+        })),
+      };
+    }
     this.assertPermissions(actor);
     if (query.requiredDocumentId && query.stageOneDocumentId)
       throw new UnprocessableEntityException(
@@ -1847,6 +2098,7 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       throw new UnprocessableEntityException('Invalid part number');
     await this.purgeUnreferencedParts(session);
     const expectedSize = expectedUploadPartSize(session, partNumber);
+    await this.assertTransferCapacity(actor, session);
     const path = join(
       this.stagingPath(id),
       `${partNumber}-${randomUUID()}.pending`,
@@ -1885,10 +2137,12 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
           current.actorId !== actor.userId ||
           current.projectId !== session.projectId ||
           current.requiredDocumentId !== session.requiredDocumentId ||
+          current.aiConversationId !== session.aiConversationId ||
           !['INITIATED', 'UPLOADING'].includes(current.status) ||
           current.expiresAt <= new Date()
         )
           throw new ConflictException('Upload is not writable');
+        if (current.aiConversationId) await this.target(actor, current, tx);
         const previous = current.parts.find(
           (part) => part.partNumber === partNumber,
         );
@@ -1928,11 +2182,19 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     return this.view(result.updated);
   }
 
-  async complete(actor: CurrentActor, id: string, expectedChecksum?: string) {
+  async complete(
+    actor: CurrentActor,
+    id: string,
+    expectedChecksum?: string,
+    publication?: {
+      check(tx: Prisma.TransactionClient): Promise<unknown>;
+      bind(tx: Prisma.TransactionClient, asset: FileAsset): Promise<unknown>;
+    },
+  ) {
     await this.owned(actor, id);
     if (this.inFlightParts.has(id))
       throw new ConflictException('Upload session is busy');
-    return this.completeSession(actor, id, expectedChecksum);
+    return this.completeSession(actor, id, expectedChecksum, publication);
   }
 
   private assertCompletionChecksum(
@@ -1951,46 +2213,73 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
     actor: CurrentActor,
     id: string,
     expectedChecksum?: string,
+    publication?: Parameters<UploadsService['complete']>[3],
   ) {
     const session = await this.owned(actor, id);
+    if (session.mcpArtifactId && (!publication || !actor.mcpAuthorizationId))
+      throw new ForbiddenException('MCP_UPLOAD_REQUIRES_RESULT_TRANSPORT');
     this.assertCompletionChecksum(session, expectedChecksum);
     if (session.status === 'AVAILABLE') {
-      return this.completedView(session);
+      return this.completedView(actor, session);
     }
     if (session.status === 'VERIFYING' && session.fileAssetId) {
       this.assertCompletionChecksum(session, expectedChecksum);
-      const completed = await this.prisma.$transaction(async (tx) => {
-        await this.assertTargetInTransaction(tx, actor, session);
-        await tx.$queryRaw<
-          { id: string }[]
-        >`SELECT "id" FROM "UploadSession" WHERE "id" = ${id}::uuid FOR UPDATE`;
-        const current = await tx.uploadSession.findUniqueOrThrow({
-          where: { id },
-        });
-        if (
-          current.status !== 'VERIFYING' ||
-          current.actorId !== actor.userId ||
-          current.organizationId !== actor.organizationId ||
-          current.projectId !== session.projectId ||
-          current.requiredDocumentId !== session.requiredDocumentId ||
-          current.stageOneDocumentId !== session.stageOneDocumentId ||
-          current.fileAssetId !== session.fileAssetId
-        )
-          throw new ConflictException('Upload claim was lost');
-        this.assertCompletionChecksum(current, expectedChecksum);
-        return tx.uploadSession.update({
-          where: { id },
-          data: {
-            status: 'AVAILABLE',
-            completedAt: new Date(),
-            expiresAt: uploadSessionExpiry(),
-            verificationClaimId: null,
-            verificationStartedAt: null,
-          },
-        });
-      });
+      const completed = await this.prisma.$transaction(
+        async (tx) => {
+          await this.assertTargetInTransaction(tx, actor, session);
+          await publication?.check(tx);
+          await tx.$queryRaw<
+            { id: string }[]
+          >`SELECT "id" FROM "UploadSession" WHERE "id" = ${id}::uuid FOR UPDATE`;
+          const current = await tx.uploadSession.findUniqueOrThrow({
+            where: { id },
+          });
+          if (
+            current.status !== 'VERIFYING' ||
+            current.actorId !== actor.userId ||
+            current.organizationId !== actor.organizationId ||
+            current.projectId !== session.projectId ||
+            current.requiredDocumentId !== session.requiredDocumentId ||
+            current.stageOneDocumentId !== session.stageOneDocumentId ||
+            current.fileAssetId !== session.fileAssetId
+          )
+            throw new ConflictException('Upload claim was lost');
+          this.assertCompletionChecksum(current, expectedChecksum);
+          if (current.aiConversationId)
+            await this.files!.attachAiUpload(
+              actor,
+              current.aiConversationId,
+              current.idempotencyKey!,
+              await tx.fileAsset.findUniqueOrThrow({
+                where: { id: current.fileAssetId! },
+              }),
+              tx,
+              current.mcpArtifactId ? 'AI_DRAFT' : 'UNCONFIRMED',
+            );
+          if (publication)
+            await publication.bind(
+              tx,
+              await tx.fileAsset.findUniqueOrThrow({
+                where: { id: current.fileAssetId! },
+              }),
+            );
+          return tx.uploadSession.update({
+            where: { id },
+            data: {
+              status: 'AVAILABLE',
+              completedAt: new Date(),
+              expiresAt: uploadSessionExpiry(),
+              verificationClaimId: null,
+              verificationStartedAt: null,
+            },
+          });
+        },
+        session.aiConversationId
+          ? { timeout: PROJECT_CHAT_TRANSACTION_TIMEOUT_MS }
+          : undefined,
+      );
       await this.releaseStaging(id);
-      return this.completedView(completed);
+      return this.completedView(actor, completed);
     }
     if (session.status === 'VERIFYING')
       throw new ConflictException('Upload verification is in progress');
@@ -2026,7 +2315,7 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
         const current = await this.owned(actor, id);
         if (current.status === 'AVAILABLE') {
           this.assertCompletionChecksum(current, expectedChecksum);
-          return this.completedView(current);
+          return this.completedView(actor, current);
         }
         throw new ConflictException('Upload is not completable');
       }
@@ -2093,23 +2382,51 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
       let completed;
       try {
         if (!finalizedAssetId) {
-          const output = await createPrivateWriteStream(finalPath, 'w');
-          for (const part of claimed.parts)
-            await pipeline(createReadStream(part.storagePath), output, {
-              end: false,
-            });
-          output.end();
-          await finished(output);
+          await this.assertTransferCapacity(actor, claimed);
           const extension = extname(
             claimed.originalFilename,
           ).toLowerCase() as keyof typeof uploadTypes;
-          if (!(await validUploadContent(extension, finalPath)))
+          const decoder = ['.csv', '.txt', '.md'].includes(extension)
+            ? new TextDecoder('utf-8', { fatal: true })
+            : undefined;
+          const hash = createHash('sha256');
+          const assembled = Readable.from(
+            (async function* () {
+              for (const part of claimed.parts) {
+                for await (const chunk of createReadStream(part.storagePath)) {
+                  const bytes = Buffer.from(chunk);
+                  if (decoder) {
+                    try {
+                      if (bytes.includes(0)) throw new Error('NUL in text');
+                      decoder.decode(bytes, { stream: true });
+                    } catch {
+                      throw new UnprocessableEntityException(
+                        'File content is not allowed',
+                      );
+                    }
+                  }
+                  hash.update(bytes);
+                  yield bytes;
+                }
+              }
+              try {
+                decoder?.decode();
+              } catch {
+                throw new UnprocessableEntityException(
+                  'File content is not allowed',
+                );
+              }
+            })(),
+            { objectMode: false },
+          );
+          await pipeline(
+            assembled,
+            await createPrivateWriteStream(finalPath, 'w'),
+          );
+          if (!decoder && !(await validUploadContent(extension, finalPath)))
             throw new UnprocessableEntityException(
               'File content is not allowed',
             );
-          const hash = createHash('sha256');
-          for await (const chunk of createReadStream(finalPath))
-            hash.update(chunk);
           const checksum = hash.digest('hex');
           const checksumPrecondition = claimed.checksum ?? expectedChecksum;
           if (checksumPrecondition && checksumPrecondition !== checksum)
@@ -2121,51 +2438,61 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
             verificationClaimId,
           );
           const materialized = await this.prisma
-            .$transaction(async (tx) => {
-              await this.assertTargetInTransaction(tx, actor, claimed);
-              await tx.$queryRaw<
-                { id: string }[]
-              >`SELECT "id" FROM "UploadSession" WHERE "id" = ${id}::uuid FOR UPDATE`;
-              const current = await tx.uploadSession.findUniqueOrThrow({
-                where: { id },
-              });
-              if (
-                current.status !== 'VERIFYING' ||
-                current.actorId !== actor.userId ||
-                current.organizationId !== actor.organizationId ||
-                current.projectId !== session.projectId ||
-                current.requiredDocumentId !== session.requiredDocumentId ||
-                current.stageOneDocumentId !== session.stageOneDocumentId ||
-                current.verificationClaimId !== verificationClaimId
-              )
-                throw new ConflictException('Upload claim was lost');
-              if (current.fileAssetId) return current;
-              await this.storage.publishPending(
-                storageKey!,
-                verificationClaimId,
-              );
-              const fileAsset = await tx.fileAsset.create({
-                data: {
-                  organizationId: actor.organizationId,
-                  originalFilename: claimed.originalFilename,
-                  storedFilename: randomUUID(),
-                  mimeType: claimed.mimeType,
-                  sizeBytes: claimed.declaredSize,
-                  storageKey: storageKey!,
-                  checksum,
-                  category: 'PROJECT_DOCUMENT',
-                  uploadedById: actor.userId,
-                },
-              });
-              return tx.uploadSession.update({
-                where: { id },
-                data: {
-                  fileAssetId: fileAsset.id,
-                  checksum,
-                  storageKey: storageKey!,
-                },
-              });
-            })
+            .$transaction(
+              async (tx) => {
+                await this.assertTargetInTransaction(tx, actor, claimed);
+                await publication?.check(tx);
+                await tx.$queryRaw<
+                  { id: string }[]
+                >`SELECT "id" FROM "UploadSession" WHERE "id" = ${id}::uuid FOR UPDATE`;
+                const current = await tx.uploadSession.findUniqueOrThrow({
+                  where: { id },
+                });
+                if (
+                  current.status !== 'VERIFYING' ||
+                  current.actorId !== actor.userId ||
+                  current.organizationId !== actor.organizationId ||
+                  current.projectId !== session.projectId ||
+                  current.requiredDocumentId !== session.requiredDocumentId ||
+                  current.stageOneDocumentId !== session.stageOneDocumentId ||
+                  current.verificationClaimId !== verificationClaimId
+                )
+                  throw new ConflictException('Upload claim was lost');
+                if (current.fileAssetId) return current;
+                await this.storage.publishPending(
+                  storageKey!,
+                  verificationClaimId,
+                );
+                const fileAsset = await tx.fileAsset.create({
+                  data: {
+                    organizationId: actor.organizationId,
+                    originalFilename: claimed.originalFilename,
+                    storedFilename: randomUUID(),
+                    mimeType: claimed.mimeType,
+                    sizeBytes: claimed.declaredSize,
+                    storageKey: storageKey!,
+                    checksum,
+                    category: claimed.mcpArtifactId
+                      ? 'AI_DRAFT'
+                      : claimed.aiConversationId
+                        ? 'AI_ATTACHMENT'
+                        : 'PROJECT_DOCUMENT',
+                    uploadedById: actor.userId,
+                  },
+                });
+                return tx.uploadSession.update({
+                  where: { id },
+                  data: {
+                    fileAssetId: fileAsset.id,
+                    checksum,
+                    storageKey: storageKey!,
+                  },
+                });
+              },
+              claimed.aiConversationId
+                ? { timeout: PROJECT_CHAT_TRANSACTION_TIMEOUT_MS }
+                : undefined,
+            )
             .catch(async (error) => {
               const current = await this.prisma.uploadSession
                 .findUniqueOrThrow({ where: { id } })
@@ -2176,36 +2503,60 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
             });
           finalizedAssetId = materialized.fileAssetId!;
         }
-        completed = await this.prisma.$transaction(async (tx) => {
-          await this.assertTargetInTransaction(tx, actor, claimed);
-          await tx.$queryRaw<
-            { id: string }[]
-          >`SELECT "id" FROM "UploadSession" WHERE "id" = ${id}::uuid FOR UPDATE`;
-          const current = await tx.uploadSession.findUniqueOrThrow({
-            where: { id },
-          });
-          if (
-            current.status !== 'VERIFYING' ||
-            current.actorId !== actor.userId ||
-            current.organizationId !== actor.organizationId ||
-            current.projectId !== session.projectId ||
-            current.requiredDocumentId !== session.requiredDocumentId ||
-            current.stageOneDocumentId !== session.stageOneDocumentId ||
-            current.fileAssetId !== finalizedAssetId ||
-            current.verificationClaimId !== verificationClaimId
-          )
-            throw new ConflictException('Upload claim was lost');
-          return tx.uploadSession.update({
-            where: { id },
-            data: {
-              status: 'AVAILABLE',
-              completedAt: new Date(),
-              expiresAt: uploadSessionExpiry(),
-              verificationClaimId: null,
-              verificationStartedAt: null,
-            },
-          });
-        });
+        completed = await this.prisma.$transaction(
+          async (tx) => {
+            await this.assertTargetInTransaction(tx, actor, claimed);
+            await publication?.check(tx);
+            await tx.$queryRaw<
+              { id: string }[]
+            >`SELECT "id" FROM "UploadSession" WHERE "id" = ${id}::uuid FOR UPDATE`;
+            const current = await tx.uploadSession.findUniqueOrThrow({
+              where: { id },
+            });
+            if (
+              current.status !== 'VERIFYING' ||
+              current.actorId !== actor.userId ||
+              current.organizationId !== actor.organizationId ||
+              current.projectId !== session.projectId ||
+              current.requiredDocumentId !== session.requiredDocumentId ||
+              current.stageOneDocumentId !== session.stageOneDocumentId ||
+              current.fileAssetId !== finalizedAssetId ||
+              current.verificationClaimId !== verificationClaimId
+            )
+              throw new ConflictException('Upload claim was lost');
+            if (current.aiConversationId)
+              await this.files!.attachAiUpload(
+                actor,
+                current.aiConversationId,
+                current.idempotencyKey!,
+                await tx.fileAsset.findUniqueOrThrow({
+                  where: { id: current.fileAssetId! },
+                }),
+                tx,
+                current.mcpArtifactId ? 'AI_DRAFT' : 'UNCONFIRMED',
+              );
+            if (publication)
+              await publication.bind(
+                tx,
+                await tx.fileAsset.findUniqueOrThrow({
+                  where: { id: current.fileAssetId! },
+                }),
+              );
+            return tx.uploadSession.update({
+              where: { id },
+              data: {
+                status: 'AVAILABLE',
+                completedAt: new Date(),
+                expiresAt: uploadSessionExpiry(),
+                verificationClaimId: null,
+                verificationStartedAt: null,
+              },
+            });
+          },
+          claimed.aiConversationId
+            ? { timeout: PROJECT_CHAT_TRANSACTION_TIMEOUT_MS }
+            : undefined,
+        );
       } catch (error) {
         const published = await this.prisma.uploadSession
           .findUniqueOrThrow({
@@ -2216,7 +2567,7 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
         if (published?.status === 'AVAILABLE' && published.fileAssetId) {
           await this.releaseStaging(id);
           this.assertCompletionChecksum(published, expectedChecksum);
-          return this.completedView(published);
+          return this.completedView(actor, published);
         }
         if (
           error instanceof NotFoundException &&
@@ -2272,7 +2623,7 @@ export class UploadsService implements OnModuleInit, OnModuleDestroy {
         throw error;
       }
       await this.releaseStaging(id);
-      return this.completedView(completed);
+      return this.completedView(actor, completed);
     } finally {
       if (heartbeat) clearInterval(heartbeat);
       this.inFlightFinalizations.delete(id);

@@ -664,7 +664,339 @@ describe.sequential(
           rmSync(dir, { recursive: true });
         }
       },
-      20000, // Full workflow: three vendor rounds, revision, downloads and concurrent index requests.
+      30000, // Three renders plus lineage/ACL checks measured19.7s; the20s fixture timer races cleanup.
+    );
+
+    it('Create embeds explicit scanned PDF pages locally with provenance and current source ACL', async () => {
+      const a = await aiScenario(1),
+        { dir } = unifiedProvider();
+      try {
+        const first = await a.ask(),
+          original = scanPdfFixture(2);
+        const uploaded = await request(app.getHttpServer())
+          .post(
+            `/api/v1/project-chat/projects/${a.projectId}/ai/conversations/${first.conversationId}/files`,
+          )
+          .set('Cookie', users.owner!.cookie)
+          .set('X-Chat-Actor', users.owner!.id)
+          .field('clientKey', randomUUID())
+          .attach('file', original, {
+            filename: 'Source-pages.pdf',
+            contentType: 'application/pdf',
+          })
+          .expect(201);
+        const sourceId = uploaded.body.id;
+        const source = await db.chatAiSourceIndex.findUniqueOrThrow({
+          where: { id: sourceId },
+          include: { file: true },
+        });
+        expect(source.file!.checksum).toBe(
+          createHash('sha256').update(original).digest('hex'),
+        );
+        const legacy = await request(app.getHttpServer())
+          .post(
+            `/api/v1/project-chat/projects/${a.projectId}/ai/conversations/${first.conversationId}/files`,
+          )
+          .set('Cookie', users.owner!.cookie)
+          .set('X-Chat-Actor', users.owner!.id)
+          .field('clientKey', randomUUID())
+          .attach('file', Buffer.from('x'.repeat(1600 * 64)), {
+            filename: 'Legacy-proof.txt',
+            contentType: 'text/plain',
+          })
+          .expect(201);
+        await a.post('/index', { scope: 'ALL' }).expect(201);
+        const legacyIndex = await db.chatAiSourceIndex.findUniqueOrThrow({
+          where: { id: legacy.body.id },
+        });
+        const legacyHandles = (legacyIndex.chunks as { handle: string }[]).map(
+          (chunk) => chunk.handle,
+        );
+        expect(legacyHandles).toHaveLength(64);
+        await db.chatAiAnswerDependency.create({
+          data: {
+            answerId: first.id,
+            sourceIndexId: legacyIndex.id,
+            organizationId,
+            projectId: a.projectId,
+            handles: legacyHandles,
+          },
+        });
+        toolVendor('create_document', {
+          version: 2,
+          format: 'xlsx',
+          title: 'PDF pages in a quote',
+          blocks: [],
+          workbook: {
+            sheets: [
+              {
+                name: 'Quote',
+                cells: [
+                  { kind: 'number', cell: 'A1', value: '2', format: 'integer' },
+                  {
+                    kind: 'number',
+                    cell: 'B1',
+                    value: '12.50',
+                    format: 'decimal2',
+                  },
+                  {
+                    kind: 'formula',
+                    cell: 'C1',
+                    operation: 'multiply',
+                    operands: [
+                      { sheet: 'Quote', cell: 'A1' },
+                      { sheet: 'Quote', cell: 'B1' },
+                    ],
+                    decimalPlaces: 2,
+                    format: 'decimal2',
+                  },
+                ],
+                images: [1, 2].map((page) => ({
+                  sourceId,
+                  page,
+                  cell: page === 1 ? 'A10' : 'A30',
+                  caption: 'Source PDF page ' + page,
+                })),
+              },
+            ],
+          },
+        });
+        const result = (
+          await a.post(`/answers/${first.id}/run`, {}).expect(201)
+        ).body;
+        expect({ status: result.status, errorCode: result.errorCode }).toEqual({
+          status: 'COMPLETED',
+          errorCode: null,
+        });
+        expect(result.artifacts).toHaveLength(1);
+        expect(result.artifacts[0].imageSources).toHaveLength(2);
+        for (const [offset, ref] of result.artifacts[0].imageSources.entries())
+          expect(ref).toMatchObject({
+            sourceId,
+            version: source.version,
+            checksum: source.file!.checksum,
+            page: offset + 1,
+          });
+        const file = await db.fileAsset.findUniqueOrThrow({
+          where: { id: result.artifacts[0].fileAssetId },
+        });
+        const stream = await app.get(FileStorage).stream(file.storageKey),
+          parts: Buffer[] = [];
+        for await (const part of stream) parts.push(part);
+        const bytes = Buffer.concat(parts);
+        expect(createHash('sha256').update(bytes).digest('hex')).toBe(
+          file.checksum,
+        );
+        const { default: JSZip } = await import('jszip'),
+          zip = await JSZip.loadAsync(bytes);
+        for (const [
+          offset,
+          ref,
+        ] of result.artifacts[0].imageSources.entries()) {
+          const image = await zip
+            .file('xl/media/image' + (offset + 1) + '.png')!
+            .async('nodebuffer');
+          expect(createHash('sha256').update(image).digest('hex')).toBe(
+            ref.imageChecksum,
+          );
+        }
+        const { Workbook } = await import('exceljs'),
+          book = new Workbook();
+        await book.xlsx.load(bytes as never);
+        expect(book.getWorksheet('Quote')!.getCell('C1').result).toBe(25);
+        const reloaded = (
+          await a.get(`/conversations/${first.conversationId}`).expect(200)
+        ).body.answers.find((x: { id: string }) => x.id === first.id);
+        expect(reloaded.artifacts).toEqual(result.artifacts);
+        await a
+          .get(`/files/${result.artifacts[0].sourceId}/download`)
+          .expect(200);
+        const memory = await a
+          .post('/memory', {
+            clientKey: randomUUID(),
+            visibility: 'PRIVATE',
+            content: 'Local PDF-page quote fixture',
+            category: 'NOTE',
+            verification: 'USER_CONFIRMED',
+            sourceRefs: [result.memorySource],
+          })
+          .expect(201);
+        expect(memory.body.sources).toContainEqual({
+          kind: 'FILE_INDEX',
+          id: sourceId,
+          version: source.version,
+          locator: {},
+        });
+        await a.get('/memory/' + memory.body.id).expect(200);
+        await db.fileAsset.update({
+          where: { id: source.file!.id },
+          data: { deletedAt: new Date() },
+        });
+        expect(
+          (
+            await a.get(`/conversations/${first.conversationId}`).expect(200)
+          ).body.answers.find((x: { id: string }) => x.id === first.id).status,
+        ).toBe('ACCESS_REVOKED');
+        await a
+          .get(`/files/${result.artifacts[0].sourceId}/download`)
+          .expect(404);
+        await a.get('/memory/' + memory.body.id).expect(404);
+      } finally {
+        await db.chatAiAnswer.updateMany({
+          where: {
+            organizationId,
+            projectId: a.projectId,
+            status: { in: ['FAILED', 'ACCESS_REVOKED'] },
+          },
+          data: { leaseUntil: null },
+        });
+        rmSync(dir, { recursive: true });
+      }
+    }, 30000);
+
+    it.each([
+      'OTHER_PROJECT',
+      'CONTEXT',
+      'VERSION',
+      'GRANT',
+      'CANCEL',
+      'MISSING_PAGE',
+      'PAGE_OUT_OF_RANGE',
+      'SOURCE_PROOF_LIMIT',
+    ])(
+      'Create commits no PDF image artifact when source admission or the render-to-commit fence fails (%s)',
+      async (failure) => {
+        const a = await aiScenario(1),
+          { dir } = unifiedProvider();
+        try {
+          const c = await a
+            .post('/conversations', { scope: 'ALL', clientKey: randomUUID() })
+            .expect(201);
+          const sourceOwner =
+            failure === 'OTHER_PROJECT' ? await aiScenario(0) : a;
+          const sourceConversation =
+            sourceOwner === a
+              ? c.body.id
+              : (await sourceOwner.ask()).conversationId;
+          const uploaded = await request(app.getHttpServer())
+            .post(
+              `/api/v1/project-chat/projects/${sourceOwner.projectId}/ai/conversations/${sourceConversation}/files`,
+            )
+            .set('Cookie', users.owner!.cookie)
+            .set('X-Chat-Actor', users.owner!.id)
+            .field('clientKey', randomUUID())
+            .attach('file', scanPdfFixture(2), {
+              filename: 'Admission-pages.pdf',
+              contentType: 'application/pdf',
+            })
+            .expect(201);
+          const first = (
+            await a
+              .post(`/conversations/${c.body.id}/answers`, {
+                clientKey: randomUUID(),
+                question: 'Create the requested local PDF page draft.',
+                model: 'openrouter/free',
+                ...(failure === 'CONTEXT'
+                  ? { roomId: a.rooms[0]!.room.id }
+                  : {}),
+              })
+              .expect(201)
+          ).body;
+          const original = nativeTools.scanPages;
+          if (failure === 'SOURCE_PROOF_LIMIT')
+            await db.chatAiAnswerDependency.create({
+              data: {
+                answerId: first.id,
+                sourceIndexId: uploaded.body.id,
+                organizationId,
+                projectId: a.projectId,
+                handles: Array.from(
+                  { length: 64 },
+                  (_, i) => 'T_' + i.toString(16).padStart(24, '0'),
+                ),
+              },
+            });
+          const scanned = vi
+            .spyOn(nativeTools, 'scanPages')
+            .mockImplementation(async (...args) => {
+              const output = await original(...args);
+              if (failure === 'VERSION')
+                await db.chatAiSourceIndex.update({
+                  where: { id: uploaded.body.id },
+                  data: { version: '2:' + 'b'.repeat(64) },
+                });
+              if (failure === 'GRANT')
+                await db.chatProjectGrant.update({
+                  where: { id: a.admin.id },
+                  data: { revokedAt: new Date() },
+                });
+              if (failure === 'CANCEL')
+                await a.post(`/answers/${first.id}/cancel`, {}).expect(201);
+              return output;
+            });
+          toolVendor('create_document', {
+            format: 'docx',
+            title: 'Fenced PDF draft',
+            blocks: [
+              {
+                kind: 'image',
+                sourceId: uploaded.body.id,
+                ...(failure === 'MISSING_PAGE'
+                  ? {}
+                  : { page: failure === 'PAGE_OUT_OF_RANGE' ? 3 : 1 }),
+                caption: 'Selected source page',
+              },
+            ],
+          });
+          const response = await a.post(`/answers/${first.id}/run`, {});
+          expect([201, 404]).toContain(response.status);
+          const saved = await db.chatAiAnswer.findUniqueOrThrow({
+            where: { id: first.id },
+          });
+          expect(
+            (saved.usage as { artifacts?: unknown[] }).artifacts ?? [],
+          ).toHaveLength(0);
+          expect(
+            await db.entityAttachment.count({
+              where: { entityType: 'ChatAiAnswer', entityId: first.id },
+            }),
+          ).toBe(0);
+          expect(
+            await db.chatAiAnswerDependency.count({
+              where: { answerId: first.id, sourceIndexId: uploaded.body.id },
+            }),
+          ).toBe(failure === 'SOURCE_PROOF_LIMIT' ? 1 : 0);
+          if (failure === 'SOURCE_PROOF_LIMIT')
+            expect(
+              (
+                await db.chatAiAnswerDependency.findUniqueOrThrow({
+                  where: {
+                    answerId_sourceIndexId: {
+                      answerId: first.id,
+                      sourceIndexId: uploaded.body.id,
+                    },
+                  },
+                })
+              ).handles,
+            ).toHaveLength(64);
+          expect(scanned).toHaveBeenCalledTimes(
+            ['OTHER_PROJECT', 'CONTEXT', 'MISSING_PAGE'].includes(failure)
+              ? 0
+              : 1,
+          );
+        } finally {
+          await db.chatAiAnswer.updateMany({
+            where: {
+              organizationId,
+              projectId: a.projectId,
+              status: { in: ['FAILED', 'ACCESS_REVOKED', 'CANCELLED'] },
+            },
+            data: { leaseUntil: null },
+          });
+          rmSync(dir, { recursive: true });
+        }
+      },
+      20000,
     );
 
     it('công cụ nguồn chặn sourceId Project khác, giữ receipt khi từ chối và revoke nguồn đã đọc', async () => {
@@ -1033,141 +1365,157 @@ describe.sequential(
         }
       },
     );
-    it('công cụ nghiệp vụ đọc đủ kế hoạch đúng Project, giữ Decimal và revoke quyền tài chính trong history', async () => {
-      const a = await aiScenario(0),
-        { dir } = unifiedProvider();
-      let assignmentId: string | undefined;
-      try {
-        const args = { view: 'stage_two_plan', includeFinancial: true };
-        toolVendor('read_project_records', args);
-        const denied = await a.ask();
-        expect(
-          (await a.post(`/answers/${denied.id}/run`, {}).expect(201)).body
-            .status,
-        ).toBe('ACCESS_REVOKED');
-        await db.chatAiAnswer.update({
-          where: { id: denied.id },
-          data: { leaseUntil: null },
-        });
-        const role = await db.role.create({
-          data: {
-            organizationId,
-            code: randomUUID(),
-            name: 'Tool finance fixture',
-            maximumScope: 'ORGANIZATION',
-            permissions: {
-              create: ['task.read', 'estimate.read'].map((code) => ({
-                permission: { connect: { code } },
-              })),
-            },
-          },
-        });
-        assignmentId = (
-          await db.userRole.create({
+    it.each([0, -1])(
+      'công cụ nghiệp vụ giữ quyền tài chính khi timestamp history lệch %i ms',
+      async (offsetMs) => {
+        const a = await aiScenario(0),
+          { dir } = unifiedProvider();
+        let assignmentId: string | undefined;
+        try {
+          const args = { view: 'stage_two_plan', includeFinancial: true };
+          toolVendor('read_project_records', args);
+          const denied = await a.ask();
+          expect(
+            (await a.post(`/answers/${denied.id}/run`, {}).expect(201)).body
+              .status,
+          ).toBe('ACCESS_REVOKED');
+          await db.chatAiAnswer.update({
+            where: { id: denied.id },
+            data: { leaseUntil: null },
+          });
+          const role = await db.role.create({
             data: {
               organizationId,
-              userId: users.owner!.id,
-              roleId: role.id,
-              scopeType: 'ORGANIZATION',
+              code: randomUUID(),
+              name: 'Tool finance fixture',
+              maximumScope: 'ORGANIZATION',
+              permissions: {
+                create: ['task.read', 'estimate.read'].map((code) => ({
+                  permission: { connect: { code } },
+                })),
+              },
             },
-          })
-        ).id;
-        for (const amount of [
-          '999999999999999999.99',
-          '999999999999999999.99',
-          null,
-        ])
+          });
+          assignmentId = (
+            await db.userRole.create({
+              data: {
+                organizationId,
+                userId: users.owner!.id,
+                roleId: role.id,
+                scopeType: 'ORGANIZATION',
+              },
+            })
+          ).id;
+          for (const amount of [
+            '999999999999999999.99',
+            '999999999999999999.99',
+            null,
+          ])
+            await db.task.create({
+              data: {
+                organizationId,
+                projectId: a.projectId,
+                title: 'Cùng tên vật tư',
+                relatedEntityType: 'PROJECT_STAGE_TWO_BASELINE',
+                baselineVersion: 1,
+                allocatedBudget: amount,
+                createdBy: users.owner!.id,
+                updatedBy: users.owner!.id,
+              },
+            });
           await db.task.create({
             data: {
               organizationId,
-              projectId: a.projectId,
-              title: 'Cùng tên vật tư',
+              projectId: otherProjectId,
+              title: 'KHONG_DUOC_TRON_PROJECT',
               relatedEntityType: 'PROJECT_STAGE_TWO_BASELINE',
               baselineVersion: 1,
-              allocatedBudget: amount,
+              allocatedBudget: '111',
               createdBy: users.owner!.id,
               updatedBy: users.owner!.id,
             },
           });
-        await db.task.create({
-          data: {
-            organizationId,
-            projectId: otherProjectId,
-            title: 'KHONG_DUOC_TRON_PROJECT',
-            relatedEntityType: 'PROJECT_STAGE_TWO_BASELINE',
-            baselineVersion: 1,
-            allocatedBudget: '111',
-            createdBy: users.owner!.id,
-            updatedBy: users.owner!.id,
-          },
-        });
-        const payloads = toolVendor('read_project_records', args),
-          allowed = await a.ask();
-        const result = await a
-          .post(`/answers/${allowed.id}/run`, {})
-          .expect(201);
-        expect(result.body.status).toBe('COMPLETED');
-        expect(payloads.join('')).not.toContain('KHONG_DUOC_TRON_PROJECT');
-        const source = (
-          await a
-            .get(
-              `/answers/${allowed.id}/sources/${result.body.sources[0].handle}`,
-            )
-            .expect(200)
-        ).body;
-        expect(JSON.parse(source.text)).toMatchObject({
-          count: 3,
-          knownAllocatedBudget: '1999999999999999999.98',
-          missingBudgetCount: 1,
-          totalAllocatedBudget: null,
-        });
-        toolVendor('create_document', {
-          format: 'xlsx',
-          title: 'Ngân sách nháp',
-          blocks: [
-            {
-              kind: 'table',
-              rows: [['Tổng đã biết', '1999999999999999999.98']],
+          const payloads = toolVendor('read_project_records', args),
+            allowed = await a.ask();
+          const result = await a
+            .post(`/answers/${allowed.id}/run`, {})
+            .expect(201);
+          expect(result.body.status).toBe('COMPLETED');
+          expect(payloads.join('')).not.toContain('KHONG_DUOC_TRON_PROJECT');
+          const source = (
+            await a
+              .get(
+                `/answers/${allowed.id}/sources/${result.body.sources[0].handle}`,
+              )
+              .expect(200)
+          ).body;
+          expect(JSON.parse(source.text)).toMatchObject({
+            count: 3,
+            knownAllocatedBudget: '1999999999999999999.98',
+            missingBudgetCount: 1,
+            totalAllocatedBudget: null,
+          });
+          toolVendor('create_document', {
+            format: 'xlsx',
+            title: 'Ngân sách nháp',
+            blocks: [
+              {
+                kind: 'table',
+                rows: [['Tổng đã biết', '1999999999999999999.98']],
+              },
+            ],
+          });
+          const exportRequest = (
+            await a
+              .post(`/conversations/${allowed.conversationId}/answers`, {
+                clientKey: randomUUID(),
+                question: 'Xuất bảng vừa tính thành bản nháp.',
+              })
+              .expect(201)
+          ).body;
+          const predecessor = await db.chatAiAnswer.findUniqueOrThrow({
+            where: { id: allowed.id },
+          });
+          await db.chatAiAnswer.update({
+            where: { id: exportRequest.id },
+            data: {
+              createdAt: new Date(predecessor.createdAt.getTime() + offsetMs),
             },
-          ],
-        });
-        const exportRequest = (
-          await a
-            .post(`/conversations/${allowed.conversationId}/answers`, {
-              clientKey: randomUUID(),
-              question: 'Xuất bảng vừa tính thành bản nháp.',
-            })
-            .expect(201)
-        ).body;
-        const exported = (
-          await a.post(`/answers/${exportRequest.id}/run`, {}).expect(201)
-        ).body;
-        expect(exported.status).toBe('COMPLETED');
-        const privateSource = exported.artifacts[0].sourceId;
-        await a.get(`/files/${privateSource}/download`).expect(200);
-        await db.userRole.update({
-          where: { id: assignmentId },
-          data: { status: 'archived' },
-        });
-        await a.get(`/files/${privateSource}/download`).expect(404);
-        expect(
-          (await a.get(`/conversations/${allowed.conversationId}`).expect(200))
-            .body.answers[0].status,
-        ).toBe('ACCESS_REVOKED');
-        await a
-          .get(
-            `/answers/${allowed.id}/sources/${result.body.sources[0].handle}`,
-          )
-          .expect(404);
-      } finally {
-        if (assignmentId)
+          });
+          const exported = (
+            await a.post(`/answers/${exportRequest.id}/run`, {}).expect(201)
+          ).body;
+          expect(exported.status).toBe('COMPLETED');
+          const privateSource = exported.artifacts[0].sourceId;
+          await a.get(`/files/${privateSource}/download`).expect(200);
           await db.userRole.update({
             where: { id: assignmentId },
             data: { status: 'archived' },
           });
-        rmSync(dir, { recursive: true });
-      }
-    });
+          await a.get(`/files/${privateSource}/download`).expect(404);
+          expect(
+            (
+              await a
+                .get(`/conversations/${allowed.conversationId}`)
+                .expect(200)
+            ).body.answers[0].status,
+          ).toBe('ACCESS_REVOKED');
+          await a
+            .get(
+              `/answers/${allowed.id}/sources/${result.body.sources[0].handle}`,
+            )
+            .expect(404);
+        } finally {
+          if (assignmentId)
+            await db.userRole.update({
+              where: { id: assignmentId },
+              data: { status: 'archived' },
+            });
+          rmSync(dir, { recursive: true });
+        }
+      },
+      15000, // Full workflow plus real XLSX preview and ACL rechecks measured 5.65s locally.
+    );
     it('web mock thật qua adapter: query công khai, nguồn snippet và credit reservation bền vững', async () => {
       const a = await aiScenario(0),
         { dir } = unifiedProvider();
@@ -1477,7 +1825,7 @@ describe.sequential(
           {
             organizationId,
             userId: users.reader!.id,
-            permissions: ['file.read'],
+            permissions: ['search.read', 'project.read', 'file.read'],
             administrationScope: 'ORGANIZATION',
             managedDepartmentIds: [],
           } as unknown as CurrentActor,
@@ -1698,7 +2046,7 @@ describe.sequential(
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
-    });
+    }, 15_000);
     it('DOCX: upload riêng, index bảng, citation và retry không nhân binary', async () => {
       const scenario = await aiScenario(0);
       const { dir, payloads } = unifiedProvider();
@@ -1795,6 +2143,8 @@ describe.sequential(
               })
               .expect(201)
           ).body;
+          let legacyScanChunks: { handle: string; page?: number }[] = [];
+          let renderedScanHandles: string[] | undefined;
           if (kind === 'scan') {
             const old = await db.chatAiSourceIndex.findUniqueOrThrow({
               where: { id: file.id },
@@ -1813,6 +2163,7 @@ describe.sequential(
               bytes,
               createHash('sha256').update(bytes).digest('hex'),
             );
+            legacyScanChunks = previous.chunks;
             await db.chatAiSourceIndex.update({
               where: { id: file.id },
               data: {
@@ -1857,7 +2208,31 @@ describe.sequential(
               const indexed = await db.chatAiSourceIndex.findUniqueOrThrow({
                 where: { id: file.id },
               });
-              expect(indexed.chunks).toHaveLength(4);
+              const chunks = indexed.chunks as unknown as {
+                handle: string;
+                page?: number;
+              }[];
+              const handles = chunks.map((chunk) => chunk.handle);
+              expect(new Set(handles).size).toBe(chunks.length);
+              expect(handles).toEqual(
+                expect.arrayContaining(
+                  legacyScanChunks.map((chunk) => chunk.handle),
+                ),
+              );
+              expect(chunks).toEqual(expect.arrayContaining(legacyScanChunks));
+              const rendered = chunks.filter(
+                (chunk) =>
+                  !legacyScanChunks.some(
+                    (legacy) => legacy.handle === chunk.handle,
+                  ),
+              );
+              expect(rendered.map((chunk) => chunk.page)).toEqual([1, 2, 3]);
+              const currentHandles = rendered
+                .map((chunk) => chunk.handle)
+                .sort();
+              if (renderedScanHandles)
+                expect(currentHandles).toEqual(renderedScanHandles);
+              else renderedScanHandles = currentHandles;
             }
             expect(result.sources).toHaveLength(1);
             expect(
@@ -1880,9 +2255,21 @@ describe.sequential(
               await db.chatAiAnswer.update({
                 where: { id: answer.id },
                 data: {
-                  citations: [handles[3]!],
+                  citations: [
+                    legacyScanChunks.find((chunk) => chunk.page === 4)!.handle,
+                  ],
                   answer: 'Bản trước đã đọc trang 4.',
                 },
+              });
+              const page4Handle = legacyScanChunks.find(
+                (chunk) => chunk.page === 4,
+              )!.handle;
+              const page4 = await scenario
+                .get(`/answers/${answer.id}/sources/${page4Handle}`)
+                .expect(200);
+              expect(page4.body).toMatchObject({
+                handle: page4Handle,
+                page: 4,
               });
             }
           }
@@ -1897,6 +2284,7 @@ describe.sequential(
           rmSync(dir, { recursive: true, force: true });
         }
       },
+      15000, // Two image turns, real PDF decoding and ACL checks can exceed Vitest's 5s default.
     );
     beforeAll(async () => {
       const identity = await db.$queryRaw<
@@ -3306,7 +3694,7 @@ describe.sequential(
     it('sends only explicit native Gemini versions and rejects the same binary for a text-only model', async () => {
       const scenario = await aiScenario();
       const bytes = Buffer.from(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhGQAAAAASUVORK5CYII=',
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=',
         'base64',
       );
       const binary = await app.get(FileStorage).put(organizationId, bytes);
@@ -3999,6 +4387,73 @@ describe.sequential(
       expect(
         responses.find((r) => r.body.status === 'FAILED')!.body.errorCode,
       ).toBe('DAILY_QUOTA_EXCEEDED');
+    });
+
+    it('claims each source lease only when that source starts reading', async () => {
+      const scenario = await aiScenario();
+      const storage = app.get(FileStorage);
+      const files: { id: string; storageKey: string }[] = [];
+      for (const name of ['first.txt', 'second.txt']) {
+        const bytes = Buffer.from(name);
+        const file = await db.fileAsset.create({
+          data: {
+            organizationId,
+            uploadedById: users.owner!.id,
+            originalFilename: name,
+            storedFilename: name,
+            mimeType: 'text/plain',
+            sizeBytes: BigInt(bytes.length),
+            storageKey: await storage.put(organizationId, bytes),
+            checksum: createHash('sha256').update(bytes).digest('hex'),
+            category: 'PROJECT',
+          },
+        });
+        await db.chatFile.create({
+          data: {
+            organizationId,
+            projectId: scenario.projectId,
+            roomId: scenario.rooms[0]!.room.id,
+            actorId: users.owner!.id,
+            clientKey: randomUUID(),
+            payloadHash: randomUUID(),
+            fileAssetId: file.id,
+            version: 1,
+            origin: 'UPLOAD',
+          },
+        });
+        files.push(file);
+      }
+      const original = storage.stream.bind(storage);
+      const spy = vi
+        .spyOn(storage, 'stream')
+        .mockImplementation(async (key) => {
+          if (key === files[0]!.storageKey) {
+            const waiting = await db.chatAiSourceIndex.findFirstOrThrow({
+              where: { chatFile: { fileAssetId: files[1]!.id } },
+            });
+            expect(waiting).toMatchObject({
+              status: 'QUEUED',
+              leaseToken: null,
+              leaseUntil: null,
+              attempts: 0,
+            });
+          }
+          return original(key);
+        });
+      try {
+        await scenario.post('/index', { scope: 'ALL' }).expect(201);
+        const rows = await db.chatAiSourceIndex.findMany({
+          where: {
+            chatFile: { fileAssetId: { in: files.map((file) => file.id) } },
+          },
+        });
+        expect(rows).toHaveLength(2);
+        expect(
+          rows.every((row) => row.status === 'READY' && row.attempts === 1),
+        ).toBe(true);
+      } finally {
+        spy.mockRestore();
+      }
     });
 
     it('fences a late index worker after its expired lease has been reclaimed', async () => {

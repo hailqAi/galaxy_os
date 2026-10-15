@@ -1,17 +1,21 @@
 import { ConsoleLogger, LogLevel } from '@nestjs/common';
 
 const secret =
-  /^(?:password|currentPassword|newPassword|confirm(?:New)?Password|temporaryPassword|passwordHash|token|rawToken|sessionToken|resetToken|cookie|set-cookie|authorization|ADMIN_TEMP_PASSWORD)$/i;
+  /^(?:access_?token|refresh_?token|id_token|id_token_hint|code_?verifier|client_?secret|clientState|state|nonce|code|password|currentPassword|newPassword|confirm(?:New)?Password|temporaryPassword|passwordHash|token|rawToken|sessionToken|resetToken|cookie|set-cookie|authorization|ADMIN_TEMP_PASSWORD|secret|signing_?secret|webhook-signature|GALAXY_MCP_ENCRYPTION_KEY|download_?url|ticket)$/i;
 
 export function redact(value: unknown): unknown {
   if (typeof value === 'string')
     return value
       .replace(
-        /([?&](?:password|currentPassword|newPassword|confirm(?:New)?Password|temporaryPassword|passwordHash|token|rawToken|sessionToken|resetToken)=)[^&#]*/gi,
+        /https?:\/\/[^\s"<>]+[?&](?:sig(?:nature)?|X-Amz-Signature|X-Goog-Signature)=[^\s"<>]*/gi,
+        '[SIGNED_URL_REDACTED]',
+      )
+      .replace(
+        /([?&](?:access_?token|refresh_?token|id_token|id_token_hint|code_?verifier|client_?secret|clientState|state|nonce|code|password|currentPassword|newPassword|confirm(?:New)?Password|temporaryPassword|passwordHash|token|rawToken|sessionToken|resetToken|secret|signing_?secret|ticket)=)[^&#]*/gi,
         '$1[REDACTED]',
       )
       .replace(
-        /(?<![?&])((?:password|currentPassword|newPassword|confirm(?:New)?Password|temporaryPassword|passwordHash|token|rawToken|sessionToken|resetToken|cookie|set-cookie|authorization)\s*[:=]\s*)(?:"[^"]*"|[^,\r\n}]+)/gi,
+        /(?<![?&])((?:access_?token|refresh_?token|id_token|id_token_hint|code_?verifier|client_?secret|clientState|state|nonce|code|password|currentPassword|newPassword|confirm(?:New)?Password|temporaryPassword|passwordHash|token|rawToken|sessionToken|resetToken|cookie|set-cookie|authorization|secret|signing_?secret|webhook-signature|GALAXY_MCP_ENCRYPTION_KEY|download_?url|ticket)\s*[:=]\s*)(?:"[^"]*"|[^,\r\n}]+)/gi,
         '$1[REDACTED]',
       );
   if (value instanceof Error)

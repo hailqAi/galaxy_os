@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import {
   chmod,
   mkdir,
@@ -30,6 +31,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { REQUIRED_PERMISSIONS } from '../access-control/access.decorators';
+import { redact } from '../security-redaction';
 import { CurrentActor } from '../access-control/current-actor';
 import { UploadsController } from './uploads.controller';
 import {
@@ -231,6 +233,7 @@ describe('large upload part calculation', () => {
       putError?: boolean;
       requireProjectBeforeSessionLock?: boolean;
       revokeBeforeAvailability?: boolean;
+      partCount?: number;
     } = {},
   ) {
     const directory = await mkdtemp(join(tmpdir(), 'galaxy-upload-'));
@@ -254,6 +257,28 @@ describe('large upload part calculation', () => {
     let storageKey = 'organization/2026/08/session';
     let fileAssetDeletedAt: Date | null = null;
     const reportedSize = Number(options.declaredSize ?? BigInt(bytes.length));
+    const partSize = Math.ceil(reportedSize / (options.partCount ?? 1));
+    const parts: {
+      partNumber: number;
+      size: number;
+      checksum: string;
+      storagePath: string;
+    }[] = [];
+    for (
+      let offset = 0;
+      options.partCount && offset < bytes.length;
+      offset += partSize
+    ) {
+      const part = bytes.subarray(offset, offset + partSize);
+      const storagePath = join(sessionDirectory, `${parts.length + 1}.part`);
+      await writeFile(storagePath, part);
+      parts.push({
+        partNumber: parts.length + 1,
+        size: part.length,
+        checksum: sha256(part),
+        storagePath,
+      });
+    }
     const session = () => ({
       id: 'session',
       organizationId: 'organization',
@@ -268,22 +293,24 @@ describe('large upload part calculation', () => {
       verificationStartedAt,
       declaredSize: options.declaredSize ?? BigInt(bytes.length),
       uploadedBytes: options.declaredSize ?? BigInt(bytes.length),
-      partSize: reportedSize,
-      totalParts: 1,
+      partSize,
+      totalParts: options.partCount ? parts.length : 1,
       originalFilename,
       mimeType,
       checksum,
       storageKey,
       createdAt: new Date(),
       expiresAt: options.expiresAt ?? new Date(Date.now() + 60_000),
-      parts: [
-        {
-          partNumber: 1,
-          size: reportedSize,
-          checksum: sha256(bytes),
-          storagePath: partPath,
-        },
-      ],
+      parts: options.partCount
+        ? parts
+        : [
+            {
+              partNumber: 1,
+              size: reportedSize,
+              checksum: sha256(bytes),
+              storagePath: partPath,
+            },
+          ],
     });
     const updateMany = vi.fn(async ({ data, where }) => {
       if (
@@ -501,6 +528,32 @@ describe('large upload part calculation', () => {
         .map((path) => rm(path, { recursive: true, force: true })),
     );
     vi.unstubAllEnvs();
+  });
+  it('assembles many committed parts without accumulating output listeners', async () => {
+    const bytes = Buffer.from('0007392,275001.10,VND\n'.repeat(100));
+    const fixture = await completionFixture(bytes, 'quote.csv', 'text/csv', {
+      partCount: 20,
+    });
+    const warnings = vi.spyOn(process, 'emitWarning');
+    try {
+      await expect(
+        fixture.service.complete(actor, 'session', sha256(bytes)),
+      ).resolves.toMatchObject({ status: 'AVAILABLE' });
+      expect(
+        warnings.mock.calls.filter(
+          ([warning]) =>
+            warning instanceof Error &&
+            warning.name === 'MaxListenersExceededWarning',
+        ),
+      ).toEqual([]);
+      expect(fixture.fileAssetCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ checksum: sha256(bytes) }),
+        }),
+      );
+    } finally {
+      warnings.mockRestore();
+    }
   });
   it('accepts 5.1 GiB and keeps provider parts bounded', () => {
     const result = uploadParts(Math.ceil(5.1 * 1024 ** 3));
@@ -1105,6 +1158,47 @@ describe('large upload part calculation', () => {
         },
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('logs only the database code when initiation fails and retains the original failure', async () => {
+    const failure = new Prisma.PrismaClientKnownRequestError(
+      'PRIVATE_FILENAME PRIVATE_TOKEN PRIVATE_QUERY',
+      { code: 'P2028', clientVersion: 'test' },
+    );
+    const log = vi
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const service = Reflect.construct(UploadsService, [
+      { $transaction: vi.fn().mockRejectedValue(failure) },
+      {},
+      { assertDocumentUpload: vi.fn() },
+      {},
+    ]) as UploadsService;
+    try {
+      await expect(
+        service.initiate(actor, {
+          projectId: 'project',
+          requiredDocumentId: 'document',
+          idempotencyKey: 'synthetic',
+          originalFilename: 'PRIVATE_FILENAME.pdf',
+          declaredSize: 50_000_000,
+          mimeType: 'application/pdf',
+        } as InitiateUploadDto),
+      ).rejects.toBe(failure);
+      expect(log).toHaveBeenCalledWith({
+        event: 'UPLOAD_INITIATE_FAILED',
+        phase: 'TRANSACTION',
+        databaseError: 'P2028',
+      });
+      expect(redact(log.mock.calls[0]?.[0])).toMatchObject({
+        databaseError: 'P2028',
+      });
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(
+        /PRIVATE_FILENAME|PRIVATE_TOKEN|PRIVATE_QUERY/,
+      );
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('creates and stores the authorized logical target before opening its transfer session', async () => {

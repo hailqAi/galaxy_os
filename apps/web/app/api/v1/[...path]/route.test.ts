@@ -16,6 +16,35 @@ afterEach(() => {
 
 describe('same-origin API forwarder', () => {
   it.each([
+    ['mcp-connection'],
+    ['mcp-auth', 'requests', 'request-id', 'consent'],
+  ])(
+    'forwards personal MCP settings and consent through the existing authenticated API path %j',
+    async (...path) => {
+      const fetch = vi.fn().mockResolvedValue(Response.json({ allowed: true }));
+      vi.stubGlobal('fetch', fetch);
+      const read = path.length === 1;
+      const response = await (read ? GET : POST)(
+        new NextRequest('http://localhost:3000/api/v1/' + path.join('/'), {
+          method: read ? 'GET' : 'POST',
+          headers: {
+            origin: 'http://localhost:3000',
+            cookie: 'galaxy_session=synthetic',
+          },
+          ...(read ? {} : { body: '{}' }),
+        }),
+        context(path),
+      );
+      expect(response.status).toBe(200);
+      expect(fetch.mock.calls[0]?.[0].toString()).toBe(
+        'http://127.0.0.1:33001/api/v1/' + path.join('/'),
+      );
+      expect(fetch.mock.calls[0]?.[1].headers.get('cookie')).toBe(
+        'galaxy_session=synthetic',
+      );
+    },
+  );
+  it.each([
     'http://192.168.1.80:3000/path',
     'http://192.168.1.80:3000?query=1',
     'http://user:password@192.168.1.80:3000',
@@ -479,4 +508,120 @@ describe('same-origin API forwarder', () => {
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(await response.text()).not.toContain('internal detail');
   });
+});
+
+it.each([undefined, 'Bearer ' + 's'.repeat(43)])(
+  'preserves the first MCP OAuth challenge and strips browser cookies (%s)',
+  async (authorization) => {
+    const fetch = vi.fn().mockResolvedValue(
+      Response.json(
+        { error: 'auth' },
+        {
+          status: 401,
+          headers: {
+            'WWW-Authenticate':
+              'Bearer resource_metadata="https://example.test/metadata"',
+          },
+        },
+      ),
+    );
+    vi.stubGlobal('fetch', fetch);
+    const path = [
+      'workspace-agent-mcp',
+      '11111111-1111-4111-8111-111111111111',
+      '22222222-2222-4222-8222-222222222222',
+    ];
+    const response = await POST(
+      new NextRequest('http://localhost:3000/api/v1/' + path.join('/'), {
+        method: 'POST',
+        headers: {
+          ...(authorization ? { authorization } : {}),
+          cookie: 'galaxy_session=private',
+          'mcp-protocol-version': '2025-11-25',
+          accept: 'application/json, text/event-stream',
+        },
+        body: '{}',
+      }),
+      context(path),
+    );
+    expect(response.status).toBe(401);
+    expect(response.headers.get('WWW-Authenticate')).toContain(
+      'resource_metadata',
+    );
+    expect(fetch.mock.calls[0]?.[1]?.headers.get('authorization')).toBe(
+      authorization ?? null,
+    );
+    expect(fetch.mock.calls[0]?.[1]?.headers.has('cookie')).toBe(false);
+  },
+);
+it('never lets an MCP bearer bypass browser CSRF on business endpoints or a foreign Origin', async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal('fetch', fetch);
+  for (const [path, origin] of [
+    [['projects'], ''],
+    [['workspace-agent-mcp', 'x', 'y'], 'https://evil.example'],
+  ] as const) {
+    const response = await POST(
+      new NextRequest('http://localhost:3000/api/v1/' + path.join('/'), {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer ' + 's'.repeat(43),
+          ...(origin ? { origin } : {}),
+        },
+        body: '{}',
+      }),
+      context([...path]),
+    );
+    expect(response.status).toBe(403);
+  }
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it('preserves the backend sandbox CSP and cancellation for a scoped Project preview', async () => {
+  const policy =
+    "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; frame-ancestors 'self'; sandbox";
+  let forwardedSignal: AbortSignal | null | undefined;
+  vi.stubGlobal('fetch', async (_url: string, options: RequestInit) => {
+    forwardedSignal = options.signal;
+    return new Response('<html>draft</html>', {
+      headers: {
+        'Content-Type': 'text/html',
+        'Content-Security-Policy': policy,
+      },
+    });
+  });
+  const p = ['project-chat', 'projects', 'p', 'ai', 'files', 's', 'preview'];
+  const request = new NextRequest(
+    'http://localhost:3000/api/v1/' + p.join('/'),
+  );
+  const preview = await GET(request, context(p));
+  expect(preview.headers.get('content-security-policy')).toBe(policy);
+  expect(preview.headers.get('x-frame-options')).toBeNull();
+  expect(forwardedSignal).toBe(request.signal);
+});
+
+it('forwards cancellation only for upload part streams and preserves the original streaming body', async () => {
+  let options: RequestInit | undefined;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url, init) => {
+      options = init;
+      return Response.json({ status: 'UPLOADING' });
+    }),
+  );
+  const part = new NextRequest(
+    'http://localhost:3000/api/v1/uploads/session/parts?partNumber=1',
+    {
+      method: 'POST',
+      headers: {
+        origin: 'http://localhost:3000',
+        'content-type': 'application/octet-stream',
+      },
+      body: 'part bytes',
+    },
+  );
+  const { POST } = await import('./route');
+  await POST(part, context(['uploads', 'session', 'parts']));
+  expect(options?.signal).toBe(part.signal);
+  expect(options?.body).toBe(part.body);
 });

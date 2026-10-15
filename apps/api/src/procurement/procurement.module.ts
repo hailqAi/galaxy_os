@@ -10,6 +10,7 @@ import { PurchaseOrderController } from './purchase-order.controller';
 import { ProformaInvoiceController } from './proforma-invoice.controller';
 import { SupplierPayablesController } from './supplier-payables.controller';
 @Module({
+  exports: [ProcurementService],
   imports: [AccessControlModule],
   controllers: [
     ProcurementController,

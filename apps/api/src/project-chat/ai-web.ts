@@ -8,6 +8,54 @@ import { parse, type DefaultTreeAdapterMap } from 'parse5';
 import { z } from 'zod';
 import { AiError, assertLegacyProviderAllowed } from './ai-registry';
 
+const publicSubjects = {
+  GENERAL: 'public information',
+  FURNITURE: 'furniture',
+  MINOTTI: 'Minotti',
+  POLIFORM: 'Poliform',
+  CASSINA: 'Cassina',
+  B_AND_B_ITALIA: 'B&B Italia',
+  FLEXFORM: 'Flexform',
+  MOLTENI: 'Molteni',
+  ARPER: 'Arper',
+  LEMA: 'Lema',
+  FLOS: 'Flos',
+  ARTEMIDE: 'Artemide',
+  OPENAI: 'OpenAI',
+} as const;
+const publicTopics = {
+  catalogue: 'official furniture catalogue',
+  specifications: 'official technical specifications',
+  current_prices: 'current public prices currency date',
+  documentation: 'official documentation',
+  current_news: 'latest public news date sources',
+} as const;
+export const publicResearchInput = z
+  .object({
+    subject: z.enum(
+      Object.keys(publicSubjects) as [
+        keyof typeof publicSubjects,
+        ...(keyof typeof publicSubjects)[],
+      ],
+    ),
+    topic: z.enum(
+      Object.keys(publicTopics) as [
+        keyof typeof publicTopics,
+        ...(keyof typeof publicTopics)[],
+      ],
+    ),
+  })
+  .strict();
+export function publicResearchQuery(input: unknown) {
+  const intent = publicResearchInput.parse(input);
+  // Only server literals enter search; private model text cannot become a query.
+  return {
+    ...intent,
+    policyVersion: 'public-query-e03-v1' as const,
+    query: `${publicSubjects[intent.subject]} ${publicTopics[intent.topic]}`,
+  };
+}
+
 export type WebPolicy = {
   enabled: boolean;
   revision: string;

@@ -1,0 +1,3 @@
+# E02 run transport delta r1
+
+Authorized by owner blanket functional design approval, 2026-10-10. Actual R3 quote completed with two verified artifacts and HTTP201, but browser aborted at110002ms; client run110s leaves no allowance beyond backend inference110s. Change only browser call timeout for /answers/.../run to130s, keep GET15s/otherPOST110s/provider deadline110s/lease120s/tenround/ACL/cancel. No request retry or model/effort changes. Browser regression scales actual selected timeout100 while response returns after equivalent115s; old UI fails, new must finish and clear only submitted draft. Fresh full/frozen/release/reload live gates apply. No new design question under existing explicit blanket approval.

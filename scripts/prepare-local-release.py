@@ -43,8 +43,44 @@ def verify_dependencies(root):
         if path.is_symlink() and not path.resolve().is_relative_to(root.resolve()):
             raise RuntimeError('Dependency symlink resolves outside candidate: ' + str(path.relative_to(root)))
 
+def check_release_space(output):
+    # WSL's virtual free space does not represent free space on the host drive.
+    if shutil.disk_usage(output.parent).free < 4 * 1024**3:
+        raise RuntimeError('RELEASE_DISK_SPACE_LOW')
+    if 'microsoft' in os.uname().release.lower():
+        powershell = Path('/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe')
+        value = ''
+        try:
+            result = subprocess.run([str(powershell), '-NoProfile', '-NonInteractive', '-Command', "[System.IO.DriveInfo]::new('C:\\').AvailableFreeSpace"], capture_output=True, text=True, timeout=15)
+            if result.returncode == 0:
+                value = result.stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        if not value.isdigit():
+            for line in Path('/proc/self/mountinfo').read_text().splitlines():
+                left, separator, right = line.partition(' - ')
+                fields = right.split()
+                if separator and left.split()[4] == '/mnt/c' and len(fields) >= 3 and fields[:2] == ['9p', r'C:\134'] and 'path=C:\\;' in fields[2]:
+                    value = str(shutil.disk_usage('/mnt/c').free)
+                    break
+            if not value.isdigit():
+                raise RuntimeError('WINDOWS_HOST_SPACE_NOT_VERIFIED')
+        if int(value) < 20 * 1024**3:
+            raise RuntimeError('WINDOWS_HOST_DISK_LOW_RECLAIM_BEFORE_BUILD')
+    if output.parent.name == 'releases':
+        complete = [p for p in output.parent.iterdir() if p.is_dir() and any((p / relative).is_dir() and not (p / relative).is_symlink() for relative in ['node_modules', 'apps/web/.next', 'services/document-ai/.venv'])]
+        if len(complete) >= 3:
+            raise RuntimeError('RELEASE_RETENTION_REQUIRED_ACTIVE_ROLLBACK_ONE_CANDIDATE')
+
 def prepare(root, output, active):
+    check_release_space(output)
     metadata = snapshot(root, output)
+    preparation = {**metadata, 'state': 'PREPARING_RELEASE_UNVERIFIED'}
+    (output / 'preparation.json').write_text(json.dumps(preparation, indent=2) + '\n')
+    for existing in [*output.parent.glob('*/release.json'), *output.parent.glob('*/preparation.json')]:
+        recorded = json.loads(existing.read_text())
+        if existing.parent != output and recorded.get('sourceDigest') == metadata['sourceDigest'] and (recorded.get('state') == 'PREPARING_RELEASE_UNVERIFIED' or (existing.parent / 'node_modules').is_dir()):
+            raise RuntimeError('RELEASE_DUPLICATE_SOURCE_CONTINUE_EXISTING_CANDIDATE')
     # Reflinks/copies freeze installed packages. Relative pnpm links stay inside
     # this snapshot; no dependency points at the live development workspace.
     for relative in [Path('node_modules'), *[path.relative_to(root) for path in (root / 'apps').glob('*/node_modules')]]:
@@ -59,6 +95,7 @@ def prepare(root, output, active):
     metadata.update(releaseId=release_id, webBuildId=(output / 'apps/web/.next/BUILD_ID').read_text().strip(), expectedSchema=active['expectedSchema'])
     metadata['artifactDigests'] = {name: runtime.digest(output / relative) for name, relative in {'api': 'apps/api/dist', 'web': 'apps/web/.next', 'edge': 'apps/edge/dist', 'dependencies': 'node_modules'}.items()}
     (output / 'release.json').write_text(json.dumps(metadata, indent=2) + '\n')
+    (output / 'preparation.json').write_text(json.dumps({**preparation, 'state': 'BUILD_FINISHED_NOT_YET_ACCEPTED'}, indent=2) + '\n')
     return metadata
 
 def stage_units(root, release, private_envs, output, manifest_path):
@@ -92,6 +129,11 @@ def candidate_manifest(root, release, private_envs, active):
         command = ['/usr/bin/node', str(cwd / 'dist/main.js')] if name == 'api' else ['/usr/bin/node', str(cwd / 'node_modules/next/dist/bin/next'), 'start', '--hostname', '0.0.0.0', '--port', '3000']
         artifacts = [cwd / 'dist'] if name == 'api' else [cwd / '.next' / part for part in ['BUILD_ID', 'server', 'static', 'build-manifest.json', 'required-server-files.json', 'prerender-manifest.json', 'routes-manifest.json']]
         paths = [*artifacts, release / 'node_modules', release / 'scripts/local-runtime.py', env_file]
+        if name == 'api' and environment.get('GALAXY_AI_OFFICECLI'):
+            office = Path(environment['GALAXY_AI_OFFICECLI']).resolve(strict=True)
+            if hashlib.sha256(office.read_bytes()).hexdigest() != 'a5ed6e4157fe9b24a099cd24ff30e89a4349b7a7d782d2b7de8d56294c7e1423':
+                raise RuntimeError('OfficeCLI capability asset pin does not match')
+            paths.append(office)
         result['services'][name] = {'cwd': str(cwd), 'command': command, 'port': 3001 if name == 'api' else 3000, 'health': '/api/v1/ready' if name == 'api' else '/health', 'service': name, 'readyBody': {'status': 'ok', 'releaseId': metadata['releaseId'], **({'database': 'connected'} if name == 'api' else {'service': 'web'})}, 'systemdUnit': f'galaxy-os-{name}.service', 'controllerPath': str(release / 'scripts/local-runtime.py'), 'envFile': str(env_file), 'environment': {}, 'identityKeys': sorted(environment), 'fingerprints': {str(path): runtime.digest(path) for path in paths}}
         if name == 'web':
             version = json.loads((cwd / 'node_modules/next/package.json').read_text())['version']

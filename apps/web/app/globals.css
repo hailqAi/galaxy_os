@@ -907,15 +907,27 @@ td {
 }
 .ai-model-controls {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .ai-model-controls > label:first-child {
-  flex: 1;
+  flex: 1 1 220px;
 }
 .ai-model-controls > label {
+  flex: 1 1 150px;
   min-width: 0;
   font-size: 13px;
   line-height: 18px;
+}
+.ai-model-controls > div,
+.ai-model-controls > p {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+.ai-artifact-preview {
+  width: 100%;
+  min-height: 500px;
+  border: 1px solid var(--border);
 }
 .ai-panel-content select {
   width: 100%;
@@ -1022,6 +1034,27 @@ td {
   width: max-content;
   min-width: 100%;
   font-size: 14px;
+}
+.chat-text img,
+.ai-user-attachments img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+.chat-source-citation {
+  font-size: 12px;
+  vertical-align: super;
+}
+.chat-code-block > button {
+  font-size: 12px;
+  margin-block: 4px;
+}
+.ai-citations > a {
+  max-width: 20rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
 }
 .ai-citations,
 .ai-file-chips {

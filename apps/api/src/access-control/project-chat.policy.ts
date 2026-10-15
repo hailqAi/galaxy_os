@@ -11,6 +11,8 @@ import { CurrentActor } from './current-actor';
 import { readEnvironment } from '../config/env';
 import { createHash, randomUUID } from 'node:crypto';
 
+export const PROJECT_CHAT_TRANSACTION_TIMEOUT_MS = 15000;
+
 export const activeChatGrant = (now: Date) => ({
   revokedAt: null,
   effectiveAt: { lte: now },
@@ -90,10 +92,11 @@ export class ProjectChatPolicy {
         organization: { status: 'active' },
       },
     });
-    if (
-      !member ||
-      !actor.sessionId ||
-      !(await tx.session.findFirst({
+    if (!member)
+      throw new UnauthorizedException('Phiên đăng nhập không còn hợp lệ');
+    const session =
+      actor.sessionId &&
+      (await tx.session.findFirst({
         where: {
           id: actor.sessionId,
           userId: actor.userId,
@@ -106,13 +109,36 @@ export class ProjectChatPolicy {
             ),
           },
         },
-      }))
-    )
+      }));
+    if (actor.mcpAuthorizationId)
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "McpGrant" WHERE "id"=${actor.mcpAuthorizationId}::uuid FOR SHARE`,
+      );
+    const oauth =
+      actor.mcpAuthorizationId &&
+      (await tx.mcpGrant.findFirst({
+        where: {
+          id: actor.mcpAuthorizationId,
+          kind: 'AUTHORIZATION',
+          revokedAt: null,
+          organizationId: actor.organizationId,
+          ownerId: actor.userId,
+          membershipId: actor.organizationMembershipId,
+          issuer: process.env.APP_PUBLIC_ORIGIN,
+          resource: process.env.APP_PUBLIC_ORIGIN + '/mcp',
+          OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        },
+      }));
+    if (!member || (!session && !oauth))
       throw new UnauthorizedException('Phiên đăng nhập không còn hợp lệ');
     return member;
   }
 
-  async freshActor(tx: Prisma.TransactionClient, actor: CurrentActor) {
+  async freshActor(
+    tx: Prisma.TransactionClient,
+    actor: CurrentActor,
+    requiredPermissions?: readonly string[],
+  ) {
     if ((await this.live(actor, tx)).kind !== 'INTERNAL')
       throw new ForbiddenException();
     const assignments = await tx.userRole.findMany({
@@ -124,7 +150,18 @@ export class ProjectChatPolicy {
         role: { status: 'active' },
       },
       include: {
-        role: { include: { permissions: { include: { permission: true } } } },
+        role: {
+          include: {
+            permissions: {
+              ...(requiredPermissions && {
+                where: {
+                  permission: { code: { in: [...requiredPermissions] } },
+                },
+              }),
+              include: { permission: true },
+            },
+          },
+        },
       },
     });
     const managed = await tx.managedDepartment.findMany({
@@ -183,9 +220,10 @@ export class ProjectChatPolicy {
     actor: CurrentActor,
     projectId: string,
     run: (tx: Prisma.TransactionClient) => Promise<T>,
+    transaction?: Prisma.TransactionClient,
   ): Promise<T> {
-    return this.db.$transaction(async (tx) => {
-      // ponytail: serialize a Project's chat writes/reads; use room locks if measured contention warrants it.
+    const execute = async (tx: Prisma.TransactionClient) => {
+      // Project reads and writes share a lock; allow bounded waiting for concurrent tabs.
       const rows = await tx.$queryRaw<{ id: string }[]>(
         Prisma.sql`SELECT "id" FROM "Project" WHERE "id"=${projectId}::uuid AND "organizationId"=${actor.organizationId}::uuid AND "deletedAt" IS NULL FOR UPDATE`,
       );
@@ -194,7 +232,12 @@ export class ProjectChatPolicy {
       const value = await run(tx);
       await this.live(actor, tx);
       return value;
-    });
+    };
+    return transaction
+      ? execute(transaction)
+      : this.db.$transaction(execute, {
+          timeout: PROJECT_CHAT_TRANSACTION_TIMEOUT_MS,
+        });
   }
 
   async roomProject(actor: CurrentActor, roomId: string) {

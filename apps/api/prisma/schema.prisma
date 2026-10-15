@@ -452,6 +452,9 @@ model PasswordResetToken {
 }
 
 model OrganizationMembership {
+  aiMemoryOwners ChatAiMemory[]
+  aiMemoryEditors ChatAiMemoryRevision[]
+  aiMemorySources ChatAiMemoryDependency[]
   aiConversations ChatAiConversation[]
   id                  String                 @id @default(uuid()) @db.Uuid
   organizationId      String                 @db.Uuid
@@ -858,6 +861,7 @@ model Opportunity {
 }
 
 model Project {
+  aiMemories ChatAiMemory[]
   aiConversations ChatAiConversation[]
   id                     String                         @id @default(uuid()) @db.Uuid
   organizationId         String                         @db.Uuid
@@ -1040,6 +1044,8 @@ model ChatHistoryGrant {
 }
 
 model ChatMessage {
+  memoryDependencies ChatAiMemoryDependency[]
+  @@unique([id, organizationId, projectId])
   aiSources ChatAiSourceIndex[]
   @@unique([id, organizationId, projectId, roomId])
   id             String   @id @default(uuid()) @db.Uuid
@@ -3361,12 +3367,15 @@ model QuotationLine {
 }
 
 model UploadSession {
+  mcpArtifactId             String? @db.Uuid
+  mcpArtifact               McpArtifact? @relation(fields:[mcpArtifactId],references:[id],onDelete:Restrict)
   id                        String                   @id @default(uuid()) @db.Uuid
   organizationId            String                   @db.Uuid
   actorId                   String                   @db.Uuid
   projectId                 String?                  @db.Uuid
   requiredDocumentId        String?                  @db.Uuid
   stageOneDocumentId        String?                  @db.Uuid
+  aiConversationId          String?                  @db.Uuid
   submittingOfficerId       String?                  @db.Uuid
   idempotencyKey            String?
   fileAssetId               String?                  @unique @db.Uuid
@@ -3395,6 +3404,7 @@ model UploadSession {
   stageOneDocument          ProjectStageOneDocument? @relation(fields: [stageOneDocumentId], references: [id])
   submittingOfficer         User?                    @relation("UploadSessionSubmittingOfficer", fields: [submittingOfficerId], references: [id], onDelete: SetNull)
   fileAsset                 FileAsset?               @relation(fields: [fileAssetId], references: [id])
+  aiConversation            ChatAiConversation?      @relation(fields: [aiConversationId, organizationId, projectId, actorId], references: [id, organizationId, projectId, ownerId], onDelete: Restrict)
 
   @@index([organizationId, actorId, status])
   @@index([expiresAt, status])
@@ -3405,6 +3415,7 @@ model UploadSession {
   @@index([organizationId, stagingReleasedAt])
   @@index([stagingReleasedAt, stagingCleanupAttemptedAt])
   @@index([status, verificationStartedAt])
+  @@unique([aiConversationId, idempotencyKey])
 }
 
 model UploadPart {
@@ -5125,6 +5136,9 @@ model CustomerConfirmation {
 
 // Private derived AI data. Canonical content remains in chat/file/publication.
 model ChatAiConversation {
+  uploads UploadSession[]
+  memories ChatAiMemory[]
+  memorySources ChatAiMemoryDependency[]
   id String @id @default(uuid()) @db.Uuid
   organizationId String @db.Uuid
   projectId String @db.Uuid
@@ -5142,6 +5156,12 @@ model ChatAiConversation {
 }
 
 model ChatAiAnswer {
+  mcpEvents McpOutbox[]
+  mcpParts McpResultPart[]
+  mcpArtifacts McpArtifact[]
+  workspaceJob ChatAiWorkspaceJob?
+  memorySources ChatAiMemoryDependency[]
+  consumedMemories ChatAiAnswerMemoryDependency[]
   id String @id @default(uuid()) @db.Uuid
   organizationId String @db.Uuid
   projectId String @db.Uuid
@@ -5165,12 +5185,17 @@ model ChatAiAnswer {
   conversation ChatAiConversation @relation(fields:[conversationId,organizationId,projectId,ownerId], references:[id,organizationId,projectId,ownerId], onDelete:Restrict)
   invokeGrant ChatProjectGrant @relation(fields:[invokeGrantId,organizationId,projectId,ownerId], references:[id,organizationId,projectId,userId], onDelete:Restrict)
   dependencies ChatAiAnswerDependency[]
+  @@unique([id,organizationId,projectId,ownerId])
   @@unique([id,organizationId,projectId])
   @@unique([conversationId,clientKey])
   @@index([organizationId,ownerId,providerStartedAt])
+  @@index([status,createdAt])
 }
 
 model ChatAiSourceIndex {
+  largeChunks ChatAiSourceChunk[]
+  processingMetadata Json?
+  memorySources ChatAiMemoryDependency[]
   id String @id @default(uuid()) @db.Uuid
   organizationId String @db.Uuid
   projectId String @db.Uuid
@@ -5217,6 +5242,22 @@ model ChatAiSourceIndex {
   @@index([organizationId,projectId,roomId,status])
 }
 
+model ChatAiSourceChunk {
+  id String @id @default(uuid()) @db.Uuid
+  sourceIndexId String @db.Uuid
+  organizationId String @db.Uuid
+  projectId String @db.Uuid
+  sourceVersion String
+  parserVersion String
+  ordinal Int
+  text String
+  checksum String
+  locator Json
+  createdAt DateTime @default(now())
+  source ChatAiSourceIndex @relation(fields:[sourceIndexId,organizationId,projectId], references:[id,organizationId,projectId], onDelete:Restrict)
+  @@unique([sourceIndexId,parserVersion,ordinal])
+}
+
 model ChatAiAnswerDependency {
   organizationId String @db.Uuid
   projectId String @db.Uuid
@@ -5226,4 +5267,267 @@ model ChatAiAnswerDependency {
   answer ChatAiAnswer @relation(fields:[answerId,organizationId,projectId], references:[id,organizationId,projectId], onDelete:Restrict)
   source ChatAiSourceIndex @relation(fields:[sourceIndexId,organizationId,projectId], references:[id,organizationId,projectId], onDelete:Restrict)
   @@id([answerId,sourceIndexId])
+}
+
+model ChatAiMemory {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  projectId String @db.Uuid
+  ownerId String @db.Uuid
+  visibility String
+  kind String @default("NOTE")
+  conversationId String? @db.Uuid
+  clientKey String @db.Uuid
+  payloadHash String
+  currentVersion Int @default(1)
+  inactiveAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  project Project @relation(fields:[organizationId,projectId],references:[organizationId,id],onDelete:Restrict)
+  owner OrganizationMembership @relation(fields:[organizationId,ownerId],references:[organizationId,userId],onDelete:Restrict)
+  conversation ChatAiConversation? @relation(fields:[conversationId,organizationId,projectId,ownerId],references:[id,organizationId,projectId,ownerId],onDelete:Restrict)
+  revisions ChatAiMemoryRevision[]
+  @@unique([id,organizationId,projectId])
+  @@unique([organizationId,projectId,ownerId,clientKey])
+  @@index([organizationId,projectId,visibility,ownerId,inactiveAt,updatedAt])
+}
+
+model ChatAiMemoryRevision {
+  id String @id @default(uuid()) @db.Uuid
+  memoryId String @db.Uuid
+  organizationId String @db.Uuid
+  projectId String @db.Uuid
+  version Int
+  previousVersion Int?
+  content String
+  category String
+  verification String @default("UNVERIFIED")
+  editorId String @db.Uuid
+  clientKey String @db.Uuid
+  payloadHash String
+  coveredAnswerIds String[] @default([]) @db.Uuid
+  inputDigest String?
+  model String?
+  policyVersion String?
+  tokenizerVersion String?
+  budget Json?
+  summaryStatus String?
+  createdAt DateTime @default(now())
+  memory ChatAiMemory @relation(fields:[memoryId,organizationId,projectId],references:[id,organizationId,projectId],onDelete:Restrict)
+  editor OrganizationMembership @relation(fields:[organizationId,editorId],references:[organizationId,userId],onDelete:Restrict)
+  previous ChatAiMemoryRevision? @relation("MemoryRevisionHistory",fields:[memoryId,previousVersion],references:[memoryId,version],onDelete:Restrict)
+  following ChatAiMemoryRevision[] @relation("MemoryRevisionHistory")
+  dependencies ChatAiMemoryDependency[] @relation("MemoryRevisionDependencies")
+  sourceFor ChatAiMemoryDependency[] @relation("MemoryRevisionSource")
+  answers ChatAiAnswerMemoryDependency[]
+  @@unique([id,organizationId,projectId])
+  @@unique([memoryId,version])
+  @@unique([memoryId,clientKey])
+  @@unique([organizationId,projectId,inputDigest])
+}
+
+model ChatAiMemoryDependency {
+  revisionId String @db.Uuid
+  organizationId String @db.Uuid
+  projectId String @db.Uuid
+  sourceKind String
+  sourceId String @db.Uuid
+  sourceVersion String
+  locator Json
+  locatorHash String
+  sourceOwnerId String? @db.Uuid
+  sourceConversationId String? @db.Uuid
+  permissions String[] @default([])
+  answerSourceId String? @db.Uuid
+  messageSourceId String? @db.Uuid
+  indexSourceId String? @db.Uuid
+  memorySourceRevisionId String? @db.Uuid
+  revision ChatAiMemoryRevision @relation("MemoryRevisionDependencies",fields:[revisionId,organizationId,projectId],references:[id,organizationId,projectId],onDelete:Restrict)
+  sourceOwner OrganizationMembership? @relation(fields:[organizationId,sourceOwnerId],references:[organizationId,userId],onDelete:Restrict)
+  sourceConversation ChatAiConversation? @relation(fields:[sourceConversationId,organizationId,projectId,sourceOwnerId],references:[id,organizationId,projectId,ownerId],onDelete:Restrict)
+  answer ChatAiAnswer? @relation(fields:[answerSourceId,organizationId,projectId],references:[id,organizationId,projectId],onDelete:Restrict)
+  message ChatMessage? @relation(fields:[messageSourceId,organizationId,projectId],references:[id,organizationId,projectId],onDelete:Restrict)
+  index ChatAiSourceIndex? @relation(fields:[indexSourceId,organizationId,projectId],references:[id,organizationId,projectId],onDelete:Restrict)
+  sourceRevision ChatAiMemoryRevision? @relation("MemoryRevisionSource",fields:[memorySourceRevisionId,organizationId,projectId],references:[id,organizationId,projectId],onDelete:Restrict)
+  @@id([revisionId,sourceKind,sourceId,sourceVersion,locatorHash])
+  @@index([organizationId,projectId,sourceKind,sourceId])
+}
+
+model ChatAiAnswerMemoryDependency {
+  answerId String @db.Uuid
+  memoryRevisionId String @db.Uuid
+  organizationId String @db.Uuid
+  projectId String @db.Uuid
+  answer ChatAiAnswer @relation(fields:[answerId,organizationId,projectId],references:[id,organizationId,projectId],onDelete:Restrict)
+  revision ChatAiMemoryRevision @relation(fields:[memoryRevisionId,organizationId,projectId],references:[id,organizationId,projectId],onDelete:Restrict)
+  @@id([answerId,memoryRevisionId])
+}
+
+// Transport and execution state only; canonical question/result remains ChatAiAnswer.
+model ChatAiWorkspaceJob {
+ id String @id @default(uuid()) @db.Uuid
+ answerId String @unique @db.Uuid
+ organizationId String @db.Uuid
+ projectId String @db.Uuid
+ ownerId String @db.Uuid
+ principalId String @db.Uuid
+ bindingRevision String @db.Uuid
+ actorSnapshot Json
+ bindingSnapshot Json
+ contextSnapshot Json
+ conversationKey String
+ state String @default("QUEUED")
+ providerRunId String?
+ providerStatus String?
+ attempts Int @default(0)
+ leaseToken String? @db.Uuid
+ leaseUntil DateTime?
+ nextAttemptAt DateTime @default(now())
+ expiresAt DateTime
+ resultChecksum String?
+ errorCode String?
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ answer ChatAiAnswer @relation(fields:[answerId,organizationId,projectId,ownerId],references:[id,organizationId,projectId,ownerId],onDelete:Restrict)
+ chunks ChatAiWorkspaceResultChunk[]
+ @@unique([id,organizationId,projectId,ownerId])
+ @@unique([answerId,organizationId,projectId,ownerId])
+ @@index([state,nextAttemptAt])
+ @@index([principalId,bindingRevision,createdAt])
+}
+model ChatAiWorkspaceResultChunk {
+ jobId String @db.Uuid
+ sequence Int
+ checksum String
+ content String
+ job ChatAiWorkspaceJob @relation(fields:[jobId],references:[id],onDelete:Restrict)
+ @@id([jobId,sequence])
+}
+// Opaque OAuth codes/access grants; only hashes are stored, scoped to one binding epoch.
+model WorkspaceConnectorGrant {
+ id String @id @default(uuid()) @db.Uuid
+ kind String
+ tokenHash String @unique
+ principalId String @db.Uuid
+ bindingRevision String @db.Uuid
+ organizationId String @db.Uuid
+ projectId String @db.Uuid
+ ownerId String @db.Uuid
+ sessionId String? @db.Uuid
+ membershipId String? @db.Uuid
+ clientId String
+ redirectUri String
+ resource String
+ challenge String
+ clientState String
+ expiresAt DateTime
+ usedAt DateTime?
+ revokedAt DateTime?
+ createdAt DateTime @default(now())
+ @@index([principalId,bindingRevision,kind])
+}
+
+// Inbound MCP OAuth is independent of SIWC and the deferred Workspace connector.
+model McpClient {
+  id String @id
+  redirectUris String[]
+  name String?
+  createdAt DateTime @default(now())
+  grants McpGrant[]
+}
+model McpGrant {
+  id String @id @default(uuid()) @db.Uuid
+  kind String
+  tokenHash String @unique
+  clientId String
+  organizationId String? @db.Uuid
+  ownerId String? @db.Uuid
+  membershipId String? @db.Uuid
+  authorizationId String? @db.Uuid
+  issuer String
+  resource String
+  scopes String[]
+  payload Json @default("{}")
+  expiresAt DateTime?
+  usedAt DateTime?
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  client McpClient @relation(fields:[clientId],references:[id],onDelete:Restrict)
+  @@index([authorizationId,kind,revokedAt])
+}
+model McpSubscription {
+  id String @id
+  organizationId String @db.Uuid
+  ownerId String @db.Uuid
+  membershipId String @db.Uuid
+  authorizationId String @db.Uuid
+  name String
+  arguments Json
+  callbackUrl String
+  secretCipher String
+  previousSecretCipher String?
+  rotationUntil DateTime?
+  refreshBefore DateTime?
+  verifiedUntil DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deliveries McpDelivery[]
+  @@index([organizationId,ownerId,revokedAt])
+}
+model McpOutbox {
+  id String @id @default(uuid()) @db.Uuid
+  answerId String @db.Uuid
+  generation Int @default(0)
+  name String
+  createdAt DateTime @default(now())
+  answer ChatAiAnswer @relation(fields:[answerId],references:[id],onDelete:Restrict)
+  deliveries McpDelivery[]
+  @@unique([answerId,generation])
+}
+model McpDelivery {
+  id String @id @default(uuid()) @db.Uuid
+  eventId String @db.Uuid
+  subscriptionId String
+  state String @default("PENDING")
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now())
+  leaseToken String? @db.Uuid
+  leaseUntil DateTime?
+  deliveredAt DateTime?
+  errorCode String?
+  event McpOutbox @relation(fields:[eventId],references:[id],onDelete:Restrict)
+  subscription McpSubscription @relation(fields:[subscriptionId],references:[id],onDelete:Restrict)
+  @@unique([eventId,subscriptionId])
+  @@index([state,nextAttemptAt])
+}
+model McpResultPart {
+  answerId String @db.Uuid
+  submissionId String
+  sequence Int
+  content String
+  checksum String
+  answer ChatAiAnswer @relation(fields:[answerId],references:[id],onDelete:Restrict)
+  @@id([answerId,submissionId,sequence])
+}
+model McpArtifact {
+  uploadSessions UploadSession[]
+  id String @id @default(uuid()) @db.Uuid
+  answerId String @db.Uuid
+  submissionId String
+  externalFileId String
+  state String @default("PENDING")
+  downloadCipher String?
+  filename String?
+  mimeType String?
+  sourceId String? @db.Uuid
+  fileAssetId String? @db.Uuid
+  checksum String?
+  leaseToken String? @db.Uuid
+  leaseUntil DateTime?
+  errorCode String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  answer ChatAiAnswer @relation(fields:[answerId],references:[id],onDelete:Restrict)
+  @@unique([answerId,submissionId,externalFileId])
 }

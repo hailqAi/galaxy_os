@@ -22,6 +22,8 @@ export default defineConfig({
             'm3-project-ai.spec.ts',
             'm3-unified-ai.spec.ts',
             'm3-pdf-workspace.spec.ts',
+            'p1-project-ai.spec.ts',
+            'e05-mcp-work.spec.ts',
           ]
         : 'm2-project-chat.spec.ts',
   workers: 1,
@@ -29,13 +31,16 @@ export default defineConfig({
   outputDir: 'test-results/m2-a',
   use: {
     channel: 'chrome',
-    headless: false,
+    headless: !!process.env.M2_CHROME_EXECUTABLE,
     // Trust only this isolated context's self-signed test endpoint; app TLS/headers stay intact.
     ignoreHTTPSErrors:
       process.env.APP_PUBLIC_ORIGIN === 'https://localhost:33003',
     baseURL: process.env.APP_PUBLIC_ORIGIN,
     launchOptions: {
       chromiumSandbox: true,
+      ...(process.env.M2_CHROME_EXECUTABLE && {
+        executablePath: process.env.M2_CHROME_EXECUTABLE,
+      }),
       ignoreDefaultArgs: ['--disable-back-forward-cache'],
     },
     // CDP also exposes the user's existing contexts. Capture only explicit fixture pages.

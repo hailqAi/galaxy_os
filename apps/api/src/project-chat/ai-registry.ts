@@ -84,6 +84,7 @@ export class AiError extends Error {
       code?: string;
       requestId?: string;
       param?: string;
+      detail?: string;
       retryAfterMs?: number;
       limitSource?: 'OPENROUTER' | 'UPSTREAM' | 'UNKNOWN';
       rateLimit?: {
@@ -748,25 +749,356 @@ export const aiContextSchema = z
   );
 export type AiContext = z.infer<typeof aiContextSchema>;
 
-const requestSchema = z.object({
+const legacyRequestSchema = z.object({
   toolRevision: z.literal('project-tools-v1').optional(),
   toolConfigDigest: z.string().optional(),
   mode: z.enum(['GENERAL', 'PROJECT', 'UNIFIED']).default('PROJECT'),
   version: z.literal(1),
-  provider: z.enum(['google_gemini', 'mistral', 'kira', 'openrouter']),
+  provider: z.enum([
+    'google_gemini',
+    'mistral',
+    'kira',
+    'openrouter',
+    'chatgpt',
+  ]),
   model: z.string(),
   revision: z.string(),
   configDigest: z.string(),
   reasoning: z.string(),
+  nativeWebSearch: z.boolean().optional(),
   dataClassification: z.enum([
     'SYNTHETIC_PUBLIC_APPROVED',
     'PROJECT_AUTHORIZED',
   ]),
   sourceIds: z.array(z.string()).default([]),
+  sourceVersions: z
+    .array(
+      z
+        .object({
+          id: z.string().uuid(),
+          version: z.string(),
+          derivativeDigest: z.string().regex(/^[a-f0-9]{64}$/),
+        })
+        .strict(),
+    )
+    .max(20)
+    .optional(),
+  historyAnswerIds: z.array(z.string().uuid()).optional(),
   context: aiContextSchema.optional(),
 });
+export const AI_PROJECT_POLICY_VERSION = 'project-ai-p1-v1' as const;
+const requestScopeSchema = z
+  .object({
+    organizationId: z.string().uuid(),
+    projectId: z.string().uuid(),
+    actorId: z.string().uuid(),
+    conversationId: z.string().uuid(),
+  })
+  .strict();
+export type AiRequestScope = z.infer<typeof requestScopeSchema>;
+export const taskContractSchema = z
+  .object({
+    version: z.literal(1),
+    originalUserMessageId: z.string().uuid(),
+    revision: z.number().int().positive(),
+    taskType: z.enum([
+      'LOOKUP',
+      'SUMMARIZE',
+      'CONVERT_DOCUMENT',
+      'COMPARE',
+      'RESEARCH',
+      'EDIT_ARTIFACT',
+      'GENERAL_QA',
+    ]),
+    requestedOutputs: z.array(z.enum(['xlsx', 'docx', 'pdf', 'pptx'])).max(1),
+    primarySourceIds: z.array(z.string().uuid()).max(3),
+    constraints: z.array(z.string().max(200)).max(8),
+    missingInformation: z.array(z.string().max(200)).max(8),
+    completionCriteria: z.array(z.string().max(200)).max(8),
+  })
+  .strict();
+const requestSchema = z.discriminatedUnion('version', [
+  legacyRequestSchema,
+  legacyRequestSchema
+    .extend({
+      version: z.literal(2),
+      provider: z.literal('chatgpt'),
+      mode: z.literal('UNIFIED'),
+      policyVersion: z.literal(AI_PROJECT_POLICY_VERSION),
+      scope: requestScopeSchema,
+      historyAnswerIds: z.array(z.string().uuid()),
+    })
+    .strict(),
+  legacyRequestSchema
+    .extend({
+      version: z.literal(3),
+      provider: z.literal('chatgpt'),
+      mode: z.literal('UNIFIED'),
+      policyVersion: z.literal(AI_PROJECT_POLICY_VERSION),
+      scope: requestScopeSchema,
+      historyAnswerIds: z.array(z.string().uuid()),
+    })
+    .strict(),
+  legacyRequestSchema
+    .extend({
+      version: z.literal(4),
+      provider: z.literal('chatgpt'),
+      mode: z.literal('UNIFIED'),
+      policyVersion: z.literal(AI_PROJECT_POLICY_VERSION),
+      scope: requestScopeSchema,
+      historyAnswerIds: z.array(z.string().uuid()),
+      nativeWebSearch: z.literal(false),
+      searchMode: z.enum(['AUTO', 'WEB', 'PROJECT_ONLY']),
+      runMode: z.enum(['NORMAL', 'DEEP']).optional(),
+      task: taskContractSchema.optional(),
+      documentReadScope: z.literal('ALL').optional(),
+      requiredDocuments: z
+        .array(
+          z
+            .object({
+              id: z.string().uuid(),
+              version: z.string().min(1).max(100),
+              checksum: z.string().regex(/^[a-f0-9]{64}$/),
+              format: z.enum(['PDF', 'XLSX']),
+            })
+            .strict(),
+        )
+        .max(20)
+        .optional(),
+      originalSourceVersions: z
+        .array(
+          z
+            .object({
+              id: z.string().uuid(),
+              version: z.string().max(100),
+              checksum: z.string().regex(/^[a-f0-9]{64}$/),
+            })
+            .strict(),
+        )
+        .max(20)
+        .optional(),
+      publicQuery: z
+        .object({
+          query: z
+            .string()
+            .min(1)
+            .max(400)
+            .refine((query) => Boolean(query.trim())),
+          authorizationHash: z.string().regex(/^[a-f0-9]{64}$/),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict()
+    .refine((pin) =>
+      pin.searchMode === 'WEB'
+        ? Boolean(pin.publicQuery)
+        : pin.searchMode !== 'PROJECT_ONLY' || !pin.publicQuery,
+    )
+    .refine((pin) => {
+      if (!pin.originalSourceVersions) return true;
+      const ids = [
+        ...(pin.sourceVersions ?? []),
+        ...pin.originalSourceVersions,
+      ].map((source) => source.id);
+      return (
+        ids.length === pin.sourceIds.length &&
+        new Set(ids).size === ids.length &&
+        new Set(pin.sourceIds).size === pin.sourceIds.length &&
+        ids.every((id) => pin.sourceIds.includes(id))
+      );
+    })
+    .refine((pin) => {
+      const required = pin.requiredDocuments ?? [];
+      return (
+        (!required.length || pin.documentReadScope === 'ALL') &&
+        new Set(required.map((source) => source.id)).size === required.length &&
+        required.every((source) =>
+          pin.originalSourceVersions?.some(
+            (original) =>
+              original.id === source.id &&
+              original.version === source.version &&
+              original.checksum === source.checksum,
+          ),
+        )
+      );
+    }),
+]);
 export type AiRequestMetadata = z.infer<typeof requestSchema>;
 export function requestMetadata(value: unknown): AiRequestMetadata | null {
   const parsed = z.object({ request: requestSchema }).safeParse(value);
   return parsed.success ? parsed.data.request : null;
+}
+export const contextLedgerSchema = z
+  .object({
+    estimator: z.literal('UTF8_BYTE_PROXY_V1'),
+    estimatedTextTokens: z.number().int().nonnegative(),
+    overheadTokenEstimate: z.null(),
+    opaqueContinuationBytes: z.number().int().min(0).max(256000),
+    opaqueContinuationTokenEstimate: z.null(),
+    unattributedMediaBytes: z.number().int().nonnegative(),
+    components: z
+      .array(
+        z
+          .object({
+            kind: z.enum([
+              'INSTRUCTIONS',
+              'CONTEXT',
+              'QUESTION',
+              'HISTORY',
+              'SUMMARY',
+              'MEMORY',
+              'TOOL_SCHEMAS',
+              'TOOL_CALLS',
+              'TOOL_OUTPUT',
+              'SOURCE',
+              'CONTINUATION',
+              'PACKED_HISTORY_MEMORY',
+            ]),
+            sourceId: z.string().uuid().nullable(),
+            textBytes: z.number().int().nonnegative(),
+            estimatedTokens: z.number().int().nonnegative(),
+          })
+          .strict(),
+      )
+      .max(128),
+    sources: z
+      .array(
+        z
+          .object({
+            sourceId: z.string().uuid(),
+            textBytes: z.number().int().nonnegative(),
+            estimatedTextTokens: z.number().int().nonnegative(),
+            mediaBytes: z.number().int().nonnegative(),
+            mediaTokenEstimate: z.null(),
+          })
+          .strict(),
+      )
+      .max(64),
+    capacity: z
+      .object({
+        publishedModelContextTokens: z.number().int().positive().nullable(),
+        publishedModelOutputTokens: z.number().int().positive().nullable(),
+        publishedEvidence: z.string().url().nullable(),
+        routeAccountContextTokens: z.number().int().positive().nullable(),
+        routeEvidence: z.string().min(1).max(1000),
+        galaxyTextBytesLimit: z.literal(256000),
+        galaxyMediaBytesLimit: z.literal(8000000),
+        galaxyInputItemsLimit: z.literal(64),
+        reasoningReserveTokens: z.null(),
+        outputReserveTokens: z.number().int().nonnegative().nullable(),
+      })
+      .strict(),
+  })
+  .strict()
+  .refine(
+    (ledger) =>
+      ledger.estimatedTextTokens ===
+        ledger.components.reduce(
+          (sum, component) => sum + component.estimatedTokens,
+          0,
+        ) &&
+      ledger.components.every(
+        (component) => component.estimatedTokens === component.textBytes,
+      ) &&
+      ledger.sources.every(
+        (source) => source.estimatedTextTokens === source.textBytes,
+      ),
+  );
+
+const budgetSchema = z
+  .object({
+    status: z.enum(['VERIFIED', 'UNVERIFIED']),
+    inputTokens: z.number().int().nonnegative().nullable(),
+    inputLimit: z.number().int().positive().nullable(),
+    tokenizerVersion: z.string().min(1).max(200).nullable(),
+    ledger: contextLedgerSchema.optional(),
+    bytes: z
+      .number()
+      .int()
+      .min(1)
+      .max(256000 + 256000 + Math.ceil(8_000_000 / 3) * 4),
+    items: z.number().int().min(1).max(64),
+    textBytes: z.number().int().min(1).max(256000).optional(),
+    media: z
+      .array(
+        z
+          .object({
+            kind: z.enum(['input_file', 'input_image']),
+            bytes: z.number().int().min(1).max(8_000_000),
+            estimatedTokens: z.null(),
+            evidence: z.literal('UNKNOWN'),
+          })
+          .strict(),
+      )
+      .max(256)
+      .optional(),
+  })
+  .strict()
+  .refine((b) => {
+    if (b.ledger?.opaqueContinuationBytes && b.status !== 'UNVERIFIED')
+      return false;
+    if (b.textBytes === undefined && b.media === undefined)
+      return b.bytes <= 256000;
+    if (b.textBytes === undefined || b.media === undefined) return false;
+    return (
+      b.media.reduce((sum, part) => sum + part.bytes, 0) <= 8_000_000 &&
+      b.bytes <=
+        b.textBytes +
+          (b.ledger?.opaqueContinuationBytes ?? 0) +
+          b.media.reduce(
+            (sum, part) => sum + 4 * Math.ceil(part.bytes / 3),
+            0,
+          ) &&
+      ((!b.media.length && !b.ledger?.opaqueContinuationBytes) ||
+        b.status === 'UNVERIFIED')
+    );
+  })
+  .refine((b) =>
+    b.status === 'VERIFIED'
+      ? b.inputTokens !== null &&
+        b.inputLimit !== null &&
+        b.tokenizerVersion !== null &&
+        b.inputTokens <= b.inputLimit
+      : b.inputTokens === null &&
+        b.inputLimit === null &&
+        b.tokenizerVersion === null,
+  );
+export const consumedContextSchema = z
+  .object({
+    scope: requestScopeSchema,
+    answerId: z.string().uuid(),
+    invokeGrantId: z.string().uuid(),
+    policyVersion: z.literal(AI_PROJECT_POLICY_VERSION),
+    usedHistoryAnswerIds: z.array(z.string().uuid()).max(64),
+    historyVersions: z
+      .array(
+        z
+          .object({
+            id: z.string().uuid(),
+            version: z.string().regex(/^[a-f0-9]{64}$/),
+          })
+          .strict(),
+      )
+      .max(64),
+    memoryRevisionIds: z.array(z.string().uuid()).max(64),
+    summaryRevisionIds: z.array(z.string().uuid()).max(64),
+    historyCompleteness: z.enum(['COMPLETE', 'PARTIAL']).optional(),
+    budget: budgetSchema,
+  })
+  .strict()
+  .refine(
+    (e) =>
+      new Set(e.usedHistoryAnswerIds).size === e.usedHistoryAnswerIds.length &&
+      new Set([...e.memoryRevisionIds, ...e.summaryRevisionIds]).size ===
+        e.memoryRevisionIds.length + e.summaryRevisionIds.length &&
+      e.historyVersions.length === e.usedHistoryAnswerIds.length &&
+      e.historyVersions.every((r, i) => r.id === e.usedHistoryAnswerIds[i]),
+  );
+export type AiConsumedContext = z.infer<typeof consumedContextSchema>;
+export function executionMetadata(value: unknown): AiConsumedContext | null {
+  const parsed = z
+    .object({ execution: consumedContextSchema })
+    .safeParse(value);
+  return parsed.success ? parsed.data.execution : null;
 }

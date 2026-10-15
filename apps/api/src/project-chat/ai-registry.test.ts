@@ -10,7 +10,168 @@ import {
   configuredModel,
   assertEgress,
   assertInput,
+  requestMetadata,
+  executionMetadata,
 } from './ai-registry';
+
+it('requires scoped version-three request and strict consumed-context proof without upgrading legacy history', () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const scope = {
+    organizationId: id,
+    projectId: id,
+    actorId: id,
+    conversationId: id,
+  };
+  const request = {
+    version: 3,
+    provider: 'chatgpt',
+    mode: 'UNIFIED',
+    model: 'account-model',
+    revision: 'binding',
+    configDigest: 'binding',
+    reasoning: 'default',
+    dataClassification: 'PROJECT_AUTHORIZED',
+    sourceIds: [],
+    historyAnswerIds: [id],
+    scope,
+    policyVersion: 'project-ai-p1-v1',
+  };
+  expect(requestMetadata({ request })?.version).toBe(3);
+  const publicRequest = {
+    ...request,
+    version: 4,
+    nativeWebSearch: false,
+    searchMode: 'WEB',
+    publicQuery: {
+      query: 'Official SIWC preview limitations',
+      authorizationHash: 'a'.repeat(64),
+    },
+  };
+  expect(requestMetadata({ request: publicRequest })).toEqual(publicRequest);
+  const original = { id, version: '1:abc', checksum: 'b'.repeat(64) };
+  const requiredRequest = {
+    ...publicRequest,
+    sourceIds: [id],
+    originalSourceVersions: [original],
+    documentReadScope: 'ALL',
+    requiredDocuments: [{ ...original, format: 'PDF' }],
+  };
+  expect(requestMetadata({ request: requiredRequest })).toEqual(
+    requiredRequest,
+  );
+  for (const requiredDocuments of [
+    [{ ...original, format: 'PDF', version: 'stale' }],
+    [{ ...original, format: 'PDF', checksum: 'c'.repeat(64) }],
+    [
+      {
+        ...original,
+        format: 'PDF',
+        id: '22222222-2222-4222-8222-222222222222',
+      },
+    ],
+    [{ ...original, format: 'PDF', modelRead: 'FULL' }],
+    [
+      { ...original, format: 'PDF' },
+      { ...original, format: 'PDF' },
+    ],
+  ])
+    expect(
+      requestMetadata({ request: { ...requiredRequest, requiredDocuments } }),
+    ).toBeNull();
+  expect(
+    requestMetadata({
+      request: {
+        ...publicRequest,
+        sourceIds: [id],
+        originalSourceVersions: [original],
+      },
+    })?.version,
+  ).toBe(4);
+  for (const sourceIds of [[], [id, id]])
+    expect(
+      requestMetadata({
+        request: {
+          ...publicRequest,
+          sourceIds,
+          originalSourceVersions: [original],
+        },
+      }),
+    ).toBeNull();
+  expect(
+    requestMetadata({
+      request: {
+        ...publicRequest,
+        sourceIds: [id],
+        originalSourceVersions: [original, original],
+      },
+    }),
+  ).toBeNull();
+  for (const invalid of [
+    { ...publicRequest, publicQuery: undefined },
+    { ...publicRequest, nativeWebSearch: true },
+    { ...publicRequest, searchMode: 'PROJECT_ONLY' },
+    { ...publicRequest, searchMode: 'UNKNOWN' },
+    {
+      ...publicRequest,
+      publicQuery: { query: 'public', clientApproved: true },
+    },
+    {
+      ...publicRequest,
+      publicQuery: { ...publicRequest.publicQuery, query: ' ' },
+    },
+    {
+      ...publicRequest,
+      publicQuery: { ...publicRequest.publicQuery, query: 'x'.repeat(401) },
+    },
+  ])
+    expect(requestMetadata({ request: invalid })).toBeNull();
+  expect(
+    requestMetadata({
+      request: { ...publicRequest, searchMode: 'AUTO', publicQuery: undefined },
+    })?.version,
+  ).toBe(4);
+  expect(
+    requestMetadata({
+      request: { ...request, scope: { ...scope, actorId: 'forged' } },
+    }),
+  ).toBeNull();
+  const execution = {
+    scope,
+    answerId: id,
+    invokeGrantId: id,
+    policyVersion: 'project-ai-p1-v1',
+    usedHistoryAnswerIds: [id],
+    historyVersions: [{ id, version: 'a'.repeat(64) }],
+    memoryRevisionIds: [],
+    summaryRevisionIds: [],
+    budget: {
+      status: 'UNVERIFIED',
+      inputTokens: null,
+      inputLimit: null,
+      tokenizerVersion: null,
+      bytes: 100,
+      items: 2,
+    },
+  };
+  expect(executionMetadata({ execution })).toEqual(execution);
+  expect(
+    executionMetadata({
+      execution: { ...execution, usedHistoryAnswerIds: [] },
+    }),
+  ).toBeNull();
+  expect(
+    executionMetadata({ execution: { ...execution, ownerId: id } }),
+  ).toBeNull();
+  expect(
+    executionMetadata({
+      execution: {
+        ...execution,
+        budget: { ...execution.budget, status: 'VERIFIED' },
+      },
+    }),
+  ).toBeNull();
+  expect(executionMetadata({ request })).toBeNull();
+});
 
 const directory = mkdtempSync(join(tmpdir(), 'galaxy-ai-config-'));
 const path = join(directory, 'providers.json');
@@ -450,4 +611,45 @@ it('web dùng env canonical tùy chọn, metadata không có key và pin config 
   expect(config.web?.credentialConfigured).toBe(true);
   expect(config.webKey).toBe('fixture-tavily');
   expect(JSON.stringify(config)).not.toContain('fixture-tavily');
+});
+
+it('requires the server scope and policy on v2 SIWC metadata while retaining v1', () => {
+  const scope = {
+    organizationId: '10000000-0000-4000-8000-000000000001',
+    projectId: '10000000-0000-4000-8000-000000000002',
+    actorId: '10000000-0000-4000-8000-000000000003',
+    conversationId: '10000000-0000-4000-8000-000000000004',
+  };
+  const legacy = {
+    version: 1,
+    provider: 'chatgpt',
+    mode: 'UNIFIED',
+    model: 'account-model',
+    revision: 'generation',
+    configDigest: 'generation',
+    reasoning: 'default',
+    dataClassification: 'PROJECT_AUTHORIZED',
+    sourceIds: [],
+    historyAnswerIds: [],
+  };
+  const scoped = {
+    ...legacy,
+    version: 2,
+    policyVersion: 'project-ai-p1-v1',
+    scope,
+  };
+  expect(requestMetadata({ request: legacy })).toMatchObject({ version: 1 });
+  expect(requestMetadata({ request: scoped })).toMatchObject({
+    version: 2,
+    scope,
+  });
+  for (const invalid of [
+    { ...scoped, scope: undefined },
+    { ...scoped, policyVersion: 'unapproved' },
+    { ...scoped, provider: 'openrouter' },
+    { ...scoped, historyAnswerIds: undefined },
+    { ...scoped, scope: { ...scope, projectId: 'invalid' } },
+    { ...scoped, scope: { ...scope, clientPermission: 'admin' } },
+  ])
+    expect(requestMetadata({ request: invalid })).toBeNull();
 });

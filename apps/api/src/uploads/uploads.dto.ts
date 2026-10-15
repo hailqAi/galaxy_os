@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  isUUID,
   Length,
   Matches,
   Max,
@@ -73,7 +74,15 @@ export class InitiateUploadDto {
       validate: (_value, args) => {
         const dto = args?.object as InitiateUploadDto | undefined;
         if (!dto) return false;
-        if (Boolean(dto.requiredDocumentId) === Boolean(dto.stageOneDocument))
+        if (
+          [
+            dto.requiredDocumentId,
+            dto.stageOneDocument,
+            dto.aiConversationId,
+          ].filter(Boolean).length !== 1
+        )
+          return false;
+        if (dto.aiConversationId && !isUUID(dto.idempotencyKey ?? ''))
           return false;
         return Boolean(
           dto.idempotencyKey ?? dto.stageOneDocument?.idempotencyKey,
@@ -83,6 +92,7 @@ export class InitiateUploadDto {
     },
   })
   projectId!: string;
+  @IsOptional() @IsUUID() aiConversationId?: string;
   @IsOptional() @IsUUID() requiredDocumentId?: string;
   @IsOptional()
   @ValidateNested()
@@ -104,6 +114,21 @@ export class UploadPartQuery {
   @Type(() => Number) @IsInt() @Min(1) @Max(10_000) partNumber!: number;
   @Matches(/^[a-f0-9]{64}$/) checksum!: string;
 }
+export class UploadConstraintsQuery {
+  @IsOptional() @IsUUID() projectId?: string;
+  @IsOptional()
+  @IsUUID()
+  @ValidateBy({
+    name: 'hasChatProject',
+    validator: {
+      validate: (_value, args) =>
+        Boolean(
+          (args?.object as UploadConstraintsQuery | undefined)?.projectId,
+        ),
+    },
+  })
+  aiConversationId?: string;
+}
 export class RecoverUploadsQuery {
   @IsUUID()
   @ValidateBy({
@@ -112,12 +137,19 @@ export class RecoverUploadsQuery {
       validate: (_value, args) => {
         const dto = args?.object as RecoverUploadsQuery | undefined;
         if (!dto) return false;
-        return !(dto.requiredDocumentId && dto.stageOneDocumentId);
+        return (
+          [
+            dto.requiredDocumentId,
+            dto.stageOneDocumentId,
+            dto.aiConversationId,
+          ].filter(Boolean).length <= 1
+        );
       },
       defaultMessage: () => 'Chỉ được chọn một hồ sơ đích.',
     },
   })
   projectId!: string;
+  @IsOptional() @IsUUID() aiConversationId?: string;
   @IsOptional()
   @IsIn(PROJECT_DOCUMENT_CONTEXTS)
   contextType?: ProjectDocumentContext;

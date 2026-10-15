@@ -5,6 +5,7 @@ import { LogisticsController } from './logistics.controller';
 import { LogisticsService } from './logistics.service';
 
 @Module({
+  exports: [LogisticsService],
   imports: [AccessControlModule],
   controllers: [LogisticsController],
   providers: [LogisticsService, PrismaService],

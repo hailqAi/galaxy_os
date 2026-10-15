@@ -55,7 +55,9 @@ export class LogisticsService {
       mode: query.mode,
       status: query.status,
       purchaseOrder: {
-        purchaseRequest: { project: this.policy.projectWhere(actor) },
+        purchaseRequest: {
+          project: this.policy.projectWhere(actor, 'logistics.shipment.read'),
+        },
       },
       OR: query.search
         ? [
@@ -117,7 +119,9 @@ export class LogisticsService {
         id,
         organizationId: actor.organizationId,
         purchaseOrder: {
-          purchaseRequest: { project: this.policy.projectWhere(actor) },
+          purchaseRequest: {
+            project: this.policy.projectWhere(actor, 'logistics.shipment.read'),
+          },
         },
       },
       include: {

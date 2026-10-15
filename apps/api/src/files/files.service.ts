@@ -11,13 +11,16 @@ import {
 import { createHash, randomUUID } from 'node:crypto';
 import { extname } from 'node:path';
 import { Readable } from 'node:stream';
-import { Prisma } from '@prisma/client';
+import { FileAsset, Prisma } from '@prisma/client';
 import {
   BusinessEntityPolicy,
   projectWhereForPermissions,
 } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
-import { ProjectChatPolicy } from '../access-control/project-chat.policy';
+import {
+  ProjectChatPolicy,
+  PROJECT_CHAT_TRANSACTION_TIMEOUT_MS,
+} from '../access-control/project-chat.policy';
 import { readEnvironment } from '../config/env';
 import { PrismaService } from '../prisma.service';
 import { isStageOneFinancialDocument } from '../projects/project-stage-one.rules';
@@ -26,6 +29,7 @@ import { safeFilename } from './filename';
 import { hiddenProjectFileIds } from './project-file';
 import { assertBoundedWorkbook } from '../imports/imports.service';
 import { docxMime, docxParts } from './office-document';
+import { pptxMime, pptxParts } from './office-presentation';
 import {
   assertFileCapacity,
   fileStorageReservationExpiry,
@@ -39,6 +43,7 @@ const allowed = new Map([
   ['application/pdf', '.pdf'],
   ['text/plain', '.txt'],
   [docxMime, '.docx'],
+  [pptxMime, '.pptx'],
   [
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     '.xlsx',
@@ -289,7 +294,7 @@ export class FilesService {
       );
     const aiContext =
       input.entityType === 'ChatAiConversation'
-        ? await this.aiUpload(actor, input.entityId, chatKey, this.prisma)
+        ? await this.assertAiUpload(actor, input.entityId, chatKey, this.prisma)
         : null;
     const chatContext =
       input.entityType === 'ChatRoom'
@@ -313,14 +318,18 @@ export class FilesService {
     if (!original) throw new BadRequestException('Invalid filename');
     const xlsx = aiContext && extname(original).toLowerCase() === '.xlsx';
     const docx = aiContext && extname(original).toLowerCase() === '.docx';
+    const pptx = aiContext && extname(original).toLowerCase() === '.pptx';
     if (docx) docxParts(file.buffer);
+    if (pptx) pptxParts(file.buffer);
     if (xlsx && (file.size > 5_000_000 || !assertBoundedWorkbook(file.buffer)))
       throw new BadRequestException('Tệp XLSX không hợp lệ hoặc quá lớn');
-    const detected = docx
-      ? docxMime
-      : xlsx
-        ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        : this.detect(file.buffer);
+    const detected = pptx
+      ? pptxMime
+      : docx
+        ? docxMime
+        : xlsx
+          ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          : this.detect(file.buffer);
     if (
       !detected ||
       (detected !== file.mimetype &&
@@ -346,7 +355,7 @@ export class FilesService {
       .update(JSON.stringify([checksum, original, detected]))
       .digest('hex');
     if (aiContext) {
-      const replay = await this.aiReplay(
+      const replay = await this.replayAiUpload(
         actor,
         input.entityId,
         chatKey!,
@@ -383,250 +392,243 @@ export class FilesService {
     const reservationId = randomUUID();
     const storageKey = this.storage.createKey(actor.organizationId);
     try {
-      await this.prisma.$transaction(async (tx) => {
-        await lockOrganizationFileCapacity(tx, actor.organizationId);
-        await assertFileCapacity(tx, {
-          organizationId: actor.organizationId,
-          actorId: actor.userId,
-          incomingBytes: BigInt(file.size),
-          staging: false,
-          organizationLimitBytes: BigInt(
-            this.environment.UPLOAD_ORGANIZATION_QUOTA_BYTES,
-          ),
-          globalLimitBytes: BigInt(this.environment.UPLOAD_GLOBAL_QUOTA_BYTES),
-          unmeasuredFileBytes: BigInt(this.environment.UPLOAD_MAX_FILE_BYTES),
-          actorStagingLimit: this.environment.UPLOAD_ACTOR_STAGING_LIMIT,
-        });
-        await tx.fileStorageReservation.create({
-          data: {
-            id: reservationId,
+      await this.prisma.$transaction(
+        async (tx) => {
+          await lockOrganizationFileCapacity(tx, actor.organizationId);
+          await assertFileCapacity(tx, {
             organizationId: actor.organizationId,
             actorId: actor.userId,
-            storageKey,
-            sizeBytes: BigInt(file.size),
-            expiresAt: fileStorageReservationExpiry(),
-          },
-        });
-      });
+            incomingBytes: BigInt(file.size),
+            staging: false,
+            organizationLimitBytes: BigInt(
+              this.environment.UPLOAD_ORGANIZATION_QUOTA_BYTES,
+            ),
+            globalLimitBytes: BigInt(
+              this.environment.UPLOAD_GLOBAL_QUOTA_BYTES,
+            ),
+            unmeasuredFileBytes: BigInt(this.environment.UPLOAD_MAX_FILE_BYTES),
+            actorStagingLimit: this.environment.UPLOAD_ACTOR_STAGING_LIMIT,
+          });
+          await tx.fileStorageReservation.create({
+            data: {
+              id: reservationId,
+              organizationId: actor.organizationId,
+              actorId: actor.userId,
+              storageKey,
+              sizeBytes: BigInt(file.size),
+              expiresAt: fileStorageReservationExpiry(),
+            },
+          });
+        },
+        aiContext
+          ? { timeout: PROJECT_CHAT_TRANSACTION_TIMEOUT_MS }
+          : undefined,
+      );
       await this.storage.putStream(
         actor.organizationId,
         Readable.from(file.buffer),
         storageKey,
         reservationId,
       );
-      return await this.prisma.$transaction(async (tx) => {
-        const reservation = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const reservation = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
           SELECT "id" FROM "FileStorageReservation"
           WHERE "id" = ${reservationId}::uuid AND "expiresAt" > NOW()
           FOR UPDATE
         `);
-        if (!reservation.length)
-          throw new ConflictException('File storage reservation expired');
-        if (aiContext)
-          await this.lockProjects(tx, actor, [aiContext.projectId]);
-        else if (chatContext)
-          await this.lockProjects(tx, actor, [chatContext.room.projectId]);
-        else if (context.projectId)
-          await this.lockProjectFor(
-            tx,
-            actor,
-            context.projectId,
-            'file.upload',
-          );
-        const aiCurrent = aiContext
-          ? await this.aiUpload(actor, input.entityId, chatKey, tx)
-          : null;
-        if (aiCurrent) {
-          const replay = await this.aiReplay(
-            actor,
-            input.entityId,
-            chatKey!,
-            chatHash,
-            tx,
-          );
-          if (replay) {
-            await this.storage.removePending(storageKey, reservationId);
-            await tx.fileStorageReservation.delete({
-              where: { id: reservationId },
-            });
-            await this.aiUpload(actor, input.entityId, chatKey, tx);
-            return replay;
+          if (!reservation.length)
+            throw new ConflictException('File storage reservation expired');
+          if (aiContext)
+            await this.lockProjects(tx, actor, [aiContext.projectId]);
+          else if (chatContext)
+            await this.lockProjects(tx, actor, [chatContext.room.projectId]);
+          else if (context.projectId)
+            await this.lockProjectFor(
+              tx,
+              actor,
+              context.projectId,
+              'file.upload',
+            );
+          const aiCurrent = aiContext
+            ? await this.assertAiUpload(actor, input.entityId, chatKey, tx)
+            : null;
+          if (aiCurrent) {
+            const replay = await this.replayAiUpload(
+              actor,
+              input.entityId,
+              chatKey!,
+              chatHash,
+              tx,
+            );
+            if (replay) {
+              await this.storage.removePending(storageKey, reservationId);
+              await tx.fileStorageReservation.delete({
+                where: { id: reservationId },
+              });
+              await this.assertAiUpload(actor, input.entityId, chatKey, tx);
+              return replay;
+            }
           }
-        }
-        const chatCurrent = chatContext
-          ? await this.chatUpload(actor, input.entityId, chatKey, tx)
-          : null;
-        if (chatCurrent) {
-          const replay = await this.chatReplay(
-            actor,
-            input.entityId,
-            chatKey!,
-            chatHash,
-            chatCurrent.grant.effectiveAt,
-            tx,
-          );
-          if (replay) {
-            await this.storage.removePending(storageKey, reservationId);
-            await tx.fileStorageReservation.delete({
-              where: { id: reservationId },
-            });
-            await this.chatUpload(actor, input.entityId, chatKey, tx);
-            return replay;
+          const chatCurrent = chatContext
+            ? await this.chatUpload(actor, input.entityId, chatKey, tx)
+            : null;
+          if (chatCurrent) {
+            const replay = await this.chatReplay(
+              actor,
+              input.entityId,
+              chatKey!,
+              chatHash,
+              chatCurrent.grant.effectiveAt,
+              tx,
+            );
+            if (replay) {
+              await this.storage.removePending(storageKey, reservationId);
+              await tx.fileStorageReservation.delete({
+                where: { id: reservationId },
+              });
+              await this.chatUpload(actor, input.entityId, chatKey, tx);
+              return replay;
+            }
           }
-        }
-        const currentContext = aiCurrent
-          ? { projectId: aiCurrent.projectId, customerId: undefined }
-          : chatCurrent
-            ? { projectId: chatCurrent.room.projectId, customerId: undefined }
-            : await this.entities.assertView(
-                actor,
-                input.entityType,
-                input.entityId,
-                'file.upload',
-                tx,
-              );
-        if (
-          currentContext.projectId !== context.projectId ||
-          currentContext.customerId !== context.customerId
-        )
-          throw new NotFoundException('Entity not found');
-        if (generated) await generated.verify(tx);
-        await this.storage.publishPending(storageKey, reservationId);
-        const asset = await tx.fileAsset.create({
-          data: {
-            organizationId: actor.organizationId,
-            originalFilename: original,
-            storedFilename: randomUUID(),
-            mimeType: detected,
-            sizeBytes: BigInt(file.size),
-            storageKey,
-            checksum,
-            category: input.category,
-            ...(generated ? { version: generated.version } : {}),
-            confidentiality: input.confidentiality,
-            uploadedById: actor.userId,
-          },
-        });
-        await tx.entityAttachment.create({
-          data: {
-            fileAssetId: asset.id,
-            entityType: input.entityType,
-            entityId: input.entityId,
-            projectId: context.projectId,
-            customerId: context.customerId,
-            createdBy: actor.userId,
-          },
-        });
-        if (aiCurrent) {
-          const linked = await tx.chatAiSourceIndex.create({
+          const currentContext = aiCurrent
+            ? { projectId: aiCurrent.projectId, customerId: undefined }
+            : chatCurrent
+              ? { projectId: chatCurrent.room.projectId, customerId: undefined }
+              : await this.entities.assertView(
+                  actor,
+                  input.entityType,
+                  input.entityId,
+                  'file.upload',
+                  tx,
+                );
+          if (
+            currentContext.projectId !== context.projectId ||
+            currentContext.customerId !== context.customerId
+          )
+            throw new NotFoundException('Entity not found');
+          if (generated) await generated.verify(tx);
+          await this.storage.publishPending(storageKey, reservationId);
+          const asset = await tx.fileAsset.create({
             data: {
               organizationId: actor.organizationId,
-              projectId: aiCurrent.projectId,
-              ownerId: actor.userId,
-              conversationId: input.entityId,
-              clientKey: chatKey,
-              payloadHash: chatHash,
-              fileAssetId: asset.id,
-              version: `${asset.version}:${checksum}`,
-              label: original,
-              provenance: generated ? 'AI_DRAFT' : 'UNCONFIRMED',
+              originalFilename: original,
+              storedFilename: randomUUID(),
+              mimeType: detected,
+              sizeBytes: BigInt(file.size),
+              storageKey,
+              checksum,
+              category: input.category,
+              ...(generated ? { version: generated.version } : {}),
+              confidentiality: input.confidentiality,
+              uploadedById: actor.userId,
             },
           });
-          if (generated) {
+          if (!aiCurrent)
             await tx.entityAttachment.create({
               data: {
                 fileAssetId: asset.id,
-                entityType: 'ChatAiAnswer',
-                entityId: generated.answerId,
-                projectId: aiCurrent.projectId,
+                entityType: input.entityType,
+                entityId: input.entityId,
+                projectId: context.projectId,
+                customerId: context.customerId,
                 createdBy: actor.userId,
               },
             });
-            await generated.record(tx, {
+          if (aiCurrent) {
+            const linked = await this.attachAiUpload(
+              actor,
+              input.entityId,
+              chatKey!,
+              asset,
+              tx,
+              generated ? 'AI_DRAFT' : 'UNCONFIRMED',
+            );
+            if (generated) {
+              await tx.entityAttachment.create({
+                data: {
+                  fileAssetId: asset.id,
+                  entityType: 'ChatAiAnswer',
+                  entityId: generated.answerId,
+                  projectId: aiCurrent.projectId,
+                  createdBy: actor.userId,
+                },
+              });
+              await generated.record(tx, {
+                id: linked.id,
+                fileAssetId: asset.id,
+                version: linked.version,
+                label: original,
+                sizeBytes: file.size,
+              });
+            }
+            await tx.fileStorageReservation.delete({
+              where: { id: reservationId },
+            });
+            await this.assertAiUpload(actor, input.entityId, chatKey, tx);
+            return {
               id: linked.id,
               fileAssetId: asset.id,
               version: linked.version,
+              status: linked.status,
               label: original,
               sizeBytes: file.size,
+            };
+          }
+          if (chatCurrent) {
+            const linked = await tx.chatFile.create({
+              data: {
+                organizationId: actor.organizationId,
+                projectId: chatCurrent.room.projectId,
+                roomId: input.entityId,
+                actorId: actor.userId,
+                clientKey: chatKey!,
+                payloadHash: chatHash,
+                fileAssetId: asset.id,
+                version: asset.version,
+                origin:
+                  actor.membershipKind === 'EXTERNAL'
+                    ? 'EXTERNAL_UNCONFIRMED'
+                    : 'INTERNAL',
+                createdAt: new Date(),
+              },
             });
+            await this.chat!.assertRoom(actor, input.entityId, 'UPLOAD', tx);
+            await tx.fileStorageReservation.delete({
+              where: { id: reservationId },
+            });
+            return {
+              id: linked.id,
+              fileAssetId: asset.id,
+              version: asset.version,
+              originalFilename: asset.originalFilename,
+              origin: linked.origin,
+            };
           }
           await tx.activity.create({
             data: {
               organizationId: actor.organizationId,
               actorId: actor.userId,
               event: 'FILE_UPLOADED',
-              entityType: 'ChatAiConversation',
+              entityType: input.entityType,
               entityId: input.entityId,
-              metadata: {
-                fileId: asset.id,
-                sourceId: linked.id,
-                version: asset.version,
-              },
+              metadata: { fileId: asset.id, category: input.category },
             },
           });
           await tx.fileStorageReservation.delete({
             where: { id: reservationId },
           });
-          await this.aiUpload(actor, input.entityId, chatKey, tx);
-          return {
-            id: linked.id,
-            fileAssetId: asset.id,
-            version: linked.version,
-            status: linked.status,
-            label: original,
-            sizeBytes: file.size,
-          };
-        }
-        if (chatCurrent) {
-          const linked = await tx.chatFile.create({
-            data: {
-              organizationId: actor.organizationId,
-              projectId: chatCurrent.room.projectId,
-              roomId: input.entityId,
-              actorId: actor.userId,
-              clientKey: chatKey!,
-              payloadHash: chatHash,
-              fileAssetId: asset.id,
-              version: asset.version,
-              origin:
-                actor.membershipKind === 'EXTERNAL'
-                  ? 'EXTERNAL_UNCONFIRMED'
-                  : 'INTERNAL',
-              createdAt: new Date(),
-            },
-          });
-          await this.chat!.assertRoom(actor, input.entityId, 'UPLOAD', tx);
-          await tx.fileStorageReservation.delete({
-            where: { id: reservationId },
-          });
-          return {
-            id: linked.id,
-            fileAssetId: asset.id,
-            version: asset.version,
-            originalFilename: asset.originalFilename,
-            origin: linked.origin,
-          };
-        }
-        await tx.activity.create({
-          data: {
-            organizationId: actor.organizationId,
-            actorId: actor.userId,
-            event: 'FILE_UPLOADED',
-            entityType: input.entityType,
-            entityId: input.entityId,
-            metadata: { fileId: asset.id, category: input.category },
-          },
-        });
-        await tx.fileStorageReservation.delete({
-          where: { id: reservationId },
-        });
-        return this.view(
-          await tx.fileAsset.findUniqueOrThrow({
-            where: { id: asset.id },
-            include: this.include(actor, 'file.upload'),
-          }),
-        );
-      });
+          return this.view(
+            await tx.fileAsset.findUniqueOrThrow({
+              where: { id: asset.id },
+              include: this.include(actor, 'file.upload'),
+            }),
+          );
+        },
+        aiContext
+          ? { timeout: PROJECT_CHAT_TRANSACTION_TIMEOUT_MS }
+          : undefined,
+      );
     } catch (error) {
       const reservation = await this.prisma.fileStorageReservation
         .findUnique({ where: { id: reservationId }, select: { id: true } })
@@ -645,7 +647,7 @@ export class FilesService {
       throw error;
     }
   }
-  private async aiUpload(
+  async assertAiUpload(
     actor: CurrentActor,
     conversationId: string,
     key: string | undefined,
@@ -675,7 +677,86 @@ export class FilesService {
     await this.chat.authority(tx, actor, conversation.projectId, 'INVOKE');
     return conversation;
   }
-  private async aiReplay(
+
+  async attachAiUpload(
+    actor: CurrentActor,
+    conversationId: string,
+    key: string,
+    asset: FileAsset,
+    tx: Prisma.TransactionClient,
+    provenance: 'UNCONFIRMED' | 'AI_DRAFT' = 'UNCONFIRMED',
+  ) {
+    const conversation = await this.assertAiUpload(
+      actor,
+      conversationId,
+      key,
+      tx,
+    );
+    if (
+      asset.organizationId !== actor.organizationId ||
+      asset.uploadedById !== actor.userId ||
+      asset.deletedAt
+    )
+      throw new NotFoundException();
+    const existing = await tx.chatAiSourceIndex.findUnique({
+      where: { conversationId_clientKey: { conversationId, clientKey: key } },
+    });
+    if (existing) {
+      if (
+        existing.fileAssetId !== asset.id ||
+        existing.version !== `${asset.version}:${asset.checksum}`
+      )
+        throw new ConflictException('Khóa upload đã dùng cho file khác');
+      return existing;
+    }
+    await tx.entityAttachment.create({
+      data: {
+        fileAssetId: asset.id,
+        entityType: 'ChatAiConversation',
+        entityId: conversationId,
+        projectId: conversation.projectId,
+        createdBy: actor.userId,
+      },
+    });
+    const linked = await tx.chatAiSourceIndex.create({
+      data: {
+        organizationId: actor.organizationId,
+        projectId: conversation.projectId,
+        ownerId: actor.userId,
+        conversationId,
+        clientKey: key,
+        payloadHash: createHash('sha256')
+          .update(
+            JSON.stringify([
+              asset.checksum,
+              asset.originalFilename,
+              asset.mimeType,
+            ]),
+          )
+          .digest('hex'),
+        fileAssetId: asset.id,
+        version: `${asset.version}:${asset.checksum}`,
+        label: asset.originalFilename,
+        provenance,
+      },
+    });
+    await tx.activity.create({
+      data: {
+        organizationId: actor.organizationId,
+        actorId: actor.userId,
+        event: 'FILE_UPLOADED',
+        entityType: 'ChatAiConversation',
+        entityId: conversationId,
+        metadata: {
+          fileId: asset.id,
+          sourceId: linked.id,
+          version: asset.version,
+        },
+      },
+    });
+    return linked;
+  }
+  async replayAiUpload(
     actor: CurrentActor,
     conversationId: string,
     clientKey: string,
@@ -697,10 +778,22 @@ export class FilesService {
     if (
       !source.file ||
       source.file.deletedAt ||
-      source.version !== `${source.file.version}:${source.file.checksum}`
+      source.file.organizationId !== actor.organizationId ||
+      source.file.uploadedById !== actor.userId ||
+      source.version !== `${source.file.version}:${source.file.checksum}` ||
+      !(await tx.entityAttachment.findFirst({
+        where: {
+          fileAssetId: source.file.id,
+          entityType: 'ChatAiConversation',
+          entityId: conversationId,
+          projectId: source.projectId,
+          createdBy: actor.userId,
+        },
+        select: { id: true },
+      }))
     )
       throw new NotFoundException();
-    await this.aiUpload(actor, conversationId, clientKey, tx);
+    await this.assertAiUpload(actor, conversationId, clientKey, tx);
     return {
       id: source.id,
       fileAssetId: source.file.id,
@@ -838,6 +931,7 @@ export class FilesService {
     id: string,
     requiredPermissions: string | readonly string[] = 'file.download',
     version?: number,
+    start = 0,
   ) {
     const file = await this.file(actor, id, false, requiredPermissions);
     if (version !== undefined && file.version !== version)
@@ -845,7 +939,12 @@ export class FilesService {
         'Phiên bản file đã thay đổi; tải lại danh sách trước khi mở.',
       );
     try {
-      return { file, data: await this.storage.stream(file.storageKey) };
+      return {
+        file,
+        data: start
+          ? await this.storage.stream(file.storageKey, start)
+          : await this.storage.stream(file.storageKey),
+      };
     } catch (error) {
       if (error instanceof NotFoundException)
         throw new NotFoundException({
