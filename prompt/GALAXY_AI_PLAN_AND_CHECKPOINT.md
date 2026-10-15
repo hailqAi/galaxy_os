@@ -1,3 +1,15 @@
+## E05 CP-r38 — CI source pushed and remote verified — 2026-10-15T09:56:53.045721+00:00
+
+Owner-authorized source commit70e398c79e4f689a62fc64e5b08651da4c089545 is published on origin/m2/project-chat-20260928; remote SHA verified. All842tested inputs unchanged; CP-r37 fresh full2756PASS+1SKIP/gates/95Python and four R39 fixes retained. Existing encrypted key was unlocked by owner in terminal and used via SSH agent; initial auth blocker resolved without collecting secrets. No PR, merge, force push, deploy or business-data change.
+
+No new CI triggered: branch has no open PR and workflow runs only on main push/PR. Previous cancellation remains UNKNOWN; no fresh hosted Ubuntu24 or Work/download acceptance claim. [Report](/home/galaxy_os/prompt/E05_CI_REPAIR_20261015.md), [checkpoint](/home/galaxy_os/prompt/E05_MCP_WORK_CHECKPOINT.md). Supersedes CP-r38 waiting-key state only; existing maintenance/release gates retained.
+
+## E05 CP-r37 — CI repair locally verified, GitHub pending — 2026-10-15T09:45:59.563269+00:00
+
+Current canonical HEAD70884bcd + uncommitted E05-CI-r1 patch fixes OS-tool provisioning/G00 CI configuration, early sandbox diagnostics and image worker Node identity; four R39 fixes retained. Fresh full pnpmtest2756PASS+1existingSKIP (API2099/Web647/Edge9/document1), scoped decoder70/R39scope98, all five gates/explicit pytest1/Python95 and independent source review PASS. Initial fixture/95-Python failures remain in evidence. No commit/push/PR/deploy/main DB change.
+
+GitHub latest push run38682875450/head8e69a6f7 and PR38682795716/head70884bcd are historical failures with test step cancelled47/48s; logs403, cancellation cause UNKNOWN. New patch has NOT run on GitHub or clean Ubuntu24; no fresh real Work/download claim. [Report and next gates](/home/galaxy_os/prompt/E05_CI_REPAIR_20261015.md), [checkpoint](/home/galaxy_os/prompt/E05_MCP_WORK_CHECKPOINT.md). CP-r36 offline-maintenance gates remain unchanged.
+
 ## E05-CP-r13 — live count, lookup and note write verified; final regression correction
 
 2026-10-14T03:21:52.508426+00:00. Main remains r21 local-f5576eb2bd2d/schema98 READY. Owner's new Galaxy OS R21 plugin has five real granted scopes, counted10 Projects, found the trial by name and read actual PLANNING/stage1 data. Owner then saved the exact requested note; backend readback at03:04:31.753Z confirms one record `afacf13c-8322-4bca-84a1-30bfa628bef3`, revision1, PRIVATE/UNVERIFIED, correct trial Project. This is an actual plugin write plus persistence proof, not a fixture/business decision.
