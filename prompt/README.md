@@ -1,3 +1,7 @@
+Latest E05 CP-r32: SSH push f9943b9 verified; cache-only cleanup done, appdata protected on D with132Files/schema98 dump checked. R41 active; owner Admin console ready, single-entry offline compact prepared/tested but NOT_EXECUTED. See STORAGE_RECLAIM_20261015.md. Git auth blocker superseded.
+
+Latest E05 CP-r31: full source committed f9943b9 (329 paths, worktree clean); actual push blocked by GitHub authentication. R42 frozen/local/review/stage PASS, R41 active. Safe R41-only offline compact prepared on Windows; no Admin/pause/compact yet. Owner Git login is next.
+
 Latest E05 CP-r30: R42 frozen/local gates/restart/browser/actual Work-byte preview PASS; R41 remains active/public accepted. Git push authorized but owner login required, sudo/WindowsAdmin also external dependencies. See E05_R42_PREVIEW_RELEASE_r1.md.
 
 Latest E05 CP-r29: R41 mainchat/reload owner PASS; C54.5GiB actual free, obsolete v2 build caches retired with manifest. Prefix-aware preview patch source122PASS/review; full regression and R42 preparation in progress. No new activation.
