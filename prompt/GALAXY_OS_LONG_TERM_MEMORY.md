@@ -1,3 +1,9 @@
+## E05 CP-r38 — CI source pushed and remote verified — 2026-10-15T09:56:53.045721+00:00
+
+Owner-authorized source commit70e398c79e4f689a62fc64e5b08651da4c089545 is published on origin/m2/project-chat-20260928; remote SHA verified. All842tested inputs unchanged; CP-r37 fresh full2756PASS+1SKIP/gates/95Python and four R39 fixes retained. Existing encrypted key was unlocked by owner in terminal and used via SSH agent; initial auth blocker resolved without collecting secrets. No PR, merge, force push, deploy or business-data change.
+
+No new CI triggered: branch has no open PR and workflow runs only on main push/PR. Previous cancellation remains UNKNOWN; no fresh hosted Ubuntu24 or Work/download acceptance claim. [Report](/home/galaxy_os/prompt/E05_CI_REPAIR_20261015.md), [checkpoint](/home/galaxy_os/prompt/E05_MCP_WORK_CHECKPOINT.md). Supersedes CP-r38 waiting-key state only; existing maintenance/release gates retained.
+
 ## E05 CP-r37 CI decision/evidence — 2026-10-15T09:45:59.563269+00:00
 
 Version E05-CI-r1, owner scope CI repair plus original four R39 fixes. Current HEAD70884bcd/uncommitted patch; source full regression2756PASS+1SKIP and all five gates/pytest1/Python95 reviewed fresh, not old composite counts. Six source/bootstrap/test/doc files changed; four-fix11inputs preserved. Linux OS tools and exact API interpreter belong to bootstrap; inactive document-ai venv does not supply them. No extra Python libraries. Failed run/cancellation details remain separately qualified; no new GitHub or Work acceptance, commit/push/PR or production change. [Evidence and supersession](/home/galaxy_os/prompt/E05_CI_REPAIR_20261015.md), [checkpoint](E05_MCP_WORK_CHECKPOINT.md). Replaces CP-r37 in-progress evidence only; CP-r36 maintenance gates retained.

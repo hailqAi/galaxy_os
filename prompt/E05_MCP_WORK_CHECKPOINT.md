@@ -1,3 +1,11 @@
+## E05 CP-r38 — SOURCE_PUSHED / REMOTE_SHA_VERIFIED — 2026-10-15T09:56:53.045721+00:00
+
+Owner explicitly requested publication. Canonical CI source commit70e398c79e4f689a62fc64e5b08651da4c089545 was pushed to origin/m2/project-chat-20260928; actual ls-remote matches exactly. Commit includes13reviewedCI/source/test/status/memory paths. All842tested inputs matched before commit; CP-r37 fresh full2756PASS+1existingSKIP/all five gates/95Python and four R39 regressions retain exact source scope. No implementation change, PR, merge, force push, runtime or DB change.
+
+Initial push was blocked because WSL no longer had an authenticated agent and the existing key was encrypted. Owner unlocked that same key in their terminal; existing SSH agent was then used successfully. No passphrase/token/key contents were collected or changed. This verified push supersedes CP-r38 WAITING_KEY_UNLOCK only. Publication checkpoint follows the source commit without changing tested application inputs.
+
+GitHub has no open PR for this branch; workflow triggers only main pushes and pull_request. Thus source is published but no new CI run was triggered by this branch push. Do not call CI PASS or infer new Work/download acceptance. Previous cancellation remains UNKNOWN/log download403. [CI report](/home/galaxy_os/prompt/E05_CI_REPAIR_20261015.md), private `.runtime/e05-ci-20261015/source-publication.json`; CP-r36 maintenance gates remain unchanged.
+
 ## E05 CP-r37 — LOCAL_CI_REPAIR_FULL_REGRESSION_PASS / REMOTE_CI_NOT_VERIFIED — 2026-10-15T09:45:59.563269+00:00
 
 Version E05-CI-r1. Owner added CI repair while retaining all four R39 review fixes. Canonical HEAD70884bcd09387b3c34a9953ed5d99f29d0b72edc plus uncommitted patch; no commit/push/PR/deploy/production write. Latest public push run38682875450/main head8e69a6f7 and PRrun38682795716/head70884bcd both verify FAILURE with pnpmtest CANCELLED after47/48s. Owner identifies latest pushed version; exact log binding and cancellation cause remain UNKNOWN because download returns403/admin required. No concurrency/timeout changes.
