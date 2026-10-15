@@ -23,6 +23,7 @@ See [system context](docs/architecture/system-context.md), [data principles](doc
 - Node.js 20.15+ (`nvm use` reads `.nvmrc`; bounded PNG validation uses the built-in CRC API)
 - pnpm 10 (`corepack enable` then `corepack prepare pnpm@10.33.4 --activate`)
 - Python 3.10+
+- Document decoders and media fixtures: `bubblewrap`, `poppler-utils`, `python3`, `util-linux`, `ffmpeg` (Ubuntu packages); run the API as a non-root user with unprivileged user namespaces available.
 - Docker Desktop with WSL integration enabled
 - VS Code with the WSL extension; open the repository from WSL using `code .`
 
@@ -32,12 +33,19 @@ Do not install JavaScript or Python project dependencies globally.
 
 ```bash
 cp .env.example .env.local
+sudo apt-get update
+sudo apt-get install --no-install-recommends -y bubblewrap poppler-utils python3 util-linux ffmpeg
 pnpm install --frozen-lockfile
 python3 -m venv services/document-ai/.venv
 services/document-ai/.venv/bin/pip install -r services/document-ai/requirements-dev.txt
 pnpm db:generate
 pnpm env:check
 ```
+
+`pnpm env:check` verifies the actual isolated PDF tools, system `/usr/bin/python3`
+standard-library imports, and the API's Node/Sharp decoder before tests. The inactive
+document-ai virtualenv does not provide these OS tools. Existing private Poppler
+installations can set `GALAXY_AI_PDFINFO` and `GALAXY_AI_PDF_LIBRARY_PATH` explicitly.
 
 The ignored root `.env.local` is the single local-development environment file used by the API and Prisma commands. Set a local-only `DEV_SEED_PASSWORD` of 12–72 UTF-8 bytes before seeding to create the administrator credential; it is hashed and never printed or stored as plaintext. `PASSWORD_BCRYPT_ROUNDS` defaults to 12. `ALLOW_DEV_AUTH` remains false by default; outside production it also requires the explicit `x-galaxy-dev-auth` request selector, and production rejects it. Session lifetime/cookie name and local avatar storage are configured by `SESSION_TTL_HOURS`, `SESSION_COOKIE_NAME`, `AVATAR_STORAGE_PATH`, and `AVATAR_MAX_BYTES`.
 

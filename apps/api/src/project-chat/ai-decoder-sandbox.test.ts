@@ -1,5 +1,6 @@
 import { PassThrough } from 'node:stream';
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { expect, it, vi } from 'vitest';
 
 const calls = vi.hoisted(
@@ -31,7 +32,7 @@ vi.mock('node:child_process', () => ({
           ? 'Pages: 1\nEncrypted: no\nJavaScript: no\n'
           : operation === 'pdftotext'
             ? 'SYNTHETIC PAGE ONE\f'
-            : args.includes('/usr/bin/node')
+            : args.includes('/decoder/node')
               ? 'OK'
               : Buffer.from(
                   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=',
@@ -124,9 +125,17 @@ it('decodes untrusted image pixels outside the API process in the same isolated 
       '--unshare-all',
       '--clearenv',
       '--die-with-parent',
-      '/usr/bin/node',
+      '--ro-bind',
+      realpathSync(process.execPath),
+      '/decoder/node',
       '--max-old-space-size=128',
     ]),
   );
   expect(calls[0]!.options.env).toEqual({});
+  const args = calls[0]!.args;
+  expect(args.slice(args.indexOf('--max-old-space-size=128') - 1, -2)).toEqual([
+    '/decoder/node',
+    '--max-old-space-size=128',
+    '--max-semi-space-size=4',
+  ]);
 });

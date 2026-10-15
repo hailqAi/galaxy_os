@@ -161,13 +161,20 @@ export async function decodeImage(bytes: Buffer, signal?: AbortSignal) {
     const program = `const sharp=require(${JSON.stringify('/modules/' + entry)});sharp.concurrency(1);let size=0;const chunks=[];process.stdin.on('data',b=>{size+=b.length;if(size>8000000)process.exit(1);chunks.push(b)});process.stdin.on('end',async()=>{try{await sharp(Buffer.concat(chunks),{limitInputPixels:8000000,failOn:'warning'}).raw().timeout({seconds:3}).toBuffer();process.stdout.write('OK')}catch{process.exit(1)}});`;
     const output = await decode(
       [
-        '/usr/bin/node',
+        '/decoder/node',
         '--max-old-space-size=128',
         '--max-semi-space-size=4',
         '-e',
         program,
       ],
-      ['--ro-bind', dependencies, '/modules'],
+      [
+        '--ro-bind',
+        dependencies,
+        '/modules',
+        '--ro-bind',
+        realpathSync(process.execPath),
+        '/decoder/node',
+      ],
       bytes,
       4096,
       'DOCUMENT_IMAGE_UNAVAILABLE',

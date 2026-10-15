@@ -1,3 +1,13 @@
+## E05 CP-r37 — LOCAL_CI_REPAIR_FULL_REGRESSION_PASS / REMOTE_CI_NOT_VERIFIED — 2026-10-15T09:45:59.563269+00:00
+
+Version E05-CI-r1. Owner added CI repair while retaining all four R39 review fixes. Canonical HEAD70884bcd09387b3c34a9953ed5d99f29d0b72edc plus uncommitted patch; no commit/push/PR/deploy/production write. Latest public push run38682875450/main head8e69a6f7 and PRrun38682795716/head70884bcd both verify FAILURE with pnpmtest CANCELLED after47/48s. Owner identifies latest pushed version; exact log binding and cancellation cause remain UNKNOWN because download returns403/admin required. No concurrency/timeout changes.
+
+Minimal fix: always provision declared Linux decoder/media tools, reuse G00 CI recipe with matching temporary Postgres and chat/AI opt-in flags, add explicit actual-executable/import/sandbox diagnostics, and mount current API Node executable read-only instead of assuming /usr/bin/node. Python standard-library workbook imports work; no guessed Python libraries, package/lock/schema/validator/authorization changes. Independent final source review SHIP/no findings; reviewed hashes retained. All11four-fix source/test paths match frozen R42.
+
+Fresh full pnpmtest EXIT0 at2026-10-15T09:42:37Z: API2099PASS+1existingSKIP/Web647/Edge9/document1 =2756PASS+1SKIP, one full run rather than composite. Fresh frozen install/preflight2/decoder70/R39scope98/lint/typecheck/build/format/explicit pytest1/Python95 PASS. Earlier unprepared G00 tmpfs/schema failure and Python PID-file race are retained; only existing G00 containers were restarted and test-only prisma:deploy+seed run after exact DB identity/zero-table proof. No DB reset or main-data change.
+
+[CI report](/home/galaxy_os/prompt/E05_CI_REPAIR_20261015.md), private `.runtime/e05-ci-20261015/final-local-verification.json`, final source manifestSHA `1d4b0a41139d387207abdd746544057c5c60d3e41cba16c49cd03137ad547c02`, per-command logs/receipts and review evidence. Final generated Next type file restored, final documentation checks recorded separately. Local Ubuntu22.04 proof is not a hosted Ubuntu24 run; patch remains unpublished. No new Work/provider/file-download acceptance is inferred. Supersedes CP-r37 IN_PROGRESS only; CP-r36 maintenance gates and historical R41 live acceptance keep their own scope.
+
 ## E05 CP-r33 — FINAL_OWNER_COMPACT_ENTRY_READY / MAILPIT_RESTORE_FIXED / SOURCE_REMOTE_VERIFIED — 2026-10-15T04:22:28.177095+00:00
 
 App code f9943b9 and checkpoint3328cd2 were pushed via existing owner SSH agent, remote SHA verified. Latest docs checkpoint follows this entry; app code unchanged, no new release or force push. Current R41/schema98/v3 serves normally; R42 local-7fa0526a9d23 frozen/reviewed/staged but NOT_ACTIVE.

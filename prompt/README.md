@@ -1,3 +1,5 @@
+Latest E05 CP-r37: CI source fix fresh full2756PASS+1SKIP/all five gates/pytest1/Python95, independent review PASS; original four R39 fixes retained. New GitHub/clean Ubuntu24 execution pending; cancellation UNKNOWN, logs403. No publish/deploy. See [CI report](E05_CI_REPAIR_20261015.md) and [checkpoint](E05_MCP_WORK_CHECKPOINT.md). Prior CP-r36 maintenance gates remain unchanged.
+
 Latest E05 CP-r33: source SSH-pushed, off-C current app backup verified; final helper includes Mailpit restoration (RED2/GREEN6, actual3container audit, independent reviewr2 SHIP). Owner Admin ready; one-command offline entry WAITING_OWNER_EXECUTION, no pause/compact yet. R41 active/R42 not active.
 
 Latest E05 CP-r32: SSH push f9943b9 verified; cache-only cleanup done, appdata protected on D with132Files/schema98 dump checked. R41 active; owner Admin console ready, single-entry offline compact prepared/tested but NOT_EXECUTED. See STORAGE_RECLAIM_20261015.md. Git auth blocker superseded.
