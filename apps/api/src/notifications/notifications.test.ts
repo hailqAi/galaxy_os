@@ -27,6 +27,9 @@ describe('NotificationsService', () => {
             id: 'notification',
             entityType: 'Project',
             entityId: 'project',
+            projectId: 'project',
+            title: 'Secret Project decision',
+            body: 'Confidential Project comment',
             href: '/projects/project',
           },
         ]),
@@ -49,7 +52,12 @@ describe('NotificationsService', () => {
         }),
       }),
     );
-    expect(result.items[0]?.href).toBeNull();
+    expect(result.items[0]).toMatchObject({
+      href: null,
+      projectId: null,
+      title: 'Thông báo không còn khả dụng',
+      body: null,
+    });
   });
 
   it('marks only an owned notification read', async () => {

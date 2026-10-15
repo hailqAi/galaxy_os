@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 const stages = [
@@ -33,22 +34,31 @@ type Page = {
   totalPages: number;
 };
 export default function OpportunitiesPage() {
+  const params = useSearchParams();
+  const active = params.get('active') === 'true';
   const [data, setData] = useState<Page>();
   const [mode, setMode] = useState<'kanban' | 'table'>('kanban');
   const [search, setSearch] = useState('');
-  const [stage, setStage] = useState('');
+  const stage = params.get('stage') ?? '';
+  const financial = params.get('financial') === 'true';
+  const setStage = (value: string) => {
+    const url = new URL(location.href);
+    if (value) url.searchParams.set('stage', value);
+    else url.searchParams.delete('stage');
+    window.history.pushState(null, '', url);
+  };
   const [message, setMessage] = useState('');
   const load = useCallback(async () => {
     try {
       setData(
         await api<Page>(
-          `/opportunities?${new URLSearchParams({ page: '1', pageSize: '100', ...(search && { search }), ...(stage && { stage }) })}`,
+          `/opportunities?${new URLSearchParams({ page: '1', pageSize: '100', ...(search && { search }), ...(stage && { stage }), ...(active && !stage && { active: 'true' }), ...(financial && { financial: 'true' }) })}`,
         ),
       );
     } catch (error) {
       setMessage((error as Error).message);
     }
-  }, [search, stage]);
+  }, [search, stage, active, financial]);
   useEffect(() => {
     const timeout = setTimeout(() => void load(), 0);
     return () => clearTimeout(timeout);
@@ -102,7 +112,9 @@ export default function OpportunitiesPage() {
           value={stage}
           onChange={(event) => setStage(event.target.value)}
         >
-          <option value="">Tất cả giai đoạn</option>
+          <option value="">
+            {active ? 'Cơ hội chưa kết thúc' : 'Tất cả giai đoạn'}
+          </option>
           {stages.map(([value, label]) => (
             <option key={value} value={value}>
               {label}

@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CurrentActor } from './access-control/current-actor';
 import { AuditService } from './audit/audit.service';
@@ -24,6 +24,18 @@ const typeOf = (buffer: Buffer) =>
         ? ['webp', 'image/webp']
         : null;
 
+const avatarKeyPattern = /^[0-9a-f-]+\.(jpg|png|webp)$/;
+
+export async function availableAvatarUrl(
+  key: string | null,
+  storagePath = readEnvironment().AVATAR_STORAGE_PATH,
+) {
+  if (!key || !avatarKeyPattern.test(key)) return null;
+  return access(join(storagePath, key))
+    .then(() => `/me/avatar/${key}`)
+    .catch(() => null);
+}
+
 @Injectable()
 export class MeService {
   constructor(
@@ -32,6 +44,45 @@ export class MeService {
   ) {}
 
   async get(actor: CurrentActor) {
+    if (actor.membershipKind === 'EXTERNAL') {
+      const member = await this.prisma.organizationMembership.findFirstOrThrow({
+        where: {
+          id: actor.organizationMembershipId,
+          userId: actor.userId,
+          status: 'active',
+          kind: 'EXTERNAL',
+          user: { status: 'active' },
+          organization: { status: 'active' },
+        },
+        select: {
+          organization: { select: { id: true, name: true } },
+          user: {
+            select: {
+              id: true,
+              email: true,
+              displayName: true,
+              credential: { select: { mustChangePassword: true } },
+            },
+          },
+        },
+      });
+      return {
+        userId: member.user.id,
+        email: member.user.email,
+        displayName: member.user.displayName,
+        organizationId: member.organization.id,
+        organization: member.organization,
+        membershipKind: 'EXTERNAL',
+        mustChangePassword: member.user.credential?.mustChangePassword ?? false,
+        permissions: [],
+        roles: [],
+        departments: [],
+        permissionSources: [],
+        administrationScope: 'SELF',
+        managedDepartmentIds: [],
+        administrationTier: 0,
+      };
+    }
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: actor.userId },
       select: {
@@ -66,7 +117,7 @@ export class MeService {
       email: user.email,
       displayName: user.displayName,
       organizationId: actor.organizationId,
-      avatarUrl: user.avatarKey ? `/me/avatar/${user.avatarKey}` : null,
+      avatarUrl: await availableAvatarUrl(user.avatarKey),
       status: user.status,
       lastLoginAt: user.lastLoginAt,
       createdAt: user.createdAt,
@@ -183,8 +234,7 @@ export class MeService {
     const user = await this.prisma.user.findFirst({
       where: { id: actor.userId, avatarKey: key },
     });
-    if (!user || !/^[0-9a-f-]+\.(jpg|png|webp)$/.test(key))
-      throw new NotFoundException();
+    if (!user || !avatarKeyPattern.test(key)) throw new NotFoundException();
     const data = await readFile(
       join(readEnvironment().AVATAR_STORAGE_PATH, key),
     ).catch(() => null);

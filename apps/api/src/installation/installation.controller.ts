@@ -4,13 +4,16 @@ import {
   Get,
   Inject,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Actor, RequirePermission } from '../access-control/access.decorators';
 import { CurrentActor } from '../access-control/current-actor';
 import {
   CreateInstallationPlanDto,
+  CreateSiteDeliveryDto,
   CreateWorkOrderDto,
   InstallItemDto,
   PunchItemDto,
@@ -76,6 +79,33 @@ export class InstallationController {
     @Body() data: InstallItemDto,
   ) {
     return this.installation.installItem(actor, id, data);
+  }
+
+  @Get('work-orders/:id/delivery-options')
+  @RequirePermission('installation.execute')
+  deliveryOptions(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.installation.deliveryOptions(actor, id);
+  }
+
+  @Post('work-orders/:id/deliveries')
+  @RequirePermission('installation.execute')
+  createDelivery(
+    @Actor() actor: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(
+      new ValidationPipe({
+        expectedType: CreateSiteDeliveryDto,
+        transform: true,
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      }),
+    )
+    data: CreateSiteDeliveryDto,
+  ) {
+    return this.installation.createDelivery(actor, id, data);
   }
 
   @Post('work-orders/:id/daily-logs')

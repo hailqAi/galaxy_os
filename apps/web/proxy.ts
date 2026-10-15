@@ -1,23 +1,38 @@
 import { randomBytes } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { safeReturnTo } from './app/login/model';
-import { routePermissions } from './app/portal-navigation';
+import { isProjectChatPath, routePermissions } from './app/portal-navigation';
 import {
   developmentHosts,
+  internalApiUrl,
   publicHosts,
   trustedRequestHost,
+  internalHttpOrigins,
+  trustedRequestOrigin,
 } from './host-config';
+import { observeResponse, runtimeIdentity } from './runtime-http';
 
-const internalApiUrl =
-  process.env.INTERNAL_API_URL ?? 'http://127.0.0.1:3001/api/v1';
+const apiBaseUrl =
+  process.env.NODE_ENV === 'production'
+    ? internalApiUrl()
+    : (process.env.INTERNAL_API_URL ?? 'http://127.0.0.1:3001/api/v1');
 
 const allowedHosts = () => {
   return new Set(
-    process.env.NODE_ENV === 'production' ? publicHosts() : developmentHosts(),
+    process.env.NODE_ENV === 'production'
+      ? [
+          ...publicHosts(),
+          ...internalHttpOrigins().map((origin) => new URL(origin).hostname),
+        ]
+      : developmentHosts(),
   );
 };
 
-const contentSecurityPolicy = (nonce: string, development: boolean) =>
+const contentSecurityPolicy = (
+  nonce: string,
+  development: boolean,
+  origin: string,
+) =>
   [
     "default-src 'self'",
     development
@@ -31,24 +46,41 @@ const contentSecurityPolicy = (nonce: string, development: boolean) =>
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
+    `frame-src blob: ${origin}/api/v1/project-chat/projects/`,
     "worker-src 'self' blob:",
     "manifest-src 'self'",
   ].join('; ');
 
 export async function proxy(request: NextRequest) {
-  const requestHost = trustedRequestHost(
+  const identity = runtimeIdentity(
     request.headers,
-    request.nextUrl.hostname,
+    process.env.NODE_ENV === 'production' &&
+      trustedRequestOrigin(request.headers, request.nextUrl.origin)?.startsWith(
+        'https://',
+      ) === true,
   );
+  const requestHost = trustedRequestHost(request.headers, request.nextUrl.host);
   if (!requestHost || !allowedHosts().has(requestHost))
-    return new NextResponse('Invalid Host', { status: 400 });
+    return observeResponse(
+      new NextResponse('Invalid Host', { status: 400 }),
+      identity,
+      request.method,
+      request.nextUrl.pathname,
+    );
 
   const development = process.env.NODE_ENV === 'development';
   const nonce = randomBytes(16).toString('base64url');
-  const csp = contentSecurityPolicy(nonce, development);
+  const csp = contentSecurityPolicy(
+    nonce,
+    development,
+    trustedRequestOrigin(request.headers, request.nextUrl.origin) ??
+      request.nextUrl.origin,
+  );
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('Content-Security-Policy', csp);
   requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('x-request-id', identity.requestId);
+  requestHeaders.delete('x-galaxy-edge-proof');
   let response = NextResponse.next({ request: { headers: requestHeaders } });
   const path = request.nextUrl.pathname;
   const returnTo = request.nextUrl.searchParams.get('returnTo');
@@ -68,13 +100,17 @@ export async function proxy(request: NextRequest) {
     }
     response = NextResponse.redirect(login);
   } else if (path !== '/forgot-password' && path !== '/reset-password') {
-    const actorResponse = await fetch(`${internalApiUrl}/me`, {
-      headers: { cookie: request.headers.get('cookie') ?? '' },
+    const actorResponse = await fetch(`${apiBaseUrl}/me`, {
+      headers: {
+        cookie: request.headers.get('cookie') ?? '',
+        'x-request-id': identity.requestId,
+      },
       cache: 'no-store',
     }).catch(() => null);
     const actor = actorResponse?.ok
-      ? ((await actorResponse.json()) as {
+      ? ((await actorResponse.json().catch(() => null)) as {
           mustChangePassword: boolean;
+          membershipKind?: string;
           permissions: string[];
           administrationScope:
             | 'SYSTEM'
@@ -83,11 +119,41 @@ export async function proxy(request: NextRequest) {
             | 'ORGANIZATION';
         })
       : null;
+    if (
+      !actorResponse ||
+      (actorResponse.status !== 401 && !actorResponse.ok) ||
+      (actorResponse.ok &&
+        (!actor ||
+          !Array.isArray(actor.permissions) ||
+          !actor.permissions.every(
+            (permission) => typeof permission === 'string',
+          )))
+    ) {
+      return observeResponse(
+        new NextResponse(
+          'Tạm thời không kết nối được hệ thống. Vui lòng thử lại.',
+          {
+            status: 503,
+            headers: {
+              'cache-control': 'no-store',
+              'Content-Security-Policy': csp,
+            },
+          },
+        ),
+        identity,
+        request.method,
+        path,
+      );
+    }
     if (path === '/login') {
       if (actor)
         response = NextResponse.redirect(
           new URL(
-            actor.mustChangePassword ? '/account/change-password' : '/',
+            actor.mustChangePassword
+              ? '/account/change-password'
+              : actor.membershipKind === 'EXTERNAL'
+                ? '/work'
+                : '/',
             request.url,
           ),
         );
@@ -108,9 +174,13 @@ export async function proxy(request: NextRequest) {
     ) {
       response = NextResponse.redirect(new URL('/forbidden', request.url));
     } else {
-      const required = routePermissions.find(([prefix]) =>
-        path.startsWith(prefix),
-      )?.[1];
+      const roomRoute =
+        process.env.FEATURE_PROJECT_CHAT === 'true' && isProjectChatPath(path);
+      const required =
+        !roomRoute &&
+        !/^\/settings\/(?:chatgpt-connection|mcp-consent)\/?$/.test(path) &&
+        path !== '/forbidden' &&
+        routePermissions.find(([prefix]) => path.startsWith(prefix))?.[1];
       if (
         (path.startsWith('/settings/users') &&
           actor.administrationScope === 'SELF') ||
@@ -128,13 +198,20 @@ export async function proxy(request: NextRequest) {
     }
   }
   response.headers.set('Content-Security-Policy', csp);
-  return response;
+  return observeResponse(
+    response,
+    identity,
+    request.method,
+    path,
+    response.headers.get('x-middleware-next') === '1',
+  );
 }
 
 export const config = {
   matcher: [
     {
-      source: '/((?!api|_next/static|_next/image|favicon.ico|health).*)',
+      source:
+        '/((?!api|_next/static|_next/image|favicon.ico|health|\\.well-known/oauth-authorization-server/?$).*)',
       missing: [
         { type: 'header', key: 'next-router-prefetch' },
         { type: 'header', key: 'purpose', value: 'prefetch' },

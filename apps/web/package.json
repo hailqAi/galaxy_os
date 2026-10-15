@@ -2,7 +2,7 @@
   "name": "@galaxy/web",
   "private": true,
   "scripts": {
-    "dev": "next dev --hostname 0.0.0.0 --port 3000",
+    "dev": "next dev --hostname 0.0.0.0 --port 3000 --webpack",
     "lint": "eslint .",
     "test:browser": "playwright test",
     "typecheck": "tsc --noEmit",
@@ -13,7 +13,9 @@
   "dependencies": {
     "next": "16.2.10",
     "react": "19.1.1",
-    "react-dom": "19.1.1"
+    "react-dom": "19.1.1",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
   },
   "devDependencies": {
     "@next/env": "16.2.10",

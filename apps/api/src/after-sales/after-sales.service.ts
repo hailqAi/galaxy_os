@@ -6,9 +6,12 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import { FileStorage } from '../files/file-storage';
 import { Prisma } from '@prisma/client';
 import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
+import { findProjectFile } from '../files/project-file';
 import { PrismaService } from '../prisma.service';
 import {
   CompleteHandoverDto,
@@ -34,10 +37,25 @@ export class AfterSalesService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(BusinessEntityPolicy) private readonly policy: BusinessEntityPolicy,
+    @Inject(FileStorage) private readonly storage: FileStorage,
   ) {}
 
+  private async lockSourceProject(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+  ) {
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "Project" WHERE "id" = ${projectId}::uuid FOR UPDATE`,
+    );
+  }
+
   async inspections(actor: CurrentActor, projectId: string) {
-    await this.policy.assertView(actor, 'Project', projectId);
+    await this.policy.assertView(
+      actor,
+      'Project',
+      projectId,
+      'inspection.read',
+    );
     return this.prisma.inspection.findMany({
       where: { organizationId: actor.organizationId, projectId },
       include: { items: true, acceptances: true },
@@ -77,7 +95,11 @@ export class AfterSalesService {
     });
   }
 
-  async inspection(actor: CurrentActor, id: string) {
+  async inspection(
+    actor: CurrentActor,
+    id: string,
+    permission = 'inspection.read',
+  ) {
     const item = await this.prisma.inspection.findFirst({
       where: { id, organizationId: actor.organizationId },
       include: {
@@ -86,7 +108,7 @@ export class AfterSalesService {
       },
     });
     if (!item) throw new NotFoundException('Inspection not found');
-    await this.policy.assertView(actor, 'Project', item.projectId);
+    await this.policy.assertView(actor, 'Project', item.projectId, permission);
     return item;
   }
 
@@ -103,7 +125,12 @@ export class AfterSalesService {
     await this.policy.assertView(actor, 'Project', line.inspection.projectId);
     if (!['DRAFT', 'SCHEDULED', 'IN_PROGRESS'].includes(line.inspection.status))
       throw new ConflictException('Inspection item cannot be decided');
-    if (data.evidenceFileId) await this.assertFile(actor, data.evidenceFileId);
+    if (data.evidenceFileId)
+      await this.assertFile(
+        actor,
+        line.inspection.projectId,
+        data.evidenceFileId,
+      );
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.inspectionItem.update({
         where: { id },
@@ -170,7 +197,11 @@ export class AfterSalesService {
     inspectionId: string,
     data: CreateAcceptanceDto,
   ) {
-    const inspection = await this.inspection(actor, inspectionId);
+    const inspection = await this.inspection(
+      actor,
+      inspectionId,
+      'acceptance.manage',
+    );
     if (inspection.status !== 'PASSED')
       throw new ConflictException('Passed inspection required');
     if (
@@ -185,7 +216,7 @@ export class AfterSalesService {
     )
       throw new ConflictException('Critical punch items block acceptance');
     if (data.signedDocumentId)
-      await this.assertFile(actor, data.signedDocumentId);
+      await this.assertFile(actor, inspection.projectId, data.signedDocumentId);
     return this.prisma.acceptanceRecord.create({
       data: {
         organizationId: actor.organizationId,
@@ -269,7 +300,7 @@ export class AfterSalesService {
   }
 
   async handovers(actor: CurrentActor, projectId: string) {
-    await this.policy.assertView(actor, 'Project', projectId);
+    await this.policy.assertView(actor, 'Project', projectId, 'handover.read');
     return this.prisma.handover.findMany({
       where: { organizationId: actor.organizationId, projectId },
       include: { _count: { select: { items: true, checklist: true } } },
@@ -288,7 +319,12 @@ export class AfterSalesService {
       },
     });
     if (!item) throw new NotFoundException('Handover not found');
-    await this.policy.assertView(actor, 'Project', item.projectId);
+    await this.policy.assertView(
+      actor,
+      'Project',
+      item.projectId,
+      'handover.read',
+    );
     return item;
   }
 
@@ -311,17 +347,46 @@ export class AfterSalesService {
     const handover = await this.handover(actor, handoverId);
     if (handover.status === 'COMPLETED')
       throw new ConflictException('Completed handover documents are immutable');
-    await this.assertFile(actor, data.fileAssetId);
-    const latest = await this.prisma.handoverDocument.findFirst({
-      where: { handoverId, type: data.type },
-      orderBy: { version: 'desc' },
-    });
-    if (
-      latest?.checksum === data.checksum.toLowerCase() &&
-      latest.language === data.language
-    )
-      return latest;
+    await this.assertFile(actor, handover.projectId, data.fileAssetId);
     return this.prisma.$transaction(async (tx) => {
+      await this.lockSourceProject(tx, handover.projectId);
+      const current = await tx.handover.findUniqueOrThrow({
+        where: { id: handoverId },
+      });
+      if (current.status === 'COMPLETED')
+        throw new ConflictException(
+          'Completed handover documents are immutable',
+        );
+      if (
+        !(await findProjectFile(tx, actor, current.projectId, data.fileAssetId))
+      )
+        throw new NotFoundException('File not found');
+      const file = await tx.fileAsset.findUniqueOrThrow({
+        where: { id: data.fileAssetId },
+      });
+      const hash = createHash('sha256');
+      let size = 0n;
+      for await (const chunk of await this.storage.stream(file.storageKey)) {
+        size += BigInt(chunk.length);
+        hash.update(chunk);
+      }
+      const checksum = hash.digest('hex');
+      if (
+        checksum !== file.checksum ||
+        checksum !== data.checksum.toLowerCase() ||
+        size !== file.sizeBytes
+      )
+        throw new ConflictException('checksum file không khớp nội dung đã lưu');
+      const latest = await tx.handoverDocument.findFirst({
+        where: { handoverId, type: data.type },
+        orderBy: { version: 'desc' },
+      });
+      if (
+        latest?.checksum === checksum &&
+        latest.fileAssetId === file.id &&
+        latest.language === data.language
+      )
+        return latest;
       const created = await tx.handoverDocument.create({
         data: {
           organizationId: actor.organizationId,
@@ -330,7 +395,7 @@ export class AfterSalesService {
           fileAssetId: data.fileAssetId,
           type: data.type,
           version: (latest?.version ?? 0) + 1,
-          checksum: data.checksum.toLowerCase(),
+          checksum,
           language: data.language,
           uploadedBy: actor.userId,
           createdBy: actor.userId,
@@ -358,12 +423,21 @@ export class AfterSalesService {
     await this.policy.assertView(actor, 'Project', item.handover.projectId);
     if (item.supersededBy || item.handover.status === 'COMPLETED')
       throw new ConflictException('Finalized document is immutable');
-    return this.prisma.handoverDocument.update({
-      where: { id },
-      data: {
-        signedStatus: data.signedStatus,
-        signedAt: data.signedStatus.startsWith('SIGNED_') ? new Date() : null,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockSourceProject(tx, item.handover.projectId);
+      const current = await tx.handoverDocument.findUniqueOrThrow({
+        where: { id },
+        include: { handover: true },
+      });
+      if (current.supersededBy || current.handover.status === 'COMPLETED')
+        throw new ConflictException('Finalized document is immutable');
+      return tx.handoverDocument.update({
+        where: { id },
+        data: {
+          signedStatus: data.signedStatus,
+          signedAt: data.signedStatus.startsWith('SIGNED_') ? new Date() : null,
+        },
+      });
     });
   }
 
@@ -372,62 +446,72 @@ export class AfterSalesService {
     id: string,
     data: CompleteHandoverDto,
   ) {
-    const item = await this.handover(actor, id);
-    if (item.status === 'COMPLETED') return item;
-    const documents = await this.prisma.handoverDocument.findMany({
-      where: { handoverId: id, supersededBy: null },
-      select: { type: true },
-    });
-    const documentTypes = new Set(documents.map(({ type }) => type));
-    const missingDocuments = [
-      'HANDOVER_MINUTES',
-      'PRODUCT_LIST',
-      'WARRANTY_DOCUMENT',
-    ].filter((type) => !documentTypes.has(type));
-    const [missingChecklist, acceptedInspection, criticalPunch] =
-      await Promise.all([
-        this.prisma.handoverChecklist.count({
-          where: { handoverId: id, required: true, completedAt: null },
-        }),
-        this.prisma.acceptanceRecord.count({
-          where: {
-            organizationId: actor.organizationId,
-            projectId: item.projectId,
-            status: 'ACCEPTED',
-          },
-        }),
-        this.prisma.punchItem.count({
-          where: {
-            organizationId: actor.organizationId,
-            projectId: item.projectId,
-            severity: 'CRITICAL',
-            status: { not: 'CLOSED' },
-          },
-        }),
-      ]);
-    const blockers = [
-      missingChecklist && 'required checklist',
-      missingDocuments.length && 'required documents',
-      !acceptedInspection && 'accepted inspection',
-      criticalPunch && 'critical punch item',
-    ].filter(Boolean);
-    if (blockers.length && !data.overrideReason)
-      throw new ConflictException(`Handover blocked: ${blockers.join(', ')}`);
-    if (blockers.length && !actor.permissions.includes('handover.override'))
-      throw new ForbiddenException('Handover override permission required');
-    const project = await this.prisma.project.findFirst({
-      where: { id: item.projectId, organizationId: actor.organizationId },
-    });
-    const policy = await this.prisma.warrantyPolicy.findFirst({
-      where: { organizationId: actor.organizationId, activeStatus: 'active' },
-      orderBy: { version: 'desc' },
-    });
-    if (!project || !policy)
-      throw new ConflictException(
-        'Project customer and warranty policy required',
-      );
-    const completedAt = new Date();
+    const initial = await this.handover(actor, id);
     return this.prisma.$transaction(async (tx) => {
+      await this.lockSourceProject(tx, initial.projectId);
+      const item = await tx.handover.findUniqueOrThrow({
+        where: { id },
+        include: {
+          items: true,
+          checklist: true,
+          documents: true,
+          statusHistory: true,
+        },
+      });
+      if (item.status === 'COMPLETED') return item;
+      const documents = await tx.handoverDocument.findMany({
+        where: { handoverId: id, supersededBy: null },
+        select: { type: true },
+      });
+      const documentTypes = new Set(documents.map(({ type }) => type));
+      const missingDocuments = [
+        'HANDOVER_MINUTES',
+        'PRODUCT_LIST',
+        'WARRANTY_DOCUMENT',
+      ].filter((type) => !documentTypes.has(type));
+      const [missingChecklist, acceptedInspection, criticalPunch] =
+        await Promise.all([
+          tx.handoverChecklist.count({
+            where: { handoverId: id, required: true, completedAt: null },
+          }),
+          tx.acceptanceRecord.count({
+            where: {
+              organizationId: actor.organizationId,
+              projectId: item.projectId,
+              status: 'ACCEPTED',
+            },
+          }),
+          tx.punchItem.count({
+            where: {
+              organizationId: actor.organizationId,
+              projectId: item.projectId,
+              severity: 'CRITICAL',
+              status: { not: 'CLOSED' },
+            },
+          }),
+        ]);
+      const blockers = [
+        missingChecklist && 'required checklist',
+        missingDocuments.length && 'required documents',
+        !acceptedInspection && 'accepted inspection',
+        criticalPunch && 'critical punch item',
+      ].filter(Boolean);
+      if (blockers.length && !data.overrideReason)
+        throw new ConflictException(`Handover blocked: ${blockers.join(', ')}`);
+      if (blockers.length && !actor.permissions.includes('handover.override'))
+        throw new ForbiddenException('Handover override permission required');
+      const project = await tx.project.findFirst({
+        where: { id: item.projectId, organizationId: actor.organizationId },
+      });
+      const policy = await tx.warrantyPolicy.findFirst({
+        where: { organizationId: actor.organizationId, activeStatus: 'active' },
+        orderBy: { version: 'desc' },
+      });
+      if (!project || !policy)
+        throw new ConflictException(
+          'Project customer and warranty policy required',
+        );
+      const completedAt = new Date();
       for (const line of item.items) {
         const installation = await tx.installationItem.findUniqueOrThrow({
           where: { id: line.installationItemId },
@@ -495,7 +579,7 @@ export class AfterSalesService {
   }
 
   async warrantyAssets(actor: CurrentActor, projectId: string) {
-    await this.policy.assertView(actor, 'Project', projectId);
+    await this.policy.assertView(actor, 'Project', projectId, 'warranty.read');
     return this.prisma.warrantyAsset.findMany({
       where: { organizationId: actor.organizationId, projectId },
       orderBy: { warrantyEnd: 'asc' },
@@ -630,7 +714,8 @@ export class AfterSalesService {
       throw new UnprocessableEntityException(
         'Diagnosis or work performed is required',
       );
-    if (data.evidenceFileId) await this.assertFile(actor, data.evidenceFileId);
+    if (data.evidenceFileId)
+      await this.assertFile(actor, visit.projectId!, data.evidenceFileId);
     return this.prisma.serviceVisit.update({
       where: { id },
       data: {
@@ -812,7 +897,7 @@ export class AfterSalesService {
       )
     )
       throw new ConflictException('Active service ticket required');
-    await this.assertFile(actor, data.evidenceFileId);
+    await this.assertFile(actor, item.projectId, data.evidenceFileId);
     return this.prisma.$transaction(async (tx) => {
       await tx.serviceResolution.create({
         data: {
@@ -834,7 +919,8 @@ export class AfterSalesService {
     const item = await this.ticketRecord(actor, id);
     if (item.status !== 'RESOLVED')
       throw new ConflictException('Resolved ticket required');
-    if (data.documentId) await this.assertFile(actor, data.documentId);
+    if (data.documentId)
+      await this.assertFile(actor, item.projectId, data.documentId);
     return this.prisma.$transaction(async (tx) => {
       await tx.customerConfirmation.create({
         data: {
@@ -914,12 +1000,8 @@ export class AfterSalesService {
     return item;
   }
 
-  private async assertFile(actor: CurrentActor, id: string) {
-    if (
-      !(await this.prisma.fileAsset.findFirst({
-        where: { id, organizationId: actor.organizationId, deletedAt: null },
-      }))
-    )
+  private async assertFile(actor: CurrentActor, projectId: string, id: string) {
+    if (!(await findProjectFile(this.prisma, actor, projectId, id)))
       throw new NotFoundException('File not found');
   }
 

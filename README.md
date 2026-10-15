@@ -20,7 +20,7 @@ See [system context](docs/architecture/system-context.md), [data principles](doc
 ## Prerequisites on WSL
 
 - WSL 2 with Ubuntu
-- Node.js 20 (`nvm use` reads `.nvmrc`)
+- Node.js 20.15+ (`nvm use` reads `.nvmrc`; bounded PNG validation uses the built-in CRC API)
 - pnpm 10 (`corepack enable` then `corepack prepare pnpm@10.33.4 --activate`)
 - Python 3.10+
 - Docker Desktop with WSL integration enabled
@@ -179,3 +179,17 @@ scripts/              repository environment checks
 services/document-ai/ inactive future document service
 .github/workflows/    CI
 ```
+
+## Galaxy MCP Work (E05)
+
+Inbound ChatGPT Work access is separate from the existing Sign in with ChatGPT execution route. The API exposes `/mcp` with MCP2 protocol `2026-07-28`, five job/file tools and webhook Events for `galaxy.ai_job.created`. Jobs remain existing private Project AI answers; their original question, conversation, source versions and persistent results stay in Galaxy.
+
+After reviewed additive migrations are deployed, enable `FEATURE_GALAXY_MCP=true` in the private API environment, set the exact HTTPS `APP_PUBLIC_ORIGIN`, and persist `GALAXY_MCP_ENCRYPTION_KEY` (32 random bytes encoded as64 hex characters) outside Git. Set `EDGE_MCP_UPSTREAM` in the existing Edge environment to the loopback API origin. Edge routes `/mcp` and OAuth discovery to API; Web handles the authenticated consent page. No API key or SIWC token substitutes for this OAuth grant.
+
+Use dynamic OAuth client registration with authorization code and PKCE S256. The client supplies its actual registered HTTPS ChatGPT redirect URI. Discovery is at `/.well-known/oauth-protected-resource/mcp` and `/.well-known/oauth-authorization-server`. Galaxy derives organization/user from the authenticated grant and rechecks IAM for tools, file downloads and webhook deliveries.
+
+In Project Chat's existing AI panel, select **ChatGPT Work (MCP)**, upload/select the original file, choose the requested file format under **Create**, and send the original request. Progress reflects recorded tool/file receipts. Reload retains the job; cancel/retry operate on the same answer. Work must subscribe to Events using its own supplied webhook callback and secret. A callback2xx acknowledges notification only.
+
+`galaxy_submit_job_result` accepts checkpointed text and native file references in `files` (`download_url`, `file_id`, optional`mime_type`/`file_name`). `_meta["openai/fileParams"]` advertises that array. Galaxy streams actual bytes through the existing Files/upload checks and stores canonical downloads. Required XLSX output blocks completion until a validated workbook exists. Batch/retry the same submission/file IDs; sequence text chunks from0. Supported stored types are those accepted by existing Galaxy uploads; runtime generation/file-reference support requires a real ChatGPT test.
+
+Focused G00 check: `pnpm --filter @galaxy/api exec vitest run test/mcp-work.integration.test.ts --no-file-parallelism` with the verified isolated G00 environment and feature flag. Production/main credentials must never be used for this fixture. Deployment evidence, actual account connection status and rollback are recorded in `/home/galaxy_os/prompt/E05_MCP_WORK_HANDOFF.md`.

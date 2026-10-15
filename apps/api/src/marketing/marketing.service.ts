@@ -20,10 +20,28 @@ import {
 @Injectable()
 export class MarketingService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  private readScope(
+    actor: CurrentActor,
+    permission: string,
+    field: 'ownerId' | 'authorId',
+  ) {
+    const global =
+      actor.permissionSources === undefined
+        ? ['SYSTEM', 'ORGANIZATION'].includes(actor.administrationScope)
+        : actor.permissionSources.some(
+            (source) =>
+              source.permission === permission &&
+              ['SYSTEM', 'ORGANIZATION'].includes(source.scopeType),
+          );
+    return global ? {} : { [field]: actor.userId };
+  }
 
   listCampaigns(actor: CurrentActor) {
     return this.prisma.campaign.findMany({
-      where: { organizationId: actor.organizationId },
+      where: {
+        organizationId: actor.organizationId,
+        ...this.readScope(actor, 'marketing.campaign.read', 'ownerId'),
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -42,6 +60,7 @@ export class MarketingService {
     const where = {
       organizationId: actor.organizationId,
       status: query.status,
+      ...this.readScope(actor, 'marketing.content.read', 'authorId'),
     };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.contentItem.findMany({
@@ -76,7 +95,11 @@ export class MarketingService {
   }
   async getContent(actor: CurrentActor, id: string) {
     const item = await this.prisma.contentItem.findFirst({
-      where: { id, organizationId: actor.organizationId },
+      where: {
+        id,
+        organizationId: actor.organizationId,
+        ...this.readScope(actor, 'marketing.content.read', 'authorId'),
+      },
       include: {
         campaign: true,
         variants: true,

@@ -1,4 +1,4 @@
-import { routePermissions } from '../portal-navigation';
+import { isProjectChatPath, routePermissions } from '../portal-navigation';
 import { Actor, api, ApiError } from '../lib/api';
 
 export const INVALID_LOGIN = 'Email hoặc mật khẩu không đúng.';
@@ -51,6 +51,7 @@ export const safeReturnTo = (value: string | null) => {
 
 export const permittedReturnTo = (value: string | null, granted: string[]) => {
   const path = safeReturnTo(value);
+  if (path && isProjectChatPath(path)) return path;
   const required =
     path && routePermissions.find(([prefix]) => path.startsWith(prefix))?.[1];
   return path && (!required || granted.includes(required)) ? path : null;

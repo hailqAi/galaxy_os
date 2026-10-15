@@ -33,7 +33,7 @@ export class CreateReservationDto {
   lines!: InventoryOperationLineDto[];
 }
 
-export class DecisionDto {
+export class InventoryDecisionDto {
   @IsOptional() @IsString() comment?: string;
 }
 

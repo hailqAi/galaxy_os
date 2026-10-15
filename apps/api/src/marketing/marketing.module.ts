@@ -16,5 +16,6 @@ import {
     FakePublishingProvider,
     PrismaService,
   ],
+  exports: [MarketingService],
 })
 export class MarketingModule {}

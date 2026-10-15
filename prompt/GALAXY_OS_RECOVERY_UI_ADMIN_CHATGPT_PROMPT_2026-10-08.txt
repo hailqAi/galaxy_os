@@ -1,0 +1,382 @@
+GALAXY OS — PROMPT TIẾP TỤC: SỬA KHỞI CHẠY, PHÁT HÀNH UI MỚI, KẾT NỐI CHATGPT DO QUẢN TRỊ VIÊN QUẢN LÝ
+Ngày 08/10/2026, cập nhật theo bàn giao 08:41 giờ Việt Nam.
+Đích nhận: Codex chạy trên máy có repository /home/galaxy_os.
+
+ĐỌC TOÀN BỘ RỒI THỰC HIỆN. ĐÂY LÀ YÊU CẦU TRIỂN KHAI, KHÔNG CHỈ TƯ VẤN.
+
+Tôi cần bản Galaxy OS đang mở hằng ngày thật sự chạy giao diện mới. Hai lỗi pnpm dev và codex vẫn còn; thông báo lỗi rõ hơn không đồng nghĩa đã sửa. Tiếp tục từ code mới nhất, bảo toàn dữ liệu và hoàn thành các bước trong phạm vi được phép. Không dừng ở báo cáo regression đạt khi runtime vẫn phục vụ bản cũ.
+
+======================================================================
+01. TÀI LIỆU ĐẦU VÀO VÀ THỨ TỰ ƯU TIÊN
+======================================================================
+Đọc trước khi thay đổi:
+1) /home/galaxy_os/prompt/GALAXY_OS_RECOVERY_UI_ADMIN_CHATGPT_PROMPT_2026-10-08.txt — file này.
+2) /home/galaxy_os/prompt/GALAXY_OS_PROJECT_MEMORY_2026-10-08.txt — quyết định và checkpoint.
+3) /home/galaxy_os/prompt/GALAXY_OS_CHATGPT_PLAN_ONLY_ADDENDUM_2026-10-08.txt.
+4) /home/galaxy_os/prompt/GALAXY_OS_CODEX_MASTER_PROMPT_2026-10-08.txt.
+5) AGENTS.md áp dụng trong repo/worktree; handoff và maintenance mới nhất.
+
+File này ghi đè các nội dung mâu thuẫn về checkpoint, thứ tự phát hành, quyền quản lý kết nối và UX đăng nhập. Addendum tiếp tục ghi đè provider/billing trong master. Các yêu cầu nghiệp vụ, dữ liệu, P04, tools và kiểm thử không bị hủy.
+Nếu file không ở đường dẫn trên, tìm có giới hạn tại /home/galaxy_os/prompt, repo và worktree đã biết. Không tự bịa nội dung tài liệu thiếu. Hoàn thành phần có đủ căn cứ và liệt kê đúng phần còn thiếu.
+
+Các thay đổi so với yêu cầu trước:
+- Chỉ quản trị hệ thống quản lý kết nối ChatGPT, tại phần Hệ thống SAU khi đăng nhập Galaxy.
+- Bỏ yêu cầu UX mỗi người dùng phải tự đăng nhập ChatGPT; không đặt nút kết nối trên màn đăng nhập Galaxy hoặc composer của nhân viên.
+- Quản trị tập trung không tự cấp quyền chia sẻ hạn mức Pro cá nhân. Xác minh riêng grant/phạm vi sử dụng của nhà cung cấp; không dùng token admin làm token đại diện mọi người khi chưa có căn cứ.
+- Có bằng chứng CLI hiện tại hỗ trợ --no-daemon từ thông báo lỗi. Có thể dùng để vào phiên sửa chữa; vẫn cần giải quyết lệnh codex thông thường.
+- UI mới và trang quản trị kết nối phải được phát hành độc lập với việc SIWC đã có grant/live hay chưa.
+
+======================================================================
+02. CHECKPOINT BẮT BUỘC XÁC MINH, KHÔNG CHECKOUT LÙI
+======================================================================
+Theo báo cáo người dùng chuyển, chưa phải bằng chứng tự kiểm trong phiên này:
+CODE_SHA = TESTED_SHA: e9a15df26903e806fc14dd23fd291a146756a273
+TESTED_TREE: 8e46baf0677838a1de02a65e460bfbd09b3a0afd
+CANDIDATE_BUILT: local-773c89f14d04
+DEPLOYED_LOCAL_RELEASE: local-a0429faf5733
+Regression: API 1.387 / Web 568 / Edge 5 / document 1; lint/typecheck/format/build đạt.
+Chrome trên artifact mới: 7 hành trình fixture đạt; main UI mới chưa nghiệm thu.
+Main đã pause 4 provider API key; kiểm cuối được báo không còn answer lease chạy. Cần kiểm lại thời điểm hiện tại.
+Code có policy ChatGPT-only, runtime diagnostics, Task pagination/count, atomic update/ACL/history/rollback và CAS/idempotency. Tracker toàn bộ bốn nhóm/12 giai đoạn, resume/registry và nghiệm thu năm PDF/main còn dang dở.
+ChatGPT ELIGIBILITY_UNCONFIRMED; callback/lifecycle chưa hoàn thiện; model/tool live NOT_RUN. Chưa cài công cụ mới; Graphify chưa chạy.
+
+Repo: /home/galaxy_os
+Worktree đầu mối: /home/galaxy_os/.worktrees/m2-a-20260928
+Branch được báo trước đây: m2/project-chat-20260928
+Đọc file thực trong worktree có nội dung:
+- docs/galaxy-os/handoffs/2026-10-08-chatgpt-plan-only.md
+- docs/galaxy-os/handoffs/2026-10-08-runtime-maintenance.md
+- docs/galaxy-os/milestones/M3/ui-figma/FIVE-PDFS-20261006.md
+- docs/galaxy-os/handoffs/2026-10-06-five-pdfs-project-tools.md
+
+Xác minh branch/HEAD/tree/diff/untracked, commit mới hơn, manifest, artifact digest, PID/owner/cgroup và release pointer. Không reset/clean/stash tự động, không git add toàn repo, không coi git sạch của báo cáo cũ vẫn đúng.
+“Main” trong nghiệm thu là runtime phục vụ địa chỉ người dùng, không tự đồng nghĩa Git branch main. Phát hành local không tự cho phép merge/push.
+Candidate local-773c89f14d04 là mốc đầu vào, không mặc định chứa UI quản trị mới được yêu cầu hôm nay. Sau sửa phải có source/test/build provenance mới.
+
+======================================================================
+03. PHẠM VI ĐƯỢC GIAO VÀ CÁCH XỬ LÝ BLOCKER
+======================================================================
+Được thực hiện: kiểm tra read-only, sửa code/config đúng phạm vi ứng dụng, test phù hợp, commit local, build và phát hành local qua cơ chế hiện hữu bảo toàn dữ liệu; cài công cụ miễn phí thật sự cần thiết theo mục 15.
+Không tự mua credit/gói, bật API key hoặc trả phí, mở public endpoint/tunnel/domain, public source, push/merge, xóa DB/uploads, đổi quyền hệ thống diện rộng hay vô hiệu hóa approval.
+
+Đã từng có automatic approval review từ chối D-Bus tạm vì tác động vượt hai service và cleanup chưa rõ. Việc maintenance.md được viết/review không tự là phê duyệt thực thi. Không coi prompt mới là phê duyệt bao trùm cho user manager.
+Nếu cần thao tác rộng: hoàn thành điều tra, bản sửa, kiểm tra an toàn, danh sách service bị ảnh hưởng và rollback/cleanup; trình đúng hành động qua cơ chế phê duyệt. Không thử lại cùng tác động bằng cú pháp khác. Nếu bị từ chối, nói rõ hành động và lý do; chỉ đi tiếp bằng phương án giảm rủi ro thực chất.
+Nếu bắt buộc người dùng tự thực hiện bước hệ điều hành hoặc đăng nhập/MFA, chuẩn bị xong trước. Handoff phải có thao tác chính xác đã kiểm theo máy thực, ảnh hưởng và điểm tiếp tục; không chỉ nói chung chung “cần phê duyệt manager”. Không tự đoán lệnh sudo hoặc WSL shutdown để đưa cho người dùng.
+Một blocker không dừng các nhánh độc lập; nhưng không được báo đã phát hành khi release vẫn cũ.
+
+======================================================================
+04. MỐC A — MỞ ĐƯỢC CODEX VÀ SỬA DAEMON BỀN VỮNG
+======================================================================
+Bằng chứng lỗi hiện tại:
+Error: Cannot use the shared background server: This session requires api_key_model_discovery to be enabled.
+To work without the background server, rerun the same command with --no-daemon (including resume or fork and its arguments).
+
+Ảnh: Background server has incompatible feature settings; Run without daemon this time / Restart with these settings / Cancel. Các cờ restart dự kiến có api_key_model_discovery=true, auth_elicitation=true, code_mode_host=true, mcp_oauth_refresh_coordination=false. Ảnh cảnh báo có thể gián đoạn active/queued work và ảnh hưởng client khác.
+
+A1. Để có phiên sửa chữa:
+- Dùng codex --no-daemon hoặc lựa chọn Run without daemon this time đúng phiên bản đã quan sát.
+- Nếu resume/fork, giữ tham số phiên và xác minh thứ tự flag bằng help của binary hiện tại; không tạo nhầm phiên rồi nói đã khôi phục phiên cũ.
+- Không gọi đây là sửa daemon hoàn tất. Flag này không phải cờ bỏ sandbox/approval và không giải quyết bus Galaxy.
+
+A2. Điều tra nguyên nhân:
+- Đọc command resolution/type của codex, đường dẫn binary thực, version; so sánh các bản npm/pnpm/extension/app nếu tồn tại, không chạy upgrade global mù.
+- Đọc cấu hình hiệu lực theo đúng precedence của phiên bản: user/project/profile/managed/CLI; che secret. Xác định nơi yêu cầu api_key_model_discovery và cấu hình daemon đang chạy.
+- Kiểm daemon owner/PID/version/features, client đang dùng và active/queued jobs bằng cơ chế chính thức. Không in nguyên process environment hoặc token.
+- Phân loại: config mismatch, daemon cũ chưa reload, nhiều binary khác phiên bản, hay setting bị áp bởi một host/extension.
+- Từ api_key_model_discovery không được suy ra phải mua hoặc nhập API key cho Galaxy. Không tắt feature client cần chỉ để giấu lỗi.
+
+A3. Sửa tối thiểu:
+- Chọn đồng bộ version/config hoặc update/restart daemon theo tài liệu/help thực tế; /daemon là điểm tham khảo chính thức nếu phiên bản có.
+- Chỉ chỉnh cờ gây mismatch đã xác định; không chép cả danh sách restart trong ảnh, không vô hiệu hóa refresh coordination/elicitation/code mode tùy ý.
+- Sao lưu phần config thay đổi, ghi owner/scope và rollback. Không xóa ~/.codex, credentials, conversations hay cài lại toàn bộ để thử.
+- Nếu daemon phục vụ công việc khác, bảo toàn checkpoint và xử lý thời điểm restart có kiểm soát; không kill hàng loạt node/python/codex. Tuân thủ phê duyệt nếu ảnh hưởng vượt phạm vi được phép.
+
+A4. Nghiệm thu:
+- Mở terminal mới dưới đúng user, gõ đúng codex, không thêm --no-daemon và không dùng alias bí mật để che cờ; không còn mismatch.
+- Kiểm phiên mới và resume khi có phiên test hợp lệ, giữ model/auth/approval bình thường.
+- Nếu chỉ vào được --no-daemon, báo CODEX_SESSION_ACCESS=PASS nhưng CODEX_DAEMON_FIX=BLOCKED/PARTIAL. Không báo cả hai PASS.
+- Không cần gọi model tốn hạn mức để xác minh màn khởi động nếu một kiểm tra TUI an toàn đã đủ.
+
+======================================================================
+05. MỐC B — PNPM DEV PHẢI ĐIỀU KHIỂN ĐƯỢC RUNTIME
+======================================================================
+Bằng chứng hiện tại:
+pnpm dev → python3 scripts/local-runtime-entry.py up
+CONTROL_PLANE_UNAVAILABLE: không nối được user manager của UID hiện tại; kiểm owner/session và socket. Không tự phục hồi D-Bus hoặc khởi chạy stack khác.
+ELIFECYCLE, exit code 1.
+
+B1. Tái hiện và tách trạng thái:
+- Kiểm app đang phục vụ riêng với control plane. API/Web health tốt không chứng minh manager tốt; manager lỗi không chứng minh app chết.
+- Đọc entrypoint hiện tại, tests, unit generator, maintenance package đã review, rollback log và Windows keeper/task có liên quan.
+- Xác định distro/UID/session/owner thực tế, PID1, manager process, runtime directory, socket type/owner/permission và endpoint kết nối. Chỉ đọc env cần thiết, không dump secrets.
+- Kiểm cổng app/edge thực tế, command/cgroup của đúng PID và release đang chạy. Xác định service nào ngoài Galaxy thuộc user manager đó.
+- Tìm nguyên nhân unit template cutover đầu: field/escaping/instance/WorkingDirectory/ExecStart/dependency nào sai. Không chỉ sửa message lỗi Python.
+
+B2. Phân nhánh theo bằng chứng:
+- Nếu đúng manager/socket đang sống nhưng session env sai: sửa entrypoint hoặc nguồn môi trường để nối đúng manager hiện có, xác minh ownership trước khi dùng địa chỉ. Không export đường dẫn giả hoặc hard-code UID.
+- Nếu manager/socket thực sự thiếu: dùng phương án phục hồi được hỗ trợ và đã xem xét ảnh hưởng. Không tạo bus tạm, bus private, socket giả hoặc process thay thế để vòng qua quyết định trước.
+- Không tự dbus-run-session, terminate-user, kill/restart user@UID, bật linger, sửa PAM/WSL systemd hoặc shutdown distro chỉ vì pnpm dev lỗi. Nếu cần, gói đó phải có căn cứ, rollback và phê duyệt riêng phù hợp.
+- Không bẻ pnpm dev sang chạy next dev/nest watch dưới agent, không tạo stack song song trên 3000/3001, không đổi cổng rồi tuyên bố main đã sửa.
+- Sửa unit/template ở nguồn sinh, validate bằng systemd tooling đúng version trước khi áp dụng. Không tạo thêm lỗi bằng unit hard-code đường dẫn tạm của worktree.
+
+B3. Nếu phải xin bước bảo trì:
+Trả bản đề nghị cụ thể gồm: nguyên nhân đã chứng minh; đúng unit/process/UID chịu tác động; danh sách service khác bị ảnh hưởng; lệnh hoặc script đã chuẩn bị để review; downtime dự kiến có căn cứ hoặc ghi chưa xác định; backup/rollback/cleanup; cách xác minh và điểm tiếp tục. Không khẳng định “chỉ ảnh hưởng hai service” khi thực tế chạm user manager.
+Nếu chưa thực thi được, tiếp tục hoàn thiện bản build/UI và evidence có thể kiểm. Ghi RELEASE_BLOCKED_BY_CONTROL_PLANE, không nói đã bàn giao giao diện mới trên main.
+
+B4. Nghiệm thu sau sửa:
+- Terminal mới cùng user chạy pnpm dev theo giao diện lệnh đã cam kết và exit behavior đúng; không CONTROL_PLANE_UNAVAILABLE.
+- Lặp up khi đã chạy không tạo process/cổng/worker trùng; status phản ánh đúng release và khả năng điều khiển.
+- Kiểm logs và thao tác lifecycle trong cửa sổ bảo trì phù hợp; không stop main chỉ để lấy một dấu PASS nếu chưa chuẩn bị phục hồi.
+- Không tự phụ thuộc vào terminal/agent sống để giữ app chạy.
+- Kiểm restart Windows/WSL chỉ khi được phép; chưa kiểm ghi NOT_RUN riêng, không làm chặn vô lý việc giao UI local đã xác minh.
+
+======================================================================
+06. MỐC C — GIAO DIỆN MỚI PHẢI CHẠY TRÊN ĐỊA CHỈ THẬT
+======================================================================
+Ưu tiên một release nhỏ gồm runtime fixes cần thiết, UI P04 đã sẵn sàng và trang Hệ thống/Kết nối ChatGPT có trạng thái thật. Không chờ tất cả công cụ AI hoặc OpenAI phê duyệt app rồi mới phát hành UI.
+Xác minh source nào thật sự có component/routes mới; nếu còn thiếu, hoàn thiện trước build. Đánh giá candidate cũ và delta thay vì mặc định chỉ đổi release pointer là đủ.
+
+Trước cutover:
+- Có manifest source/tree/test/build digest mới, API/Web tương thích, migration/config/schema phù hợp, assets đầy đủ, rollback release cũ khả dụng.
+- Kiểm migration additive/compatibility; nếu không rollback được dữ liệu, lập phương án phục hồi trước. Không seed/reset main DB.
+- Bảo toàn uploads, files, project/chat/tasks, tài khoản và các binary thiếu đã ghi trong handoff. Không tạo file rỗng hoặc xóa record để che thiếu.
+- Giữ policy API-key providers PAUSED_BY_USER trong cả release mới lẫn rollback. Sau đổi config/release, kiểm không kích hoạt lại qua default cũ.
+- Build từ cây source đã nghiệm thu; không copy thủ công một vài file source vào artifact đóng băng hoặc tráo riêng Web/API khác version.
+
+Phát hành:
+- Dùng local release mechanism của Galaxy theo quyền đã giao; không thay bằng server tạm của Codex.
+- Kiểm readiness, migrations và version trước chuyển traffic/pointer theo cơ chế hiện có. Failed cutover phải có rollback xác minh.
+- Main release, API/Web build identity và đường localhost/LAN phải cùng truy nguyên được về source đã test.
+- Browser cache/service worker/proxy chỉ điều tra sau khi chứng minh server đang phục vụ artifact mới. Có cơ chế invalidation/version phù hợp nếu thực tế cần; không bắt người dùng xóa toàn bộ lịch sử trình duyệt.
+
+Nghiệm thu UI:
+- Mở đúng origin người dùng: localhost và IP LAN thực tế (mốc cũ 192.168.1.80:3000). Đăng nhập bằng actor kiểm thử hợp lệ vào Project thật được phép hoặc Project test có nhận diện rõ; không đưa dữ liệu fixture vào main như dữ liệu thật.
+- Chụp Empty, Conversation Selected, Direct AI, Mobile và Error/Provider state phù hợp; map từng ảnh đến release, URL, actor role và viewport, che dữ liệu riêng cần thiết.
+- Kiểm sidebar navy, bố cục cột đúng PDF, câu trả lời ở giữa, nguồn/lịch sử đúng vị trí, composer không che tin nhắn, font 16/26, desktop và mobile 375/390px. Không dùng cùng một screenshot đại diện đủ năm trạng thái.
+- So sánh PDF với main screenshot cùng viewport/state và ghi sai khác có căn cứ. Không hard-code model/data trong PDF, không khôi phục nút giả hay mode selector đã bỏ.
+- Ghi đường dẫn trang quản trị mới, cách mở và ảnh sau đăng nhập. Chứng minh bằng UI người dùng nhìn thấy, không chỉ response API hoặc build PASS.
+
+======================================================================
+07. UX MỚI: ĐĂNG NHẬP GALAXY TRƯỚC, QUẢN TRỊ KẾT NỐI BÊN TRONG
+======================================================================
+Luồng bắt buộc:
+1. Người dùng đăng nhập Galaxy OS bằng cơ chế Galaxy hiện có.
+2. Chỉ quản trị hệ thống thấy Hệ thống → Kết nối ChatGPT. Có thể nằm dưới AI & tích hợp nếu đã có nhóm menu này; không tạo hai trang cấu hình trùng.
+3. Quản trị viên kiểm điều kiện, bắt đầu kết nối, tự đăng nhập/MFA/đồng ý trên trang OpenAI và quay lại trang quản trị Galaxy.
+4. Khi provider và phạm vi phục vụ đã hợp lệ, nhân viên mở Project và dùng AI theo quyền Galaxy, không thiết lập provider riêng.
+
+Trang quản trị phải render ngay cả khi ELIGIBILITY_UNCONFIRMED. Hiển thị lý do và metadata còn thiếu; nút hành động có trạng thái hợp lý, không giả đã kết nối hoặc link placeholder.
+Tối thiểu có: trạng thái cấu hình; danh tính kết nối đã xác minh ở mức cần thiết; phạm vi sử dụng được xác minh; lần kiểm gần nhất; model catalog thật nếu có; kết nối/kiểm tra/ngắt; quản lý quyền sử dụng của Galaxy; diagnostic đã che token và link quản lý usage chính thức nếu phù hợp.
+Không đặt feature flag mặc định false khiến trang biến mất trên main rồi báo code đã có. Feature gate có thể khóa inference nhưng không được che trang trạng thái khỏi quản trị hệ thống hợp lệ.
+
+Với người dùng thường:
+- Không có nút kết nối/đổi tài khoản/API key hoặc trang cấu hình admin.
+- Model picker chỉ gồm model được nhà cung cấp và quản trị viên cho phép cho actor hiện tại, không danh sách hard-code.
+- Nếu chưa kích hoạt: thông báo ngắn “AI chưa được quản trị viên kích hoạt” hoặc lỗi thực tương ứng; vẫn đọc/sửa các dữ liệu nghiệp vụ được phép, giữ draft/tệp khi phù hợp.
+- Không chuyển họ sang trang đăng nhập ChatGPT, không dùng token trong browser, không tự fallback provider.
+- Không hiển thị email tài khoản Pro, token, registration details, lỗi stack hoặc số liệu usage riêng của admin cho nhân viên.
+
+======================================================================
+08. QUYỀN QUẢN TRỊ VÀ QUYỀN SỬ DỤNG AI LÀ HAI LỚP KHÁC NHAU
+======================================================================
+Đọc IAM hiện tại, map quyền vào permission service có thật. Các tên sau chỉ là logic đề xuất, không mặc định tạo role mới:
+- Quản lý kết nối hệ thống: chỉ system administrator theo invariant hiện có.
+- Sử dụng AI: actor được cấp quyền theo tenant/Project và policy.
+- Đọc/ghi từng nguồn, task, artifact, trường tài chính: domain ACL hiện có.
+
+Ẩn menu không đủ. Backend phải kiểm quyền mọi endpoint đọc config nhạy cảm, begin OAuth, poll attempt, test connection, refresh catalog, change/disable/disconnect và cấu hình nhóm dùng. Actor thường gọi API trực tiếp hoặc đoán URL không thể sửa/xem secret metadata.
+Callback không phụ thuộc đơn giản vào role client gửi. Bind attempt với admin actor/session/tenant, PKCE/state/nonce và registration. Kiểm admin vẫn còn quyền trước commit kết nối; replay, khác actor/tenant, stale attempt, logout/revocation phải bị chặn.
+Liên kết ChatGPT không đăng nhập thay tài khoản Galaxy, không merge người dùng chỉ vì email giống, không tự cấp system admin.
+
+Tách trong dữ liệu và audit:
+- người quản lý cấu hình;
+- chủ thể tài khoản/grant của nhà cung cấp;
+- phạm vi provider cho phép phục vụ;
+- actor Galaxy thực sự giao việc;
+- tenant/Project và nguồn được actor đó sử dụng.
+Tool executor luôn chạy theo actor giao việc, không theo quyền admin sở hữu credential. Một kết nối trung tâm hợp lệ không biến mọi nhân viên thành admin và không làm Project A dùng dữ liệu B.
+
+======================================================================
+09. KHÔNG SUY DIỄN GÓI PRO CÁ NHÂN THÀNH HẠN MỨC CHUNG CÔNG TY
+======================================================================
+Ý định sản phẩm là admin cấu hình một lần và người dùng thường dùng luôn. Việc này phải được map vào mô hình entitlement OpenAI thật sự hỗ trợ; không giải quyết bằng lấy token của admin cho toàn bộ actor.
+
+Phải xác minh riêng ba điều:
+A. Galaxy OS/private/local/hosted deployment có route registration chính thức phù hợp không?
+B. Kết nối được cấp quyền inference, model và tools nào?
+C. Grant/chính sách cụ thể có cho phép ứng dụng phục vụ nhiều người khác dưới cấu hình trung tâm này không?
+
+Tài liệu SIWC về nhiều host của cùng một user/workspace không tự chứng minh nhiều nhân viên dùng một hạn mức cá nhân. Workspace ID có mặt trong token cũng không tự là quyền organization-wide. Không tự mua ChatGPT Business hoặc khẳng định gói đó chắc chắn giải quyết yêu cầu nếu chưa có tài liệu đúng route.
+
+Thiết kế metadata nội bộ phân biệt (map vào schema hiện có):
+ELIGIBILITY_UNCONFIRMED; PERSONAL_OWNER_ONLY; ORGANIZATION_USE_VERIFIED; NEEDS_PROVIDER_APPROVAL; UNSUPPORTED_FOR_REQUESTED_SCOPE.
+Đây là trạng thái Galaxy đề xuất, không phải vendor error codes.
+Proof của ORGANIZATION_USE_VERIFIED phải gắn nguồn/quyết định/registration thực tế và ngày kiểm; không phải checkbox người dùng hoặc seed fixture có thể bật để vượt entitlement. Không nhận scope từ request body của nhân viên.
+
+Xử lý:
+- Nếu provider hỗ trợ mô hình tổ chức được quản trị tập trung và grant phù hợp: triển khai đúng contract, bật những actor được phép qua policy Galaxy, theo dõi usage theo actor/Project và giới hạn đúng.
+- Nếu hiện chỉ có grant cá nhân: có thể nghiệm thu pilot của chính chủ thể hợp lệ, còn actor khác bị chặn dispatch; giữ UX quản trị tập trung, không ép mỗi nhân viên tự nối để thay yêu cầu đã chốt.
+- Nếu chưa xác định: ghi rõ bằng chứng thiếu và hành động cần từ nhà cung cấp; UI quản trị, UI P04 và nghiệp vụ local vẫn phải hoàn thành/phát hành.
+- Nếu yêu cầu admin-only/no-personal-login không tương thích route hiện có: báo xung đột cụ thể và giữ trạng thái chưa kích hoạt. Không dựng proxy không chính thức hoặc giải pháp dùng chung credential để giả đạt.
+
+Giai đoạn này không tự dùng API-key provider làm phương án thay thế, kể cả gọi là free. Kiến trúc có thể giữ adapter disabled để sau này người dùng quyết định; không biến nó thành điều kiện phải nạp tiền mới sửa runtime/UI.
+
+======================================================================
+10. HOÀN THIỆN KẾT NỐI, MODEL VÀ CÔNG CỤ THẬT
+======================================================================
+Tái sử dụng ChatGPTPlanProvider/registry/orchestrator hiện có; đọc tài liệu OpenAI hiện hành. Không dựng engine thứ hai hoặc dùng shared daemon phát triển của Codex làm backend Galaxy.
+OAuth: registration chính thức phù hợp, stable host ID theo contract, callback đúng scheme/host/path, PKCE/state/nonce, token verification, grant validation; secret ở credential store server-side, không frontend/log/URL/Git.
+Windows browser ↔ WSL loopback cần kiểm thật. Browser máy khác/mobile có 127.0.0.1 của chính thiết bị đó; nếu route chỉ setup trên host thì admin setup tại host rồi kiểm sử dụng LAN đúng phạm vi. Không đăng ký HTTP LAN/public tunnel tùy ý.
+Chuẩn bị callback/UI/health metadata đầy đủ rồi mới yêu cầu tôi tự đăng nhập một lần. Không xin username/password/token trong chat và không đọc ~/.codex/auth.json làm shortcut.
+
+Token lifecycle:
+- Refresh atomic/CAS và lock theo connection; xử lý race giữa API/worker, admin reconnect và refresh.
+- Mỗi run giữ actor thật, tenant/Project, connection revision, provider scope, model và policy revision.
+- Admin thay/ngắt connection không âm thầm chuyển run đang chạy sang danh tính khác; reauthorize trước tool, mỗi dispatch và công bố kết quả.
+- Thu hồi quyền quản trị xử lý theo quyền quản lý; việc dùng grant còn hợp lệ hay không phải theo provider scope/chủ thể và policy đã xác định, không tự chuyển credential cho admin mới.
+- Revoke chặn run mới, xử lý run đang chạy có audit; vẫn giữ dữ liệu/tài liệu đã được phép lưu. Không mất Project khi logout ChatGPT.
+
+Catalog và inference:
+- Catalog lấy bằng grant hợp lệ, lọc theo scope/model policy; cache theo connection/revision/entitlement, không lẫn account/tenant.
+- Dùng endpoint/payload đúng SIWC; không copy API-key payload. Kiểm hạn chế store/stream, fields, hosted tools trong tài liệu hiện hành.
+- Catalog xuất hiện không đủ để ghi live; phải có response terminal thành công. Stream dở rồi lỗi không là success.
+- Function tools gọi domain service đúng actor, validate schema/ACL, giữ idempotency. Unsupported hosted tools phải có trạng thái thật; không đổi tên cho qua.
+- Quota/401/403/429/503/timeout phải phân loại bằng bằng chứng; không auto-repeat hoặc fallback tài khoản/provider. Không tự bật dùng purchased credits/auto reload.
+- Usage nếu không có số liệu chính thức thì UNKNOWN, không ghi hạn mức vô hạn hoặc cost=0. Nguồn dùng gói và giới hạn nội bộ Galaxy phải được phân biệt.
+
+======================================================================
+11. GIỮ API-KEY PROVIDER PAUSED THẬT TRÊN MAIN
+======================================================================
+Đối chiếu bốn provider đã pause theo handoff với routing/main config hiện tại; giữ trạng thái và audit. Không in secret để kiểm key.
+Kiểm thêm retry/fallback, job queue, answer leases, auto health probes, parser/extractor, web/media tools có thể gọi key cũ. Không chỉ ẩn nút UI.
+Release mới và rollback phải giữ lựa chọn tạm dừng của người dùng; không bật lại default FREE_ONLY từ master cũ.
+Không gọi OpenRouter/Gemini/Mistral/Kira/LlamaCloud/Tavily/OpenAI API-key để làm đẹp báo cáo live. Thư viện HTTP và API nghiệp vụ nội bộ Galaxy vẫn hoạt động bình thường.
+
+======================================================================
+12. NGHIỆP VỤ VÀ HỆ SINH THÁI TIẾP TỤC SAU MỐC UI
+======================================================================
+Không làm mất mục tiêu master: bốn nhóm/12 giai đoạn, todo/tracker, Project memory, file/citation/export, resume và registry. Tái sử dụng Task CAS/idempotency đã có; xác minh delta chưa xong thay vì xây lại.
+Tracker lấy dữ liệu domain thật, phân trang/count nhất quán, owner/hạn/nguồn/trạng thái đúng. Không bịa dữ liệu thiếu. Cập nhật được phép có audit và version; retry không tạo task lặp.
+Hoàn thành AI run/file không tự đánh dấu task thi công/approval nghiệp vụ hoàn thành.
+Chat mới trong Project tìm được nguồn còn quyền; Project A/B/private room/field tài chính/revocation được kiểm trước khi gửi model hoặc trả kết quả. Artifact tải lại được sau reload, version/lineage/ACL đúng.
+Job bền vững sau reload/worker restart trong môi trường kiểm thử phù hợp; checkpoint/idempotency bảo đảm không lặp write. Hết quota hoặc grant bị revoke phải dừng hợp lý, không “chạy hộ” bằng danh tính khác.
+
+Hệ sinh thái hai chiều, triển khai thành mốc riêng sau sửa runtime/UI:
+- Galaxy dùng model qua đường hợp lệ và bộ tools nghiệp vụ của mình.
+- Plugin Galaxy OS/MCP expose công cụ tối thiểu tìm Project, đọc tracker, tạo/cập nhật task, lưu artifact và đọc kết quả theo actor/ACL.
+- ChatGPT/Codex truy cập plugin bằng danh tính Galaxy được cấp quyền; admin cấu hình nhà cung cấp AI không đồng nghĩa cấp mọi người quyền xem hệ thống.
+- ChatGPT web và Codex local có khả năng truy cập mạng/tool khác nhau. Không giả web đọc localhost/LAN được; không mở tunnel/public endpoint ngoài phạm vi.
+- Lịch sử ChatGPT không tự nhập. Chức năng Lưu vào Project nhận nội dung được chọn và provenance; dữ liệu Galaxy là nguồn trạng thái nghiệp vụ chính.
+- Mốc đầu: tạo việc từ ChatGPT → thấy trong Galaxy → sửa trong Galaxy → hỏi lại đúng trạng thái. Nếu chưa có plugin/route/network phù hợp, ghi chưa live; không lấy demo nội bộ thay bằng chứng liên thông.
+Không để mốc hệ sinh thái này trì hoãn UI main đã đủ điều kiện phát hành.
+
+======================================================================
+13. BỘ NGHIỆM THU BẮT BUỘC VÀ CÁCH DÙNG TEST
+======================================================================
+Lập bảng CODE / UNIT / INTEGRATION / FIXTURE / MAIN / VENDOR_LIVE với PASS, FAIL, PARTIAL, BLOCKED, NOT_RUN và evidence. Các check mới có ID R01–R28:
+R01. Mở Codex phiên riêng theo --no-daemon thành công; không mất phiên/credentials và không đổi approval.
+R02. Bare codex từ terminal mới hết mismatch sau sửa daemon; ghi riêng nếu chưa đạt.
+R03. pnpm dev nối được đúng manager, hành vi khởi chạy đúng; thông báo mới không thay bài kiểm này.
+R04. Up lặp idempotent; đúng owner, không process/cổng/queue trùng; app tồn tại độc lập phiên agent.
+R05. Template/unit được validate; sửa đúng nguyên nhân cutover lỗi; manager recovery nếu có phải đúng phạm vi đã duyệt.
+R06. Candidate mới map đúng tested tree; API/Web/assets/config/migration tương thích; rollback đã chuẩn bị và kiểm phù hợp.
+R07. Main localhost và LAN phục vụ release mới, SHA/build identity khớp; health 200 của release cũ không đạt.
+R08. Năm P04 có screenshot main và đối chiếu thiết kế; state chỉ mô phỏng trong fixture ghi đúng mức.
+R09. Login Galaxy giữ nguyên; system admin thấy trang Kết nối ChatGPT trong Hệ thống cả khi eligibility chưa rõ.
+R10. User thường không thấy management CTA/menu, truy cập URL/API quản trị bị chặn; không leak metadata/token của admin.
+R11. Project admin/trưởng bộ phận không tự là system admin; stale JWT/session sau revoke role không thể hoàn tất OAuth admin.
+R12. OAuth cancel/replay/wrong state/actor/tenant/registration bị xử lý đúng; redirect không mất draft hoặc đổi nhầm connection.
+R13. Callback host Windows/WSL được kiểm; LAN/mobile setup và LAN/mobile usage phân biệt, không giả 127.0.0.1 là server từ mọi thiết bị.
+R14. Grant/catalog/live response được kiểm riêng; trả token chưa đủ LIVE; chỉ response terminal thành công được ghi đạt.
+R15. Multiuser scope chưa xác minh thì non-owner inference bị chặn ở backend kể cả gọi API trực tiếp; không có admin switch bypass.
+R16. Nếu organization use đã được xác minh: hai actor khác quyền sử dụng theo policy, không đăng nhập ChatGPT riêng; usage/audit đúng actor, không chạy tool bằng quyền admin.
+R17. Đổi model giữ nguồn/Project/session; model mất quyền xử lý đúng; không bịa model thứ hai nếu account chỉ có một.
+R18. Refresh/API-worker race/admin reconnect giữ đúng connection revision; revoke không dispatch/công bố kết quả trái quyền.
+R19. Request lỗi/hết hạn mức không fallback API key hoặc account khác; policy pause còn hiệu lực sau restart/release/rollback.
+R20. Task pagination/count/atomic/CAS/idempotency/history đúng, không lost update hoặc ghi nhận nhầm người.
+R21. Tracker bốn nhóm/12 giai đoạn lấy việc thật; thiếu owner/hạn có nhãn, completed/blocked/overdue phân biệt đúng.
+R22. Project A/B có dữ liệu trùng từ khóa nhưng khác nội dung; cả admin có quyền hai Project cũng không trộn context.
+R23. Private source/field tài chính/citation/cache/artifact download/revocation giữa lúc chạy đều đúng quyền actor giao việc.
+R24. PDF/DOCX/XLSX đọc đúng khả năng; scan render không giả OCR; export bytes thật, tải lại sau reload; cached formula/recalc ghi rõ.
+R25. Tool loop live đọc nguồn → tạo/cập nhật task → trả kết quả; retry không lặp mutation; fixture không thay vendor/main.
+R26. Reload/cancel/timeout/worker restart trong test phù hợp không mất checkpoint hoặc lặp tool write; completion không tự duyệt nghiệp vụ.
+R27. Plugin/skill/Graphify nếu cài phải có smoke check/version/scope; nếu chưa cài báo NOT_INSTALLED/NOT_RUN, không báo đã có chỉ từ prompt.
+R28. Bộ nhớ dự án/handoff/manifest và lệnh vận hành được cập nhật, không chứa secret, người dùng có URL và cách nhận diện bản đang chạy.
+
+Viết test hồi quy cần thiết cho lỗi đã xác định và các thay đổi quyền/atomic/lifecycle. Tái sử dụng test hiện có, không tăng test vô ích để nâng số lượng. Chạy lint/typecheck/build và regression theo gate của repo. Không chạy vòng full suite lặp lại khi source không đổi chỉ để tạo thêm evidence.
+Chrome phải dùng origin thật sau cutover. Thử trên main phải bảo toàn dữ liệu; ưu tiên actor/Project test có nhận diện và cleanup phạm vi rõ, không reset DB hoặc dùng tài khoản khách hàng trái phép.
+
+======================================================================
+14. THỨ TỰ THỰC HIỆN VÀ ĐỊNH NGHĨA HOÀN THÀNH
+======================================================================
+Đợt 1 — Chẩn đoán và chuẩn bị phát hành:
+Đọc checkpoint → kiểm repo/runtime/daemon → lập nguyên nhân từng lỗi → sửa daemon/entrypoint/unit theo căn cứ → hoàn thiện admin UI và build hợp lệ. Phê duyệt rộng nếu cần phải có hành động review được trước.
+
+Đợt 2 — Người dùng thấy UI mới:
+Khôi phục control plane hợp lệ → cutover local → kiểm localhost/LAN/identity → P04 và trang admin mới. ChatGPT có thể vẫn “chưa được kích hoạt”; trạng thái phải thật. Báo mốc phát hành riêng ngay khi có evidence, không chờ mọi backlog.
+
+Đợt 3 — Kết nối và làm việc:
+Xác minh route/grant/scope phục vụ → callback lifecycle → tôi đăng nhập OpenAI nếu cần → catalog → response thật → tool loop → kiểm actor khác nếu organization scope được xác minh → hoàn thiện todo/tracker/memory/resume/export/registry.
+
+Đợt 4 — Liên thông hệ sinh thái:
+Plugin Galaxy/MCP và workflow ChatGPT/Codex theo mục 12; hoàn thiện các mốc còn lại của master với trạng thái thực.
+
+Không được ghi “đã sửa hai lỗi và giao UI mới” nếu một trong các điều sau còn đúng:
+- bare codex vẫn mismatch (chỉ --no-daemon chạy được);
+- pnpm dev vẫn CONTROL_PLANE_UNAVAILABLE;
+- main vẫn release cũ;
+- trang quản trị chỉ tồn tại trong fixture/worktree;
+- worker/server tạm của agent đang là thứ giữ giao diện sống.
+Từng phần có thể hoàn thành độc lập; báo chính xác phần đã đạt và phần chặn.
+
+======================================================================
+15. GRAPHIFY, AGENT SKILLS VÀ PLUGIN CHO CODEX
+======================================================================
+Tôi đã cho phép bổ sung công cụ miễn phí cần thiết cho nhiệm vụ; không cần hỏi lại để cài routine trong phạm vi đã giao. Tuy nhiên không cài chỉ vì có tên trong prompt và không trì hoãn sửa lỗi/phát hành.
+Inventory trên chính máy Codex: tool/skills/plugins version/path/compatibility. Dùng systematic debugging, design/PDF, runtime release, ACL và review skills nếu đã có. Không cài nhiều bộ instruction xung đột.
+Graphify optional: xác minh upstream Graphify-Labs/graphify, package/license/version, installer và khả năng code-only; pin trong môi trường tool tách biệt, không Python venv runtime của Galaxy. Chỉ index code đã scope, không .env/.runtime/credentials/uploads/DB dump/hồ sơ khách hàng/build/vendor folders; không dùng semantic API trả phí hoặc tự xuất dữ liệu.
+Skill mới chỉ khi thiếu; đọc skill-creator nếu có, version/commit đúng scope và giữ AGENTS.md gọn với link tài liệu. Không thêm hook nới quyền hoặc thay approval. Cài xong phải chạy thử; nếu không cần thì SKIPPED có lý do và tiếp tục.
+Plugin thiếu tài khoản/quyền kết nối bên ngoài không được tự coi đã được cấp OAuth chỉ từ quyền cài package.
+
+======================================================================
+16. BỘ NHỚ DỰ ÁN, BÀN GIAO VÀ BÁO CÁO CUỐI
+======================================================================
+Duy trì tài liệu memory hiện có trong repo; nếu chưa có, tạo docs/galaxy-os/PROJECT_MEMORY.md với mục tiêu hệ sinh thái, invariant nghiệp vụ, admin-only connection, provider scope còn chưa xác minh, policy không API key và thứ tự phát hành. Thêm link ngắn từ AGENTS.md phù hợp sau khi đọc và bảo toàn nội dung.
+Checkpoint có ngày/timezone và nguồn bằng chứng, ghi riêng docs/galaxy-os/handoffs/2026-10-08-runtime-ui-admin-chatgpt.md hoặc cập nhật handoff chuẩn hiện có theo convention; không tạo bản trùng không có chỉ mục.
+Phân biệt USER_REPORTED và VERIFIED_THIS_RUN. Giữ nguyên lịch sử mốc e9a15df... và local-a0429faf5733; thêm mốc mới, không sửa quá khứ thành đã live.
+
+Báo cáo cuối phải dẫn đường evidence và gồm:
+CODE_SHA / TESTED_SHA / TESTED_TREE / ARTIFACT_DIGEST / DEPLOYED_LOCAL_RELEASE / API_WEB_VERSION_MATCH.
+CODEX_SESSION_ACCESS / CODEX_DAEMON_FIX / PNPM_DEV / CONTROL_PLANE.
+MAIN_LOCALHOST / MAIN_LAN / P04_MAIN_UI / ADMIN_CHATGPT_PAGE_VISIBLE.
+ADMIN_ONLY_MANAGEMENT_RBAC / MEMBER_NO_SETUP_UX / ACTOR_AUTHORIZATION_ISOLATION.
+SIWC_APP_ELIGIBILITY / SIWC_INFERENCE_GRANT / MULTIUSER_PROVIDER_SCOPE / CALLBACK_HOST / CALLBACK_LAN.
+MODEL_CATALOG_LIVE / MODEL_RESPONSE_LIVE / TOOL_LOOP_LIVE / TOKEN_REFRESH_REVOKE.
+API_KEY_PROVIDERS_PAUSED / OLD_ROUTE_FALLBACK_CHECK / TASK_TRACKER / PROJECT_MEMORY / ARTIFACT_EXPORT / RESUME_REGISTRY.
+GRAPHIFY_STATUS / SKILLS_INSTALLED_WITH_VERSION / CHATGPT_GALAXY_CODEX_PLUGIN_STATUS.
+REMAINING_BLOCKERS và NEXT_ACTION, mỗi blocker phải có nguyên nhân, evidence, ai thực hiện, thao tác cụ thể và điều kiện tiếp tục.
+
+Đưa cho người dùng URL đang chạy, đường dẫn menu mới, release nhận diện, thay đổi họ sẽ thấy và giới hạn còn lại. Không chỉ trả các con số test.
+Nếu cần phê duyệt cuối hoặc đăng nhập, nêu lý do từ chính policy/automatic review/nhà cung cấp và phạm vi chính xác; không hỏi lại các hành động thường đã được giao. Không ghi DONE khi còn blocker; cũng không bỏ dở các việc độc lập được phép.
+
+======================================================================
+17. NGUỒN THAM KHẢO CHÍNH THỨC — ĐỌC LẠI THEO VERSION THỰC TẾ
+======================================================================
+OpenAI Docs, kiểm trong phiên soạn ngày 08/10/2026:
+- https://learn.chatgpt.com/docs/changelog
+- https://learn.chatgpt.com/docs/developer-commands
+- https://developers.openai.com/siwc/quickstart
+- https://developers.openai.com/siwc/token-sharing-open-source
+- https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions
+- https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference
+- https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations
+- https://learn.chatgpt.com/docs/sign-in-with-chatgpt
+- https://developers.openai.com/plugins/concepts/plugins
+- https://learn.chatgpt.com/docs/extend/mcp
+
+Changelog/help của binary và lỗi quan sát là căn cứ --no-daemon; không áp lệnh daemon chưa có trong version cài đặt.
+Tài liệu SIWC nêu client registration gắn user/workspace và nhiều host của cùng user; không dùng đoạn đó để suy ra mọi nhân viên dùng một Pro cá nhân.
+Tài liệu Codex enterprise gateway là một tích hợp riêng. Không lấy endpoint/backend-api hoặc config gateway của Codex thay cho route SIWC của Galaxy, không dùng nó làm bằng chứng quyền chia sẻ tài khoản.
+Thông tin không được nguồn chính thức xác nhận phải giữ UNCONFIRMED. Không bịa registration metadata, điều kiện cấp phép hoặc kết quả live.
+
+BẮT ĐẦU THỰC HIỆN TỪ MỐC A/B, CHUẨN BỊ VÀ PHÁT HÀNH UI MỚI THEO MỐC C. GIỮ NGUYÊN MỤC TIÊU NGHIỆP VỤ VÀ CHỈ BÁO HOÀN TẤT BẰNG BẰNG CHỨNG BẢN ĐANG CHẠY.

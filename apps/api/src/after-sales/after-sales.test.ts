@@ -6,6 +6,7 @@ import {
 import { describe, expect, it, vi } from 'vitest';
 import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
+import { FileStorage } from '../files/file-storage';
 import { PrismaService } from '../prisma.service';
 import { AfterSalesService } from './after-sales.service';
 
@@ -16,7 +17,7 @@ const actor = {
   email: 'user@example.test',
   displayName: 'User',
   mustChangePassword: false,
-  permissions: [],
+  permissions: ['file.read', 'project.stage1.finance.read', 'estimate.read'],
   administrationScope: 'ORGANIZATION',
   managedDepartmentIds: [],
   administrationTier: 1,
@@ -38,6 +39,7 @@ describe('Inspection, handover and after-sales', () => {
         },
       } as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(
       service.createAcceptance(actor, 'inspection', {
@@ -66,9 +68,19 @@ describe('Inspection, handover and after-sales', () => {
       acceptanceRecord: { count: vi.fn().mockResolvedValue(1) },
       punchItem: { count: vi.fn().mockResolvedValue(0) },
     };
+    Object.assign(prisma, {
+      $queryRaw: vi.fn(),
+      $transaction: vi.fn(async (callback: (tx: typeof prisma) => unknown) =>
+        callback(prisma),
+      ),
+    });
+    Object.assign(prisma.handover, {
+      findUniqueOrThrow: prisma.handover.findFirst,
+    });
     const service = new AfterSalesService(
       prisma as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(
       service.completeHandover(actor, 'handover', {}),
@@ -81,6 +93,7 @@ describe('Inspection, handover and after-sales', () => {
         project: { findFirst: vi.fn().mockResolvedValue(null) },
       } as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(
       service.createTicket(actor, {
@@ -107,6 +120,7 @@ describe('Inspection, handover and after-sales', () => {
         },
       } as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(service.closeTicket(actor, 'ticket')).rejects.toBeInstanceOf(
       ConflictException,
@@ -129,6 +143,7 @@ describe('Inspection, handover and after-sales', () => {
         $transaction: vi.fn().mockResolvedValue([1, 0, 0]),
       } as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(service.closeTicket(actor, 'ticket')).rejects.toBeInstanceOf(
       ConflictException,
@@ -147,6 +162,7 @@ describe('Inspection, handover and after-sales', () => {
         },
       } as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(
       service.createServiceVisit(actor, 'ticket', {
@@ -168,6 +184,7 @@ describe('Inspection, handover and after-sales', () => {
         },
       } as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(
       service.signHandoverDocument(actor, 'document', {
@@ -190,12 +207,50 @@ describe('Inspection, handover and after-sales', () => {
         },
       } as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(
       service.completeServiceVisit(actor, 'visit', {
         diagnosis: 'Fault found',
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('rejects an unattached temporary asset before completing a visit', async () => {
+    const findFirst = vi.fn(({ where }) =>
+      Promise.resolve(where.attachments ? null : { id: 'file' }),
+    );
+    const service = new AfterSalesService(
+      {
+        serviceVisit: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: 'visit',
+            projectId: 'project',
+            technicianId: actor.userId,
+            status: 'IN_PROGRESS',
+            visitType: 'DIAGNOSIS',
+          }),
+          update: vi.fn(),
+        },
+        fileAsset: { findFirst },
+      } as unknown as PrismaService,
+      policy,
+      {} as FileStorage,
+    );
+
+    await expect(
+      service.completeServiceVisit(actor, 'visit', {
+        diagnosis: 'Fault found',
+        evidenceFileId: '00000000-0000-4000-8000-000000000001',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          attachments: { some: { projectId: 'project' } },
+        }),
+      }),
+    );
   });
 
   it('rejects an expired warranty claim unless it is goodwill', async () => {
@@ -221,6 +276,7 @@ describe('Inspection, handover and after-sales', () => {
         },
       } as unknown as PrismaService,
       policy,
+      {} as FileStorage,
     );
     await expect(
       service.createWarrantyClaim(actor, 'ticket', {

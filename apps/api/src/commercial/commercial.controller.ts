@@ -38,7 +38,7 @@ export class CommercialController {
     return this.commercial.listEstimates(a, projectId);
   }
   @Post('estimates')
-  @RequirePermission('estimate.create')
+  @RequirePermission('estimate.create', 'financial_margin.read')
   createEstimate(
     @Actor() a: CurrentActor,
     @Param('projectId', ParseUUIDPipe) projectId: string,

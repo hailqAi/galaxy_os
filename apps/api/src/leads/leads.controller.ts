@@ -10,8 +10,9 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsDate,
   IsIn,
   IsOptional,
@@ -31,6 +32,12 @@ import {
 import { LeadsService } from './leads.service';
 
 class LeadsQuery extends PageQuery {
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === 'true' ? true : value === 'false' ? false : value,
+  )
+  @IsBoolean()
+  active?: boolean;
   @IsOptional() @IsString() @Length(1, 200) search?: string;
   @IsOptional()
   @IsIn([

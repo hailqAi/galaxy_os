@@ -1,4 +1,5 @@
 'use client';
+import { createCommandKey } from '../../lib/create-command-key';
 import Link from 'next/link';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
@@ -43,7 +44,7 @@ export default function SupplierPaymentsPage() {
           bankReferenceProtected:
             form.get('bankReferenceProtected') || undefined,
           transactionReference: form.get('transactionReference') || undefined,
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: createCommandKey(),
         }),
       });
       event.currentTarget.reset();

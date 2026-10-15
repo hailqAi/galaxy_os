@@ -1,5 +1,5 @@
 'use client';
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import React, { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api } from './lib/api';
 type Comment = {
   id: string;
@@ -18,16 +18,38 @@ type Comment = {
 };
 type Page = { items: Comment[]; total: number };
 type User = { userId: string; displayName: string };
+export function canDeleteComment({
+  actorUserId,
+  authorId,
+  permissions,
+}: {
+  actorUserId?: string;
+  authorId: string;
+  permissions?: string[];
+}) {
+  return (
+    permissions === undefined ||
+    permissions.includes('comment.delete_any') ||
+    (permissions.includes('comment.delete_own') && actorUserId === authorId)
+  );
+}
 export function EntityComments({
+  actorUserId,
   entityType,
   entityId,
+  permissions,
 }: {
+  actorUserId?: string;
   entityType: string;
   entityId: string;
+  permissions?: string[];
 }) {
   const [data, setData] = useState<Page>();
   const [users, setUsers] = useState<User[]>([]);
   const [message, setMessage] = useState('');
+  const [mentionSearch, setMentionSearch] = useState('');
+  const canCreate = permissions?.includes('comment.create') ?? true;
+  const canReadUsers = permissions?.includes('user.read') ?? true;
   const load = useCallback(
     () =>
       api<Page>(
@@ -39,10 +61,20 @@ export function EntityComments({
   );
   useEffect(() => {
     void load();
-    api<{ items: User[] }>('/users?pageSize=100')
-      .then((result) => setUsers(result.items))
-      .catch(() => undefined);
   }, [load]);
+  useEffect(() => {
+    if (!canReadUsers || !mentionSearch.trim()) return;
+    api<{ items: User[] }>(
+      `/users?${new URLSearchParams({
+        pageSize: '20',
+        status: 'active',
+        search: mentionSearch.trim(),
+      })}`,
+    )
+      .then((result) => setUsers(result.items))
+      .catch(() => setUsers([]));
+  }, [canReadUsers, mentionSearch]);
+  const visibleUsers = mentionSearch.trim() ? users : [];
   async function submit(event: FormEvent<HTMLFormElement>, parentId?: string) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -93,9 +125,14 @@ export function EntityComments({
                     {new Date(comment.createdAt).toLocaleString('vi-VN')}
                   </small>
                 </p>
-                {!comment.deletedAt && (
-                  <button onClick={() => void remove(comment.id)}>Xóa</button>
-                )}
+                {!comment.deletedAt &&
+                  canDeleteComment({
+                    actorUserId,
+                    authorId: comment.author.id,
+                    permissions,
+                  }) && (
+                    <button onClick={() => void remove(comment.id)}>Xóa</button>
+                  )}
               </div>
               <p className="whitespace-pre-wrap">
                 {comment.deletedAt ? 'Bình luận đã bị xóa' : comment.body}
@@ -110,42 +147,53 @@ export function EntityComments({
                   ))}
                 </ol>
               )}
-              <form
-                className="ml-6 mt-2 flex gap-2"
-                onSubmit={(event) => void submit(event, comment.id)}
-              >
-                <input
-                  name="body"
-                  required
-                  maxLength={10000}
-                  placeholder="Trả lời…"
-                />
-                <button>Trả lời</button>
-              </form>
+              {canCreate && (
+                <form
+                  className="ml-6 mt-2 flex gap-2"
+                  onSubmit={(event) => void submit(event, comment.id)}
+                >
+                  <input
+                    name="body"
+                    required
+                    maxLength={10000}
+                    placeholder="Trả lời…"
+                  />
+                  <button>Trả lời</button>
+                </form>
+              )}
             </li>
           ))}
         </ol>
       )}
-      <form className="grid gap-3" onSubmit={(event) => void submit(event)}>
-        <label>
-          Nội dung
-          <textarea name="body" required maxLength={10000} />
-        </label>
-        {users.length > 0 && (
+      {canCreate && (
+        <form className="grid gap-3" onSubmit={(event) => void submit(event)}>
           <label>
-            Nhắc đến
-            <select name="mentionedUserId">
-              <option value="">Không nhắc</option>
-              {users.map((user) => (
-                <option key={user.userId} value={user.userId}>
-                  {user.displayName}
-                </option>
-              ))}
-            </select>
+            Nội dung
+            <textarea name="body" required maxLength={10000} />
           </label>
-        )}
-        <button className="primary">Gửi bình luận</button>
-      </form>
+          {canReadUsers && (
+            <label>
+              Nhắc đến
+              <input
+                onChange={(event) => setMentionSearch(event.target.value)}
+                placeholder="Tìm người dùng"
+                value={mentionSearch}
+              />
+              {visibleUsers.length > 0 && (
+                <select name="mentionedUserId">
+                  <option value="">Không nhắc</option>
+                  {visibleUsers.map((user) => (
+                    <option key={user.userId} value={user.userId}>
+                      {user.displayName}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </label>
+          )}
+          <button className="primary">Gửi bình luận</button>
+        </form>
+      )}
     </section>
   );
 }

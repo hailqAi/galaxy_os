@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import {
   Actor,
+  AllowExternal,
   AllowPasswordChange,
   Public,
   RequirePermission,
@@ -45,14 +46,16 @@ export class AuthController {
     response.cookie(env.SESSION_COOKIE_NAME, result.token, {
       httpOnly: true,
       sameSite: 'lax',
-      secure: env.NODE_ENV === 'production',
+      secure:
+        env.NODE_ENV === 'production' ||
+        new URL(env.APP_PUBLIC_ORIGIN).protocol === 'https:',
       path: '/',
       expires: result.expiresAt,
     });
     return { authenticated: true };
   }
 
-  @AllowPasswordChange() @Post('logout') async logout(
+  @AllowExternal() @AllowPasswordChange() @Post('logout') async logout(
     @Actor() actor: CurrentActor,
     @Res({ passthrough: true }) response: CookieResponse,
   ) {
@@ -61,13 +64,18 @@ export class AuthController {
     response.clearCookie(env.SESSION_COOKIE_NAME, {
       httpOnly: true,
       sameSite: 'lax',
-      secure: env.NODE_ENV === 'production',
+      secure:
+        env.NODE_ENV === 'production' ||
+        new URL(env.APP_PUBLIC_ORIGIN).protocol === 'https:',
       path: '/',
     });
     return { authenticated: false };
   }
 
-  @AllowPasswordChange() @Post('change-password') async changePassword(
+  @AllowExternal()
+  @AllowPasswordChange()
+  @Post('change-password')
+  async changePassword(
     @Actor() actor: CurrentActor,
     @Body() input: ChangePasswordDto,
     @Res({ passthrough: true }) response: CookieResponse,
@@ -82,7 +90,9 @@ export class AuthController {
     response.clearCookie(env.SESSION_COOKIE_NAME, {
       httpOnly: true,
       sameSite: 'lax',
-      secure: env.NODE_ENV === 'production',
+      secure:
+        env.NODE_ENV === 'production' ||
+        new URL(env.APP_PUBLIC_ORIGIN).protocol === 'https:',
       path: '/',
     });
     return { changed: true, loginRequired: true };

@@ -3,10 +3,15 @@
   "private": true,
   "packageManager": "pnpm@10.33.4",
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=20.15.0"
   },
   "scripts": {
-    "dev": "pnpm --parallel --filter './apps/*' dev",
+    "dev": "python3 scripts/local-runtime.py up",
+    "local:status": "python3 scripts/local-runtime.py status",
+    "local:up": "python3 scripts/local-runtime.py up",
+    "local:stop": "python3 scripts/local-runtime.py stop",
+    "local:logs": "python3 scripts/local-runtime.py logs",
+    "test:local-runtime": "python3 -m unittest discover -s scripts -p test_local_runtime.py",
     "lint": "pnpm -r --if-present lint && services/document-ai/.venv/bin/ruff check services/document-ai",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test && services/document-ai/.venv/bin/pytest services/document-ai",
@@ -19,8 +24,8 @@
     "edge:start": "pnpm --filter @galaxy/edge start",
     "edge:test": "pnpm --filter @galaxy/edge test",
     "edge:check": "pnpm --filter @galaxy/edge check",
-    "prod:start": "systemctl --user start galaxy-os.target",
-    "prod:stop": "systemctl --user stop galaxy-os.target",
+    "prod:start": "python3 scripts/local-runtime.py up",
+    "prod:stop": "python3 scripts/local-runtime.py stop",
     "prod:health": "bash scripts/production-health.sh",
     "prod:verify-artifacts": "bash scripts/verify-production-artifacts.sh",
     "db:generate": "pnpm --filter @galaxy/api prisma:generate",
@@ -30,7 +35,9 @@
     "admin:reset-password": "pnpm --filter @galaxy/api admin:reset-password",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "env:check": "node scripts/check-environment.mjs"
+    "env:check": "node scripts/check-environment.mjs",
+    "test:g00:check": "node --env-file=scripts/g00-isolated.env.example scripts/g00-isolated-test.mjs check",
+    "test:g00": "node --env-file=scripts/g00-isolated.env.example scripts/g00-isolated-test.mjs run"
   },
   "devDependencies": {
     "prettier": "3.6.2"

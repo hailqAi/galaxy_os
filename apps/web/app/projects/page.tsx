@@ -1,21 +1,35 @@
 'use client';
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import React, {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { api } from '../lib/api';
+import {
+  type StageOneMode,
+  type StageOneRow,
+  type StageOneSummary,
+  stageOneRows,
+} from './stage-one-projects';
+import { projectDomainLabel } from '../../features/projects/project-domain-labels';
+import { ProjectDeleteAction } from './project-delete-action';
 type Project = {
   id: string;
   code: string;
   name: string;
-  phase: string;
   status: string;
   healthStatus: string;
   progressPercentage: number;
-  estimatedValue: string | null;
-  currency: string;
-  expectedCompletionDate: string | null;
+  currentStage?: string;
+  updatedAt: string;
+  stages: { stageKey: string; status: string }[];
   customer: { displayName: string };
   projectManager: { displayName: string } | null;
-  departments: { department: { name: string } }[];
+  canDeleteProject?: boolean;
+  commitment?: 'SIGNED' | 'POTENTIAL';
 };
 type Page = {
   items: Project[];
@@ -24,185 +38,902 @@ type Page = {
   pageSize: number;
   totalPages: number;
 };
-export default function ProjectsPage() {
-  const [data, setData] = useState<Page>();
-  const [search, setSearch] = useState('');
-  const [phase, setPhase] = useState('');
-  const [status, setStatus] = useState('');
-  const [health, setHealth] = useState('');
-  const [page, setPage] = useState(1);
-  const [message, setMessage] = useState('');
-  const load = useCallback(async () => {
-    try {
-      setData(
-        await api<Page>(
-          `/projects?${new URLSearchParams({ page: String(page), pageSize: '20', ...(search && { search }), ...(phase && { phase }), ...(status && { status }), ...(health && { health }) })}`,
-        ),
-      );
-    } catch (error) {
-      setMessage((error as Error).message);
+type Dashboard = {
+  total: number;
+  active: number;
+  needsAttention: number;
+  completed: number;
+  permittedCommands: { create: boolean };
+  estimatedValues?: { currency: string; value: string }[];
+  contractValues?: { currency: string; value: string }[];
+  receivedValues?: { currency: string; value: string }[];
+  receivableValues?: { currency: string; value: string }[];
+  payableValues?: { currency: string; value: string }[];
+  pendingApprovals?: number;
+  dueWarrantyAssets?: number;
+  dueServiceTickets?: number;
+};
+const projectStages = [
+  'STAGE_1',
+  'STAGE_2',
+  'STAGE_3',
+  'STAGE_4',
+  'STAGE_5',
+] as const;
+type StageOneSummaryBatch = {
+  items: (StageOneSummary & { projectId: string })[];
+};
+
+type ProjectLoadCallbacks = {
+  onStart: () => void;
+  onData: (data: Page) => void;
+  onRows: (rows: StageOneRow<Project>[], message: string) => void;
+  onListError: (message: string) => void;
+};
+
+type DashboardLoadCallbacks = {
+  onStart: () => void;
+  onData: (dashboard: Dashboard) => void;
+  onError: (message: string) => void;
+};
+
+export function projectListPath({
+  currentStage,
+  mine,
+  page,
+  search,
+  status,
+  health,
+  active,
+  commitment,
+  sort,
+  direction,
+}: {
+  currentStage?: string;
+  mine?: boolean;
+  page: number;
+  search?: string;
+  status?: string;
+  health?: string;
+  active?: boolean;
+  commitment?: string;
+  sort?: string;
+  direction?: string;
+}) {
+  return `/projects?${new URLSearchParams({
+    page: String(page),
+    pageSize: '20',
+    ...(mine && { mine: 'true' }),
+    ...(search && { search }),
+    ...(currentStage && { currentStage }),
+    ...(status && { status }),
+    ...(health && { health }),
+    ...(active && { active: 'true' }),
+    ...(commitment && { commitment }),
+    ...(sort && { sort }),
+    ...(direction && { direction }),
+  })}`;
+}
+
+export function readProjectFilters(search: string) {
+  const q = new URLSearchParams(search);
+  const choice = (name: string, values: string[], fallback = '') =>
+    values.includes(q.get(name) ?? '') ? q.get(name)! : fallback;
+  const number = Number(q.get('page'));
+  return {
+    search: (q.get('search') ?? '').slice(0, 200),
+    page: Number.isSafeInteger(number) && number > 0 ? number : 1,
+    currentStage: choice('currentStage', [...projectStages]),
+    status: choice('status', [
+      'PLANNING',
+      'ACTIVE',
+      'ON_HOLD',
+      'COMPLETED',
+      'CANCELLED',
+    ]),
+    health: choice('health', ['ON_TRACK', 'AT_RISK', 'OFF_TRACK']),
+    commitment: choice('commitment', ['SIGNED', 'POTENTIAL']),
+    active: q.get('active') === 'true',
+    sort: choice(
+      'sort',
+      ['updatedAt', 'name', 'code', 'expectedCompletionDate'],
+      'updatedAt',
+    ),
+    direction: choice('direction', ['asc', 'desc'], 'desc'),
+  };
+}
+
+export async function loadProjectsPage({
+  callbacks,
+  isCurrent,
+  path,
+  stageOneMode,
+}: {
+  callbacks: ProjectLoadCallbacks;
+  isCurrent: () => boolean;
+  path: string;
+  stageOneMode?: StageOneMode;
+}) {
+  if (!isCurrent()) return;
+  callbacks.onStart();
+  try {
+    const result = await api<Page>(path);
+    if (!isCurrent()) return;
+    callbacks.onData(result);
+    if (!stageOneMode) return;
+    let entries: { project: Project; summary?: StageOneSummary }[] =
+      result.items.map((project) => ({ project }));
+    if (entries.length) {
+      try {
+        const summaries = await api<StageOneSummaryBatch>(
+          `/projects/stage-1-summaries?projectIds=${result.items.map(({ id }) => id).join(',')}`,
+        );
+        const byProjectId = new Map(
+          summaries.items.map(({ projectId, ...summary }) => [
+            projectId,
+            summary,
+          ]),
+        );
+        entries = result.items.map((project) => ({
+          project,
+          summary: byProjectId.get(project.id),
+        }));
+      } catch {}
     }
-  }, [health, page, phase, search, status]);
-  useEffect(() => {
-    const timeout = setTimeout(() => void load(), 0);
-    return () => clearTimeout(timeout);
-  }, [load]);
+    if (!isCurrent()) return;
+    callbacks.onRows(
+      stageOneRows(stageOneMode, entries),
+      entries.some(({ summary }) => !summary)
+        ? 'Một số dữ liệu Stage 1 không thể tải.'
+        : '',
+    );
+  } catch (error) {
+    if (isCurrent()) callbacks.onListError((error as Error).message);
+  }
+}
+
+export async function loadProjectDashboard({
+  callbacks,
+  isCurrent,
+}: {
+  callbacks: DashboardLoadCallbacks;
+  isCurrent: () => boolean;
+}) {
+  if (!isCurrent()) return;
+  callbacks.onStart();
+  try {
+    const dashboard = await api<Dashboard>('/projects/dashboard');
+    if (isCurrent()) callbacks.onData(dashboard);
+  } catch (error) {
+    if (isCurrent()) callbacks.onError((error as Error).message);
+  }
+}
+
+export function applyProjectFilter(
+  value: string,
+  setFilter: (value: string) => void,
+  setPage: (value: number) => void,
+) {
+  setFilter(value);
+  setPage(1);
+}
+
+function money(value: string) {
+  const [integer = '', fraction] = value.split('.');
+  return `${integer.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}${fraction ? `,${fraction}` : ''}`;
+}
+
+function ProjectTable({
+  items,
+  onProjectDeleted,
+}: {
+  items: Project[];
+  onProjectDeleted?: () => void | Promise<void>;
+}) {
   return (
-    <div className="grid gap-5">
-      <p className="text-sm text-black/55">Trang chủ / Dự án</p>
-      <header className="flex flex-wrap justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Dự án</h1>
-          <p className="text-sm text-black/60">
-            Trung tâm quản lý toàn bộ dự án Galaxy Centre
-          </p>
-        </div>
-        <Link className="primary rounded px-4 py-2" href="/projects/new">
-          + Tạo dự án
-        </Link>
-      </header>
-      <section className="grid gap-3 sm:grid-cols-4">
-        {[
-          [
-            'Đang hoạt động',
-            data?.items.filter((item) => item.status === 'ACTIVE').length ?? 0,
-          ],
-          [
-            'Cần chú ý',
-            data?.items.filter((item) => item.healthStatus !== 'ON_TRACK')
-              .length ?? 0,
-          ],
-          [
-            'Tiến độ TB',
-            data?.items.length
-              ? Math.round(
-                  data.items.reduce(
-                    (sum, item) => sum + item.progressPercentage,
-                    0,
-                  ) / data.items.length,
-                ) + '%'
-              : '0%',
-          ],
-          [
-            'Tổng giá trị',
-            data?.items
-              .reduce((sum, item) => sum + Number(item.estimatedValue ?? 0), 0)
-              .toLocaleString('vi-VN') ?? '0',
-          ],
-        ].map(([label, value]) => (
-          <div className="panel" key={label}>
-            <p className="text-sm text-black/55">{label}</p>
-            <strong className="text-2xl">{value}</strong>
+    <div className="overflow-x-auto">
+      <table className="min-w-[1080px] table-fixed text-[13px]">
+        <colgroup>
+          <col className="w-[130px]" />
+          <col className="w-[200px]" />
+          <col className="w-[150px]" />
+          <col className="w-[130px]" />
+          <col className="w-[125px]" />
+          <col className="w-[130px]" />
+          <col className="w-[120px]" />
+          <col className="w-[90px]" />
+          <col className="w-[105px]" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Mã dự án</th>
+            <th>Tên dự án</th>
+            <th>Khách hàng</th>
+            <th>Quản lý dự án</th>
+            <th>Tiến độ</th>
+            <th>Giai đoạn đang xử lý</th>
+            <th>Trạng thái</th>
+            <th>Cập nhật</th>
+            <th className="sticky right-0 z-10">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={item.id}>
+              <td className="font-semibold text-slate-700">
+                <span className="block truncate" title={item.code}>
+                  {item.code}
+                </span>
+              </td>
+              <td>
+                <Link
+                  className="block truncate font-semibold text-slate-900 hover:text-blue-700"
+                  href={`/projects/${item.id}/overview`}
+                  title={item.name}
+                >
+                  {item.name}
+                </Link>
+                <span className="mt-1 block text-xs text-slate-500">
+                  {item.commitment === 'SIGNED'
+                    ? 'Đã có hợp đồng ký'
+                    : item.commitment === 'POTENTIAL'
+                      ? 'Chưa ghi nhận hợp đồng ký'
+                      : 'Cam kết: chưa được cấp dữ liệu'}
+                </span>
+              </td>
+              <td>
+                <span
+                  className="block truncate"
+                  title={item.customer.displayName}
+                >
+                  {item.customer.displayName}
+                </span>
+              </td>
+              <td>
+                <span className="block truncate">
+                  {item.projectManager?.displayName ?? 'Chưa phân công'}
+                </span>
+              </td>
+              <td>
+                <div className="grid min-w-28 gap-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span>{item.progressPercentage}%</span>
+                  </div>
+                  <progress
+                    aria-label={`Tiến độ ${item.name}`}
+                    className="h-1.5 w-full accent-blue-600"
+                    max={100}
+                    value={item.progressPercentage}
+                  />
+                </div>
+              </td>
+              <td>
+                {projectDomainLabel('stage', item.currentStage ?? 'STAGE_1')}
+              </td>
+              <td>
+                <span className="whitespace-nowrap rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">
+                  {projectDomainLabel('status', item.status)}
+                </span>
+              </td>
+              <td>{new Date(item.updatedAt).toLocaleDateString('vi-VN')}</td>
+              <td className="sticky right-0 bg-white">
+                <div className="flex items-center gap-2">
+                  <Link
+                    className="primary inline-flex whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold"
+                    href={`/projects/${item.id}/overview`}
+                  >
+                    MỞ DỰ ÁN
+                  </Link>
+                  {item.canDeleteProject && (
+                    <ProjectDeleteAction
+                      onDeleted={onProjectDeleted}
+                      project={item}
+                    />
+                  )}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export function DashboardView({
+  children,
+  data,
+  dashboardError,
+  error,
+  loading,
+  onDashboardRetry,
+  onRetry,
+  onProjectDeleted,
+  pagination,
+  summary,
+}: {
+  children?: ReactNode;
+  data?: Page;
+  dashboardError?: string;
+  error?: string;
+  loading?: boolean;
+  onDashboardRetry?: () => void;
+  onRetry?: () => void;
+  onProjectDeleted?: () => void | Promise<void>;
+  pagination?: ReactNode;
+  summary?: Dashboard;
+}) {
+  return (
+    <>
+      <section className="grid gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div>
+            <h1 className="text-[22px] font-semibold text-slate-900">
+              Danh sách dự án
+            </h1>
+            <p className="mt-1 text-sm text-slate-600">
+              Theo dõi toàn bộ dự án bạn được quyền xem.
+            </p>
           </div>
-        ))}
-      </section>
-      <section className="panel grid gap-4">
-        <div className="flex flex-wrap gap-3">
-          <input
-            aria-label="Tìm dự án"
-            placeholder="Tìm mã hoặc tên…"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-          <select
-            aria-label="Giai đoạn"
-            value={phase}
-            onChange={(event) => setPhase(event.target.value)}
-          >
-            <option value="">Tất cả giai đoạn</option>
-            {['SURVEY', 'REQUIREMENT', 'DESIGN'].map((value) => (
-              <option key={value}>{value}</option>
-            ))}
-          </select>
-          <select
-            aria-label="Trạng thái"
-            value={status}
-            onChange={(event) => setStatus(event.target.value)}
-          >
-            <option value="">Tất cả trạng thái</option>
-            {['PLANNING', 'ACTIVE', 'ON_HOLD', 'COMPLETED'].map((value) => (
-              <option key={value}>{value}</option>
-            ))}
-          </select>
-          <select
-            aria-label="Sức khỏe"
-            value={health}
-            onChange={(event) => setHealth(event.target.value)}
-          >
-            <option value="">Tất cả sức khỏe</option>
-            {['ON_TRACK', 'AT_RISK', 'OFF_TRACK'].map((value) => (
-              <option key={value}>{value}</option>
-            ))}
-          </select>
+          {summary?.permittedCommands.create && (
+            <Link
+              className="primary rounded-lg px-4 py-2 text-sm font-semibold"
+              href="/projects/new"
+            >
+              TẠO DỰ ÁN
+            </Link>
+          )}
         </div>
-        {message && <p role="alert">{message}</p>}
-        {!data ? (
+        {summary ? (
+          <details className="portfolio-summary">
+            <summary>Tổng quan danh mục · {summary.total} dự án</summary>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {(
+                [
+                  ['Tổng dự án', summary.total],
+                  ['Đang thực hiện', summary.active],
+                  ['Cần xử lý', summary.needsAttention],
+                  ['Đã hoàn thành', summary.completed],
+                  ...(summary.estimatedValues?.length
+                    ? [
+                        [
+                          'Tổng giá trị',
+                          summary.estimatedValues
+                            .map(
+                              ({ currency, value }) =>
+                                `${currency} ${money(value)}`,
+                            )
+                            .join(' · '),
+                        ],
+                      ]
+                    : []),
+                  ...[
+                    ['Giá trị hợp đồng', summary.contractValues],
+                    ['Tổng đã thu', summary.receivedValues],
+                    ['Công nợ phải thu', summary.receivableValues],
+                    ['Công nợ phải trả', summary.payableValues],
+                  ].flatMap(([label, values]) =>
+                    Array.isArray(values) && values.length
+                      ? [
+                          [
+                            label,
+                            values
+                              .map(
+                                ({ currency, value }) =>
+                                  `${currency} ${money(value)}`,
+                              )
+                              .join(' · '),
+                          ],
+                        ]
+                      : [],
+                  ),
+                  ...(summary.pendingApprovals !== undefined
+                    ? [['Phê duyệt đang chờ', summary.pendingApprovals]]
+                    : []),
+                  ...(summary.dueWarrantyAssets !== undefined ||
+                  summary.dueServiceTickets !== undefined
+                    ? [
+                        [
+                          'Bảo hành/bảo trì đến hạn',
+                          [
+                            ...(summary.dueWarrantyAssets !== undefined
+                              ? [`Bảo hành ${summary.dueWarrantyAssets}`]
+                              : []),
+                            ...(summary.dueServiceTickets !== undefined
+                              ? [`Dịch vụ ${summary.dueServiceTickets}`]
+                              : []),
+                          ].join(' · '),
+                        ],
+                      ]
+                    : []),
+                ] as [string, string | number][]
+              ).map(([label, value]) => (
+                <div
+                  className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+                  key={label}
+                >
+                  <p className="text-sm text-slate-500">{label}</p>
+                  <strong className="mt-1 block break-words text-lg text-slate-900 2xl:text-xl">
+                    {value}
+                  </strong>
+                </div>
+              ))}
+            </div>
+            {summary.total > 0 && (
+              <section
+                aria-label="Tiến độ danh mục dự án"
+                className="grid gap-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+              >
+                <h2 className="font-semibold">TIẾN ĐỘ DANH MỤC DỰ ÁN</h2>
+                <progress
+                  aria-label="Tỷ lệ dự án đã hoàn thành"
+                  className="h-3 w-full accent-blue-600"
+                  max={summary.total}
+                  value={summary.completed}
+                />
+                <p className="text-sm text-slate-600">
+                  {summary.completed}/{summary.total} dự án đã hoàn thành
+                </p>
+              </section>
+            )}
+          </details>
+        ) : dashboardError ? (
+          <div role="alert">
+            <p>{dashboardError}</p>
+            {onDashboardRetry && (
+              <button onClick={onDashboardRetry}>Thử lại</button>
+            )}
+          </div>
+        ) : (
+          <p role="status">Đang tải tổng quan dự án…</p>
+        )}
+      </section>
+      <section className="grid gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        {children}
+        {error ? (
+          <div role="alert">
+            <p>{error}</p>
+            {onRetry && <button onClick={onRetry}>Thử lại</button>}
+          </div>
+        ) : loading || !data ? (
           <p role="status">Đang tải dự án…</p>
         ) : !data.items.length ? (
           <p>Chưa có dự án phù hợp.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table>
-              <thead>
-                <tr>
-                  <th>Mã</th>
-                  <th>Tên dự án</th>
-                  <th>Khách hàng</th>
-                  <th>Giai đoạn</th>
-                  <th>Project Manager</th>
-                  <th>Phòng ban</th>
-                  <th>Tiến độ</th>
-                  <th>Sức khỏe</th>
-                  <th>Hoàn thành dự kiến</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.code}</td>
-                    <td>
-                      <Link className="underline" href={`/projects/${item.id}`}>
-                        {item.name}
-                      </Link>
-                    </td>
-                    <td>{item.customer.displayName}</td>
-                    <td>{item.phase}</td>
-                    <td>{item.projectManager?.displayName ?? '—'}</td>
-                    <td>
-                      {item.departments
-                        .map((value) => value.department.name)
-                        .join(', ') || '—'}
-                    </td>
-                    <td>{item.progressPercentage}%</td>
-                    <td>{item.healthStatus}</td>
-                    <td>
-                      {item.expectedCompletionDate
-                        ? new Date(
-                            item.expectedCompletionDate,
-                          ).toLocaleDateString('vi-VN')
-                        : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ProjectTable
+            items={data.items}
+            onProjectDeleted={onProjectDeleted}
+          />
         )}
-        <div className="flex justify-end gap-2">
-          <button disabled={page <= 1} onClick={() => setPage(page - 1)}>
-            Trước
-          </button>
-          <span className="px-3 py-2">
-            {page}/{data?.totalPages || 1}
-          </span>
-          <button
-            disabled={!data || page >= data.totalPages}
-            onClick={() => setPage(page + 1)}
-          >
-            Sau
-          </button>
-        </div>
+        {pagination}
       </section>
+    </>
+  );
+}
+
+export function ProjectsPage({
+  mine = false,
+  stageOneMode,
+}: {
+  mine?: boolean;
+  stageOneMode?: StageOneMode;
+}) {
+  const [data, setData] = useState<Page>();
+  const [dashboard, setDashboard] = useState<Dashboard>();
+  const [dashboardError, setDashboardError] = useState('');
+  const [stageRows, setStageRows] = useState<StageOneRow<Project>[]>();
+  const [filtersState, setFiltersState] = useState(() =>
+    readProjectFilters(''),
+  );
+  const [urlReady, setUrlReady] = useState(false);
+  const [canReadCommitment, setCanReadCommitment] = useState(false);
+  const {
+    search,
+    currentStage,
+    status,
+    health,
+    page,
+    active,
+    commitment,
+    sort,
+    direction,
+  } = filtersState;
+  useEffect(() => {
+    const restore = () => {
+      setFiltersState(readProjectFilters(window.location.search));
+      setUrlReady(true);
+    };
+    restore();
+    window.addEventListener('popstate', restore);
+    api<{ permissions: string[] }>('/me')
+      .then((actor) =>
+        setCanReadCommitment(actor.permissions.includes('contract.read')),
+      )
+      .catch(() => undefined);
+    return () => window.removeEventListener('popstate', restore);
+  }, []);
+  function changeFilters(patch: Partial<typeof filtersState>) {
+    invalidateLoad();
+    setData(undefined);
+    const next = { ...filtersState, page: 1, ...patch };
+    setFiltersState(next);
+    window.history.pushState(
+      null,
+      '',
+      `${window.location.pathname}?${projectListPath(next).split('?')[1]}`,
+    );
+  }
+  const setPage = (value: number) => changeFilters({ page: value });
+  const [message, setMessage] = useState('');
+  const [listFailed, setListFailed] = useState(false);
+  const loadGeneration = useRef(0);
+  const dashboardGeneration = useRef(0);
+  const invalidateLoad = useCallback(() => ++loadGeneration.current, []);
+  const invalidateDashboardLoad = useCallback(
+    () => ++dashboardGeneration.current,
+    [],
+  );
+  const loadDashboard = useCallback(async () => {
+    const request = ++dashboardGeneration.current;
+    await loadProjectDashboard({
+      callbacks: {
+        onStart: () => {
+          setDashboard(undefined);
+          setDashboardError('');
+        },
+        onData: (value) => {
+          setDashboard(value);
+          setDashboardError('');
+        },
+        onError: setDashboardError,
+      },
+      isCurrent: () => request === dashboardGeneration.current,
+    });
+  }, []);
+  const load = useCallback(async () => {
+    const request = ++loadGeneration.current;
+    await loadProjectsPage({
+      callbacks: {
+        onStart: () => {
+          setData(undefined);
+          setListFailed(false);
+          setMessage('');
+          setStageRows(undefined);
+        },
+        onData: setData,
+        onRows: (rows, partialMessage) => {
+          setStageRows(rows);
+          if (partialMessage) setMessage(partialMessage);
+        },
+        onListError: (error) => {
+          setData(undefined);
+          setStageRows(undefined);
+          setMessage(error);
+          setListFailed(true);
+        },
+      },
+      isCurrent: () => request === loadGeneration.current,
+      path: projectListPath({
+        active,
+        commitment,
+        sort,
+        direction,
+        currentStage,
+        health,
+        mine,
+        page,
+        search,
+        status,
+      }),
+      stageOneMode,
+    });
+  }, [
+    active,
+    commitment,
+    sort,
+    direction,
+    currentStage,
+    health,
+    mine,
+    page,
+    search,
+    stageOneMode,
+    status,
+  ]);
+  useEffect(() => {
+    if (!urlReady) return;
+    const timeout = setTimeout(() => void load(), 0);
+    return () => {
+      clearTimeout(timeout);
+      invalidateLoad();
+    };
+  }, [invalidateLoad, load, urlReady]);
+  useEffect(() => {
+    if (mine || stageOneMode) return;
+    const timeout = setTimeout(() => void loadDashboard(), 0);
+    return () => {
+      clearTimeout(timeout);
+      invalidateDashboardLoad();
+    };
+  }, [invalidateDashboardLoad, loadDashboard, mine, stageOneMode]);
+  const visibleStageRows = stageRows ?? [];
+  const filters = (
+    <div className="grid gap-4">
+      {!mine && !stageOneMode && (
+        <nav className="workspace-tabs" aria-label="Hồ sơ dự án">
+          {[
+            ['', 'Tất cả'],
+            ['POTENTIAL', 'Tiềm năng'],
+            ['SIGNED', 'Đã ký'],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              disabled={!!value && !canReadCommitment}
+              title={
+                value && !canReadCommitment
+                  ? 'Cần quyền đọc hợp đồng để lọc trạng thái ký'
+                  : undefined
+              }
+              aria-pressed={commitment === value}
+              onClick={() => changeFilters({ commitment: value })}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      )}
+      <div className="flex flex-wrap gap-3">
+        <input
+          aria-label="Tìm dự án"
+          autoComplete="off"
+          id="project-search"
+          name="search"
+          placeholder="Tìm mã, tên dự án hoặc khách hàng…"
+          value={search}
+          onChange={(event) => changeFilters({ search: event.target.value })}
+        />
+        <select
+          aria-label="Giai đoạn hiện tại"
+          id="project-stage-filter"
+          name="currentStage"
+          value={currentStage}
+          onChange={(event) =>
+            changeFilters({ currentStage: event.target.value })
+          }
+        >
+          <option value="">Tất cả giai đoạn</option>
+          {projectStages.map((value) => (
+            <option key={value} value={value}>
+              {projectDomainLabel('stage', value)}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Trạng thái"
+          id="project-status-filter"
+          name="status"
+          value={status}
+          onChange={(event) => changeFilters({ status: event.target.value })}
+        >
+          <option value="">Tất cả trạng thái</option>
+          {['PLANNING', 'ACTIVE', 'ON_HOLD', 'COMPLETED', 'CANCELLED'].map(
+            (value) => (
+              <option key={value} value={value}>
+                {projectDomainLabel('status', value)}
+              </option>
+            ),
+          )}
+        </select>
+        <select
+          aria-label="Sức khỏe"
+          id="project-health-filter"
+          name="health"
+          value={health}
+          onChange={(event) => changeFilters({ health: event.target.value })}
+        >
+          <option value="">Tất cả sức khỏe</option>
+          {['ON_TRACK', 'AT_RISK', 'OFF_TRACK'].map((value) => (
+            <option key={value} value={value}>
+              {projectDomainLabel('status', value)}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Sắp xếp dự án"
+          value={`${sort}:${direction}`}
+          onChange={(event) => {
+            const [sort, direction] = event.target.value.split(':');
+            changeFilters({ sort: sort!, direction: direction! });
+          }}
+        >
+          <option value="updatedAt:desc">Cập nhật mới nhất</option>
+          <option value="name:asc">Tên A → Z</option>
+          <option value="code:asc">Mã tăng dần</option>
+          <option value="expectedCompletionDate:asc">Hạn gần nhất</option>
+        </select>
+        {active && (
+          <button onClick={() => changeFilters({ active: false })}>
+            Đang thực hiện ×
+          </button>
+        )}
+      </div>
+      {commitment && (
+        <p className="text-xs text-slate-500">
+          Theo hợp đồng khách hàng trong phạm vi được đọc; không suy từ PI hoặc
+          tiến độ. Hồ sơ Lead chưa chuyển thành Project chưa nằm trong danh sách
+          này.
+        </p>
+      )}
     </div>
   );
+  return (
+    <div className="project-list mx-auto grid w-full max-w-[1280px] gap-5">
+      <p className="text-sm text-black/55">Trang chủ / Dự án</p>
+      {(stageOneMode || mine) && (
+        <header>
+          <h1 className="text-2xl font-semibold">
+            {stageOneMode === 'actions'
+              ? 'Việc cần xử lý'
+              : stageOneMode === 'alerts'
+                ? 'Cảnh báo dự án'
+                : 'Dự án của tôi'}
+          </h1>
+          <p className="text-sm text-black/60">
+            {stageOneMode
+              ? 'Tình trạng Giai đoạn 1 từ các dự án bạn được phép xem'
+              : 'Các dự án bạn trực tiếp tham gia.'}
+          </p>
+        </header>
+      )}
+      {!stageOneMode && !mine && (
+        <DashboardView
+          data={data}
+          dashboardError={dashboardError || undefined}
+          error={listFailed ? message : undefined}
+          loading={!data}
+          onDashboardRetry={() => void loadDashboard()}
+          onRetry={() => void load()}
+          pagination={
+            <div className="flex justify-end gap-2">
+              <button disabled={page <= 1} onClick={() => setPage(page - 1)}>
+                Trước
+              </button>
+              <span className="px-3 py-2">
+                {page}/{data?.totalPages || 1}
+              </span>
+              <button
+                disabled={!data || page >= data.totalPages}
+                onClick={() => setPage(page + 1)}
+              >
+                Sau
+              </button>
+            </div>
+          }
+          summary={dashboard}
+          onProjectDeleted={async () => {
+            await Promise.all([load(), loadDashboard()]);
+          }}
+        >
+          {filters}
+          {message && !listFailed && <p role="alert">{message}</p>}
+        </DashboardView>
+      )}
+      {(stageOneMode || mine) && (
+        <section className="panel grid gap-4">
+          {filters}
+          {message && !listFailed && <p role="alert">{message}</p>}
+          {listFailed ? (
+            <div role="alert">
+              <p>{message}</p>
+              <button onClick={() => void load()}>Thử lại</button>
+            </div>
+          ) : !data ? (
+            <p role="status">Đang tải dự án…</p>
+          ) : stageOneMode && !stageRows ? (
+            <p role="status">Đang tải tình trạng Stage 1…</p>
+          ) : stageOneMode && !visibleStageRows.length ? (
+            <p>Không có mục Stage 1 phù hợp.</p>
+          ) : stageOneMode === 'actions' ? (
+            <div className="overflow-x-auto">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Mã</th>
+                    <th>Dự án</th>
+                    <th>Readiness</th>
+                    <th>Việc cần xử lý</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleStageRows
+                    .filter(
+                      (row): row is Extract<typeof row, { type: 'action' }> =>
+                        row.type === 'action',
+                    )
+                    .map((row) => (
+                      <tr key={row.project.id}>
+                        <td>{row.project.code}</td>
+                        <td>
+                          <Link
+                            className="underline"
+                            href={`/projects/${row.project.id}/overview`}
+                          >
+                            {row.project.name}
+                          </Link>
+                        </td>
+                        <td>{row.readinessStatus}</td>
+                        <td>
+                          {row.redFlags.length
+                            ? row.redFlags.map(({ title }) => title).join('; ')
+                            : 'Stage 1 chưa hoàn tất.'}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          ) : stageOneMode === 'alerts' ? (
+            <div className="overflow-x-auto">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Mã</th>
+                    <th>Dự án</th>
+                    <th>Mức độ</th>
+                    <th>Cảnh báo</th>
+                    <th>Khắc phục</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleStageRows
+                    .filter(
+                      (row): row is Extract<typeof row, { type: 'alert' }> =>
+                        row.type === 'alert',
+                    )
+                    .map((row) => (
+                      <tr key={`${row.project.id}:${row.code}`}>
+                        <td>{row.project.code}</td>
+                        <td>
+                          <Link
+                            className="underline"
+                            href={`/projects/${row.project.id}/overview`}
+                          >
+                            {row.project.name}
+                          </Link>
+                        </td>
+                        <td>{row.severity}</td>
+                        <td>{row.title}</td>
+                        <td>{row.remediation}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          ) : !data.items.length ? (
+            <p>Chưa có dự án phù hợp.</p>
+          ) : (
+            <ProjectTable items={data.items} />
+          )}
+          <div className="flex justify-end gap-2">
+            <button disabled={page <= 1} onClick={() => setPage(page - 1)}>
+              Trước
+            </button>
+            <span className="px-3 py-2">
+              {page}/{data?.totalPages || 1}
+            </span>
+            <button
+              disabled={!data || page >= data.totalPages}
+              onClick={() => setPage(page + 1)}
+            >
+              Sau
+            </button>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+export default function AllProjectsPage() {
+  return <ProjectsPage />;
 }

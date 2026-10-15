@@ -1,15 +1,90 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   developmentHosts,
+  internalApiUrl,
   normalizeHost,
   publicHosts,
   trustedRequestHost,
   validateProductionEnvironment,
+  trustedRequestOrigin,
 } from './host-config';
 import { proxy } from './proxy';
 import { NextRequest } from 'next/server';
 
 afterEach(() => vi.unstubAllEnvs());
+
+describe('managed internal production origins', () => {
+  const headers = (host: string, forwarded: Record<string, string> = {}) =>
+    new Headers({ host, ...forwarded });
+  it('accepts exact HTTP origins without trusting public metadata', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv(
+      'GALAXY_INTERNAL_HTTP_ORIGINS',
+      'http://localhost:3000,http://192.168.1.80:3000',
+    );
+    expect(trustedRequestOrigin(headers('192.168.1.80:3000'))).toBe(
+      'http://192.168.1.80:3000',
+    );
+    expect(
+      trustedRequestOrigin(
+        headers('localhost:3000', {
+          'x-forwarded-host': 'localhost:3000',
+          'x-forwarded-proto': 'http',
+        }),
+      ),
+    ).toBe('http://localhost:3000');
+    for (const h of [
+      headers('192.168.1.80:3001'),
+      headers('localhost:3000', { 'x-forwarded-proto': 'https' }),
+      headers('localhost:3000', { 'x-forwarded-host': 'os.example.com' }),
+    ])
+      expect(trustedRequestOrigin(h)).toBeNull();
+  });
+  it('requires the server-only Edge proof for public HTTPS', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('APP_PUBLIC_ORIGIN', 'https://os.example.com');
+    vi.stubEnv('TRUST_PROXY', 'true');
+    vi.stubEnv('GALAXY_PUBLIC_ACCESS', 'true');
+    vi.stubEnv(
+      'GALAXY_EDGE_PROOF',
+      'synthetic-test-proof-with-at-least-32-bytes',
+    );
+    const forwarded = {
+      'x-forwarded-host': 'os.example.com',
+      'x-forwarded-proto': 'https',
+    };
+    expect(
+      trustedRequestOrigin(headers('os.example.com', forwarded)),
+    ).toBeNull();
+    expect(
+      trustedRequestOrigin(
+        headers('os.example.com', {
+          ...forwarded,
+          'x-galaxy-edge-proof': 'forged',
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      trustedRequestOrigin(
+        headers('os.example.com', {
+          ...forwarded,
+          'x-galaxy-edge-proof': process.env.GALAXY_EDGE_PROOF!,
+        }),
+      ),
+    ).toBe('https://os.example.com');
+    for (const gate of ['', 'false', 'TRUE', 'typo']) {
+      vi.stubEnv('GALAXY_PUBLIC_ACCESS', gate);
+      expect(
+        trustedRequestOrigin(
+          headers('os.example.com', {
+            ...forwarded,
+            'x-galaxy-edge-proof': process.env.GALAXY_EDGE_PROOF!,
+          }),
+        ),
+      ).toBeNull();
+    }
+  });
+});
 
 describe('development host configuration', () => {
   it('normalizes defaults, URLs, ports, IPv4 addresses, and hostnames', () => {
@@ -90,6 +165,23 @@ describe('Host validation', () => {
     );
   });
 
+  it('accepts only an exact loopback HTTP API base', () => {
+    expect(internalApiUrl('http://127.0.0.1:3001/api/v1')).toBe(
+      'http://127.0.0.1:3001/api/v1',
+    );
+    for (const value of [
+      'https://127.0.0.1:3001/api/v1',
+      'http://api:3001/api/v1',
+      'http://127.0.0.1:3001/api/v1/',
+      'http://user:secret@127.0.0.1:3001/api/v1',
+      'http://127.0.0.1:3001/api/v1?target=elsewhere',
+      'http://127.0.0.1:3001/api/v1#fragment',
+    ])
+      expect(() => internalApiUrl(value)).toThrow(
+        'INTERNAL_API_URL must be an exact loopback HTTP API base',
+      );
+  });
+
   it('rejects unconfigured and malformed hosts', async () => {
     vi.stubEnv('NODE_ENV', 'development');
     expect((await request('external.example:3000')).status).toBe(400);
@@ -99,9 +191,10 @@ describe('Host validation', () => {
 
   it('uses only APP_PUBLIC_ORIGIN in production', async () => {
     vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('TRUST_PROXY', 'false');
     vi.stubEnv('APP_PUBLIC_ORIGIN', 'https://galaxy.example');
     vi.stubEnv('DEV_ALLOWED_ORIGINS', 'development.example');
-    expect((await request('galaxy.example')).status).not.toBe(400);
+    expect((await request('galaxy.example')).status).toBe(400);
     expect((await request('development.example')).status).toBe(400);
     expect((await request('localhost')).status).toBe(400);
   });

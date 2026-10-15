@@ -1,16 +1,25 @@
-import { ValidationPipe } from '@nestjs/common';
+import { RequestMethod, ValidationPipe } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { readEnvironment } from './config/env';
 import { HttpExceptionFilter } from './http-exception.filter';
 import { SecurityLogger } from './security-redaction';
+import { observeHttp } from './runtime-http';
+import {
+  deploymentAdmission,
+  DeploymentRequests,
+} from './deployment-admission';
 
 async function bootstrap() {
   const environment = readEnvironment();
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false,
     logger: new SecurityLogger({ json: true }),
   });
+  app.useBodyParser('json', { limit: '512kb' });
+  app.useBodyParser('urlencoded', { limit: '64kb', extended: false });
   if (environment.TRUST_PROXY)
     (
       app.getHttpAdapter().getInstance() as {
@@ -18,7 +27,13 @@ async function bootstrap() {
       }
     ).set('trust proxy', 'loopback');
 
-  app.setGlobalPrefix('api/v1');
+  app.setGlobalPrefix('api/v1', {
+    exclude: [
+      { path: 'mcp', method: RequestMethod.ALL },
+      { path: 'mcp/{*path}', method: RequestMethod.ALL },
+      { path: '.well-known/{*path}', method: RequestMethod.ALL },
+    ],
+  });
   app.useGlobalFilters(new HttpExceptionFilter());
   app.useGlobalPipes(
     new ValidationPipe({
@@ -28,6 +43,9 @@ async function bootstrap() {
     }),
   );
   app.enableShutdownHooks();
+  app.use(observeHttp);
+  app.use(deploymentAdmission);
+  app.useGlobalInterceptors(new DeploymentRequests());
   app.use(
     (
       _request: unknown,

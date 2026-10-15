@@ -1,7 +1,13 @@
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
+import { ProjectChatPolicy } from '../access-control/project-chat.policy';
+import { FileStorage } from '../files/file-storage';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma.service';
 import { InstallationService } from './installation.service';
@@ -13,7 +19,7 @@ const actor = {
   email: 'user@example.test',
   displayName: 'User',
   mustChangePassword: false,
-  permissions: [],
+  permissions: ['file.read', 'project.stage1.finance.read', 'estimate.read'],
   administrationScope: 'ORGANIZATION',
   managedDepartmentIds: [],
   administrationTier: 1,
@@ -34,6 +40,8 @@ function buildService() {
       prisma as unknown as PrismaService,
       { assertView: vi.fn() } as unknown as BusinessEntityPolicy,
       {} as InventoryService,
+      {} as ProjectChatPolicy,
+      {} as FileStorage,
     ),
   };
 }
@@ -95,6 +103,41 @@ describe('Installation operations', () => {
     });
     await expect(service.verifyPunch(actor, 'punch')).rejects.toBeInstanceOf(
       ForbiddenException,
+    );
+  });
+
+  it('rejects punch evidence attached only to another Project', async () => {
+    const { prisma, service } = buildService();
+    const findFirst = vi.fn(({ where }) =>
+      Promise.resolve(
+        where.attachments?.some?.projectId === 'other-project'
+          ? { id: 'file' }
+          : null,
+      ),
+    );
+    Object.assign(prisma, {
+      fileAsset: { findFirst },
+      punchItem: { ...prisma.punchItem, create: vi.fn() },
+    });
+    vi.spyOn(service, 'getWorkOrder').mockResolvedValue({
+      id: 'work-order',
+      projectId: 'project',
+    } as never);
+
+    await expect(
+      service.addPunch(actor, 'work-order', {
+        issue: 'Damage',
+        location: 'Room 1',
+        severity: 'HIGH',
+        evidenceFileId: '00000000-0000-4000-8000-000000000001',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          attachments: { some: { projectId: 'project' } },
+        }),
+      }),
     );
   });
 });

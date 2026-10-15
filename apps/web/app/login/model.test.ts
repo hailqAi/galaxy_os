@@ -116,3 +116,9 @@ describe('login submission', () => {
     expect(source).not.toMatch(/router\.(?:push|replace)\(password\)/i);
   });
 });
+it('permits chat-only navigation without inheriting dashboard or legacy Project permission', () => {
+  expect(permittedReturnTo('/work', [])).toBe('/work');
+  const path = '/projects/00000000-0000-4000-8000-000000000001/work';
+  expect(permittedReturnTo(path, [])).toBe(path);
+  expect(permittedReturnTo('/projects', [])).toBeNull();
+});

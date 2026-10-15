@@ -1,4 +1,29 @@
 import { NextRequest } from 'next/server';
+
+it.each([null, 503, 'malformed'])(
+  'reports unavailable API without falsely expiring authentication (%s)',
+  async (failure) => {
+    vi.stubGlobal(
+      'fetch',
+      failure === null
+        ? vi.fn().mockRejectedValue(new Error('offline'))
+        : vi
+            .fn()
+            .mockResolvedValue(
+              failure === 'malformed'
+                ? Response.json({ permissions: null })
+                : new Response(null, { status: Number(failure) }),
+            ),
+    );
+    const response = await proxy(
+      new NextRequest('http://localhost:3000/projects'),
+    );
+    expect(response.status).toBe(503);
+    expect(response.headers.get('location')).toBeNull();
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(await response.text()).toContain('Tạm thời');
+  },
+);
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { proxy } from './proxy';
 
@@ -121,6 +146,12 @@ describe('web CSP', () => {
 
   it('uses a unique nonce and no eval in production', async () => {
     vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('TRUST_PROXY', 'true');
+    vi.stubEnv('GALAXY_PUBLIC_ACCESS', 'true');
+    vi.stubEnv(
+      'GALAXY_EDGE_PROOF',
+      'synthetic-test-proof-with-at-least-32-bytes',
+    );
     vi.stubEnv('APP_PUBLIC_ORIGIN', 'https://galaxy.example');
     vi.stubEnv('DEV_ALLOWED_ORIGINS', 'development.example');
     vi.stubGlobal(
@@ -128,7 +159,14 @@ describe('web CSP', () => {
       vi.fn().mockResolvedValue(new Response(null, { status: 401 })),
     );
     const productionRequest = () =>
-      new NextRequest('https://galaxy.example/login');
+      new NextRequest('https://galaxy.example/login', {
+        headers: {
+          host: 'galaxy.example',
+          'x-forwarded-host': 'galaxy.example',
+          'x-forwarded-proto': 'https',
+          'x-galaxy-edge-proof': process.env.GALAXY_EDGE_PROOF!,
+        },
+      });
     const first = await proxy(productionRequest());
     const second = await proxy(productionRequest());
     const firstCsp = first.headers.get('content-security-policy')!;

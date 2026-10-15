@@ -1,3 +1,4 @@
+import { multipartFilename } from './filename';
 import {
   Body,
   Controller,
@@ -10,17 +11,36 @@ import {
   Post,
   Query,
   Res,
+  StreamableFile,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Actor, RequirePermission } from '../access-control/access.decorators';
 import { CurrentActor } from '../access-control/current-actor';
-import { FilesQuery, UpdateFileDto, UploadFileDto } from './files.dto';
+import {
+  FilesQuery,
+  FileVersionQuery,
+  UpdateFileDto,
+  UploadFileDto,
+} from './files.dto';
 import { FilesService } from './files.service';
+import { MultipartAdmissionInterceptor } from './multipart-admission.interceptor';
 type BinaryResponse = {
   setHeader(name: string, value: string): void;
-  send(data: Buffer): void;
+};
+const rfc5987Filename = (value: string) =>
+  encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+export const genericFileUploadLimits = {
+  fileSize: 10 * 1024 * 1024,
+  files: 1,
+  fields: 4,
+  fieldSize: 4 * 1024,
+  parts: 5,
+  headerPairs: 50,
 };
 @Controller('files')
 export class FilesController {
@@ -34,8 +54,13 @@ export class FilesController {
   @Post()
   @RequirePermission('file.upload')
   @UseInterceptors(
+    MultipartAdmissionInterceptor,
     FileInterceptor('file', {
-      limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+      limits: genericFileUploadLimits,
+      fileFilter: (_req, file, done) => {
+        file.originalname = multipartFilename(file.originalname);
+        done(null, true);
+      },
     }),
   )
   upload(
@@ -51,19 +76,42 @@ export class FilesController {
   ) {
     return this.files.get(a, id);
   }
-  @Get(':id/download') @RequirePermission('file.download') async download(
+  @Get(':id/preview')
+  @RequirePermission('file.read', 'file.download')
+  async preview(
     @Actor() a: CurrentActor,
     @Param('id', ParseUUIDPipe) id: string,
-    @Res() response: BinaryResponse,
-  ) {
-    const result = await this.files.download(a, id);
+    @Res({ passthrough: true }) response: BinaryResponse,
+    @Query() query: FileVersionQuery = {},
+  ): Promise<StreamableFile> {
+    const result = await this.files.preview(a, id, query.version);
     response.setHeader('Content-Type', result.file.mimeType);
     response.setHeader(
       'Content-Disposition',
-      `attachment; filename*=UTF-8''${encodeURIComponent(result.file.originalFilename)}`,
+      `inline; filename*=UTF-8''${rfc5987Filename(result.file.originalFilename)}`,
     );
-    response.setHeader('Content-Length', String(result.data.length));
-    response.send(result.data);
+    response.setHeader('Content-Length', String(result.file.sizeBytes));
+    return new StreamableFile(result.data);
+  }
+  @Get(':id/download') @RequirePermission('file.download') async download(
+    @Actor() a: CurrentActor,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res({ passthrough: true }) response: BinaryResponse,
+    @Query() query: FileVersionQuery = {},
+  ): Promise<StreamableFile> {
+    const result = await this.files.download(
+      a,
+      id,
+      'file.download',
+      query.version,
+    );
+    response.setHeader('Content-Type', result.file.mimeType);
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename*=UTF-8''${rfc5987Filename(result.file.originalFilename)}`,
+    );
+    response.setHeader('Content-Length', String(result.file.sizeBytes));
+    return new StreamableFile(result.data);
   }
   @Patch(':id') @RequirePermission('file.update') update(
     @Actor() a: CurrentActor,

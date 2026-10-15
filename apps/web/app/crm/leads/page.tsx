@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
@@ -30,6 +31,8 @@ type Page = {
 type Source = { id: string; name: string };
 
 export default function LeadsPage() {
+  const params = useSearchParams();
+  const active = params.get('active') === 'true';
   const router = useRouter();
   const [data, setData] = useState<Page>();
   const [sources, setSources] = useState<Source[]>([]);
@@ -46,6 +49,7 @@ export default function LeadsPage() {
         pageSize: '20',
         ...(search && { search }),
         ...(status && { status }),
+        ...(active && !status && { active: 'true' }),
         ...(sourceId && { sourceId }),
         ...(priority && { priority }),
       });
@@ -53,7 +57,7 @@ export default function LeadsPage() {
     } catch (error) {
       setMessage((error as Error).message);
     }
-  }, [page, priority, search, sourceId, status]);
+  }, [page, priority, search, sourceId, status, active]);
   useEffect(() => {
     const timeout = setTimeout(() => void load(), 0);
     return () => clearTimeout(timeout);
@@ -136,7 +140,9 @@ export default function LeadsPage() {
             value={status}
             onChange={(event) => setStatus(event.target.value)}
           >
-            <option value="">Tất cả trạng thái</option>
+            <option value="">
+              {active ? 'Đang xử lý (từ Tổng quan)' : 'Tất cả trạng thái'}
+            </option>
             {[
               'NEW',
               'ASSIGNED',

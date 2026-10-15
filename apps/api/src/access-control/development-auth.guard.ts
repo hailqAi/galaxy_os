@@ -9,7 +9,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { readEnvironment } from '../config/env';
 import { PrismaService } from '../prisma.service';
-import { IS_PUBLIC } from './access.decorators';
+import { IS_PUBLIC, ALLOW_EXTERNAL } from './access.decorators';
 import { ALLOW_PASSWORD_CHANGE } from './access.decorators';
 import { CurrentActor } from './current-actor';
 import { createHash } from 'node:crypto';
@@ -163,15 +163,27 @@ export class DevelopmentAuthGuard implements CanActivate {
             assignment.organizationId === membership.organizationId,
         )
         .flatMap((assignment) =>
-          assignment.role.permissions.map(({ permission }) => permission.code),
+          assignment.role.permissions
+            .filter(
+              ({ permission }) =>
+                !permission.code.startsWith('system.') ||
+                assignment.scopeType === 'SYSTEM',
+            )
+            .map(({ permission }) => permission.code),
         ),
     );
     const assignments = user.roles.filter(
       ({ organizationId }) => organizationId === membership.organizationId,
     );
-    const managedDepartmentIds = membership.managedDepartments.map(
-      ({ departmentId }) => departmentId,
+    const managedDepartmentScopes = new Map(
+      membership.managedDepartments.map(({ departmentId }) => [
+        departmentId,
+        [departmentId],
+      ]),
     );
+    const managedDepartmentIds = [
+      ...new Set([...managedDepartmentScopes.values()].flat()),
+    ];
     if (
       membership.managedDepartments.some(
         ({ includeChildren }) => includeChildren,
@@ -183,15 +195,24 @@ export class DevelopmentAuthGuard implements CanActivate {
       });
       for (let changed = true; changed; ) {
         changed = false;
-        for (const unit of units)
+        for (const [departmentId, ids] of managedDepartmentScopes)
           if (
-            unit.parentId &&
-            managedDepartmentIds.includes(unit.parentId) &&
-            !managedDepartmentIds.includes(unit.id)
-          ) {
-            managedDepartmentIds.push(unit.id);
-            changed = true;
-          }
+            membership.managedDepartments.find(
+              (managed) =>
+                managed.departmentId === departmentId &&
+                managed.includeChildren,
+            )
+          )
+            for (const unit of units)
+              if (
+                unit.parentId &&
+                ids.includes(unit.parentId) &&
+                !ids.includes(unit.id)
+              ) {
+                ids.push(unit.id);
+                managedDepartmentIds.push(unit.id);
+                changed = true;
+              }
       }
     }
     const actor: CurrentActor = {
@@ -199,6 +220,7 @@ export class DevelopmentAuthGuard implements CanActivate {
       organizationId: membership.organizationId,
       organizationMembershipId: membership.id,
       sessionId: sessionValid ? session.id : undefined,
+      membershipKind: membership.kind,
       email: user.email,
       displayName: user.displayName,
       mustChangePassword: sessionValid
@@ -208,10 +230,16 @@ export class DevelopmentAuthGuard implements CanActivate {
       permissionSources: assignments.flatMap((assignment) =>
         assignment.role.permissions.map(({ permission }) => ({
           permission: permission.code,
+          assignmentId: assignment.id,
+          administrationTier: assignment.role.administrationTier,
           roleId: assignment.role.id,
           roleName: assignment.role.name,
           scopeType: assignment.scopeType,
           departmentId: assignment.departmentId,
+          managedDepartmentIds:
+            assignment.scopeType === 'DEPARTMENT' && assignment.departmentId
+              ? (managedDepartmentScopes.get(assignment.departmentId) ?? [])
+              : [],
         })),
       ),
       administrationScope: assignments.some(
@@ -235,6 +263,20 @@ export class DevelopmentAuthGuard implements CanActivate {
           .map(({ role }) => role.administrationTier),
       ),
     };
+    if (membership.kind === 'EXTERNAL') {
+      if (
+        !this.reflector.getAllAndOverride<boolean>(ALLOW_EXTERNAL, [
+          context.getHandler(),
+          context.getClass(),
+        ])
+      )
+        throw new ForbiddenException('Chỉ được truy cập phạm vi khách đã cấp');
+      actor.permissions = [];
+      actor.permissionSources = [];
+      actor.administrationScope = 'SELF';
+      actor.administrationTier = 0;
+      actor.managedDepartmentIds = [];
+    }
     if (
       actor.mustChangePassword &&
       !this.reflector.getAllAndOverride<boolean>(ALLOW_PASSWORD_CHANGE, [

@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsDateString,
   IsIn,
@@ -11,8 +11,10 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { PartialType } from '@nestjs/swagger';
-export class CreateProjectDto {
+import { OmitType, PartialType } from '@nestjs/swagger';
+import { SimpleInitiationDto } from './project-stage-one.dto';
+
+class ProjectWriteDto {
   @IsString() @Length(1, 50) code!: string;
   @IsString() @Length(1, 200) name!: string;
   @IsUUID() customerId!: string;
@@ -34,6 +36,9 @@ export class CreateProjectDto {
     | 'SURVEY'
     | 'REQUIREMENT'
     | 'DESIGN';
+  @IsOptional()
+  @IsIn(['STAGE_1', 'STAGE_2', 'STAGE_3', 'STAGE_4', 'STAGE_5'])
+  entryStage?: 'STAGE_1' | 'STAGE_2' | 'STAGE_3' | 'STAGE_4' | 'STAGE_5';
   @IsOptional() @IsIn(['LOW', 'NORMAL', 'HIGH', 'URGENT']) priority?:
     | 'LOW'
     | 'NORMAL'
@@ -61,7 +66,25 @@ export class CreateProjectDto {
   @Max(100)
   progressPercentage?: number;
 }
-export class UpdateProjectDto extends PartialType(CreateProjectDto) {}
+
+export class CreateProjectDto extends SimpleInitiationDto {}
+
+export class UpdateProjectDto extends PartialType(
+  OmitType(ProjectWriteDto, ['entryStage'] as const),
+) {}
+
+export class DeleteProjectDto {
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @Length(1, 50)
+  code!: string;
+
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @Length(1, 1000)
+  reason!: string;
+}
+
 export class ProjectMemberDto {
   @IsUUID() userId!: string;
   @IsOptional() @IsString() @Length(1, 100) role?: string;
@@ -101,4 +124,18 @@ export class ChangeProjectPhaseDto {
     | 'HANDOVER'
     | 'WARRANTY'
     | 'AFTER_SALES';
+}
+
+export class ProjectStageDecisionDto {
+  @IsIn(['NOT_APPLICABLE', 'BYPASSED_WITH_APPROVAL'])
+  decision!: 'NOT_APPLICABLE' | 'BYPASSED_WITH_APPROVAL';
+
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @Length(1, 2000)
+  reason!: string;
+
+  @IsOptional()
+  @IsUUID()
+  approvalId?: string;
 }

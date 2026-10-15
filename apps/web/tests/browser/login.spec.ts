@@ -19,9 +19,13 @@ test('hydrates Login and toggles the password without submitting', async ({
   });
   await page.goto('/login');
   const password = page.getByLabel('Mật khẩu', { exact: true });
-  await password.fill('value-stays-present');
   const toggle = page.getByRole('button', { name: 'Hiện mật khẩu' });
   await expect(toggle).toHaveAttribute('type', 'button');
+  await toggle.click();
+  await expect(password).toHaveAttribute('type', 'text');
+  await page.getByRole('button', { name: 'Ẩn mật khẩu' }).click();
+  await expect(password).toHaveAttribute('type', 'password');
+  await password.fill('value-stays-present');
   await toggle.click();
   await expect(password).toHaveAttribute('type', 'text');
   await expect(password).toHaveValue('value-stays-present');
@@ -82,7 +86,9 @@ test('stores the session, loads CurrentActor, redirects, and logs out', async ({
   await page.getByLabel('Mật khẩu', { exact: true }).fill('fixture-password');
   await page.getByRole('button', { name: 'Đăng nhập' }).click();
   await expect(page).toHaveURL('http://127.0.0.1:3000/');
-  await expect(page.getByRole('link', { name: 'Browser Test' })).toBeVisible();
+  await expect(
+    page.getByRole('link', { name: 'Browser Test ORGANIZATION', exact: true }),
+  ).toBeVisible();
   const cookies = await context.cookies();
   expect(
     cookies.find((cookie) => cookie.name === 'galaxy_session'),

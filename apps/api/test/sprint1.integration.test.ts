@@ -12,9 +12,11 @@ import {
   vi,
 } from 'vitest';
 import { AppModule } from '../src/app.module';
+import { PrismaService } from '../src/prisma.service';
+import { TasksService } from '../src/tasks/tasks.service';
+import { assertG00Isolation } from '../scripts/g00-isolated-environment.mjs';
 
-process.env.DATABASE_URL ??=
-  'postgresql://galaxy:galaxy_local@localhost:5432/galaxy_os?schema=public';
+assertG00Isolation();
 process.env.PASSWORD_BCRYPT_ROUNDS = '4';
 
 describe.sequential('Sprint 1 API integration', () => {
@@ -167,6 +169,338 @@ describe.sequential('Sprint 1 API integration', () => {
     await request(app.getHttpServer())
       .get('/api/v1/organization')
       .set('x-galaxy-dev-auth', process.env.DEV_AUTH_USER_EMAIL!);
+  });
+
+  it('keeps central ChatGPT metadata and checks system-only, including after assignment revocation', async () => {
+    const endpoint = '/api/v1/system/settings/chatgpt-connection';
+    const { randomBytes, createHash } = await import('node:crypto');
+    const oldAdminCredential =
+      await prisma.passwordCredential.findUniqueOrThrow({
+        where: { userId: adminId },
+      });
+    await prisma.passwordCredential.update({
+      where: { userId: adminId },
+      data: { mustChangePassword: false },
+    });
+    const adminToken = randomBytes(32).toString('hex');
+    const adminMembership =
+      await prisma.organizationMembership.findFirstOrThrow({
+        where: { userId: adminId, organizationId },
+      });
+    const adminSession = await prisma.session.create({
+      data: {
+        userId: adminId,
+        organizationMembershipId: adminMembership.id,
+        tokenHash: createHash('sha256').update(adminToken).digest('hex'),
+        expiresAt: new Date(Date.now() + 3600000),
+        lastSeenAt: new Date(),
+      },
+    });
+    const checked = await request(app.getHttpServer())
+      .get(endpoint)
+      .set('Cookie', `${process.env.SESSION_COOKIE_NAME}=${adminToken}`)
+      .expect(200);
+    expect(checked.body.tools).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'task_list',
+          sideEffect: 'READ',
+          status: 'DISABLED',
+          reason: 'CHATGPT_NOT_READY',
+        }),
+      ]),
+    );
+    expect(checked.body).toMatchObject({
+      status: 'AUTH_NOT_STARTED',
+      appEligibility: 'NOT_VERIFIED',
+      inferenceGrant: 'NOT_GRANTED',
+      providerScope: 'OWNER_ONLY_STAFF_UNCONFIRMED',
+      identity: null,
+      models: [],
+      canConnect: false,
+      canDisconnect: false,
+    });
+    const permissions = await prisma.permission.findMany({
+      where: {
+        code: { in: ['system.settings.read', 'system.settings.update'] },
+      },
+    });
+    const assignment = await prisma.userRole.findFirstOrThrow({
+      where: { userId: restrictedId, roleId: restrictedRoleId },
+    });
+    const membership = await prisma.organizationMembership.findFirstOrThrow({
+      where: { userId: restrictedId, organizationId },
+    });
+    const scopedDepartment = await prisma.department.findFirstOrThrow({
+      where: { organizationId, status: 'active' },
+    });
+    const token = randomBytes(32).toString('hex');
+    const session = await prisma.session.create({
+      data: {
+        userId: restrictedId,
+        organizationMembershipId: membership.id,
+        tokenHash: createHash('sha256').update(token).digest('hex'),
+        expiresAt: new Date(Date.now() + 3600000),
+        lastSeenAt: new Date(),
+      },
+    });
+    const unrelatedSystemRole = await prisma.role.create({
+      data: {
+        organizationId,
+        code: `chatgpt-unrelated-${Date.now()}`,
+        name: 'Unrelated SYSTEM fixture',
+        permissions: {
+          create: { permission: { connect: { code: 'organization.read' } } },
+        },
+      },
+    });
+    const unrelatedSystemAssignment = await prisma.userRole.create({
+      data: {
+        organizationId,
+        userId: restrictedId,
+        roleId: unrelatedSystemRole.id,
+        scopeType: 'SYSTEM',
+      },
+    });
+    const cookie = `${process.env.SESSION_COOKIE_NAME}=${token}`;
+    try {
+      await prisma.rolePermission.createMany({
+        data: permissions.map((permission) => ({
+          roleId: restrictedRoleId,
+          permissionId: permission.id,
+        })),
+      });
+      for (const scopeType of ['SELF', 'DEPARTMENT', 'ORGANIZATION'] as const) {
+        await prisma.userRole.update({
+          where: { id: assignment.id },
+          data: {
+            scopeType,
+            departmentId:
+              scopeType === 'DEPARTMENT' ? scopedDepartment.id : null,
+          },
+        });
+        await request(app.getHttpServer())
+          .get(endpoint)
+          .set('Cookie', cookie)
+          .expect(403);
+        await request(app.getHttpServer())
+          .post(endpoint)
+          .set('Cookie', cookie)
+          .send({})
+          .expect(403);
+      }
+      await prisma.userRole.update({
+        where: { id: assignment.id },
+        data: { scopeType: 'SYSTEM' },
+      });
+      const result = await request(app.getHttpServer())
+        .post(endpoint)
+        .set('Cookie', cookie)
+        .send({})
+        .expect(409);
+      expect(result.body.message).toBe('CHATGPT_OWNER_ONLY');
+      await request(app.getHttpServer())
+        .post(endpoint + '/begin')
+        .set('Cookie', cookie)
+        .send({})
+        .expect(409);
+      await prisma.userRole.update({
+        where: { id: assignment.id },
+        data: { scopeType: 'ORGANIZATION' },
+      });
+      await request(app.getHttpServer())
+        .get(endpoint)
+        .set('Cookie', cookie)
+        .expect(403);
+      await request(app.getHttpServer())
+        .post(endpoint)
+        .set('Cookie', cookie)
+        .send({})
+        .expect(403);
+    } finally {
+      await prisma.session.delete({ where: { id: adminSession.id } });
+      await prisma.passwordCredential.update({
+        where: { userId: adminId },
+        data: { mustChangePassword: oldAdminCredential.mustChangePassword },
+      });
+      await prisma.userRole.delete({
+        where: { id: unrelatedSystemAssignment.id },
+      });
+      await prisma.rolePermission.deleteMany({
+        where: { roleId: unrelatedSystemRole.id },
+      });
+      await prisma.role.delete({ where: { id: unrelatedSystemRole.id } });
+      await prisma.session.delete({ where: { id: session.id } });
+      await prisma.userRole.update({
+        where: { id: assignment.id },
+        data: {
+          scopeType: assignment.scopeType,
+          departmentId: assignment.departmentId,
+        },
+      });
+      await prisma.rolePermission.deleteMany({
+        where: {
+          roleId: restrictedRoleId,
+          permissionId: { in: permissions.map((p) => p.id) },
+        },
+      });
+    }
+  });
+
+  it('reads paged tasks and complete status totals from the same domain query', async () => {
+    const title = `tracker-${crypto.randomUUID()}`;
+    try {
+      await prisma.task.createMany({
+        data: Array.from({ length: 125 }, (_, i) => ({
+          organizationId,
+          title,
+          createdBy: adminId,
+          updatedBy: adminId,
+          status: i < 110 ? ('TODO' as const) : ('DONE' as const),
+        })),
+      });
+      const actor = await request(app.getHttpServer())
+        .get('/api/v1/me')
+        .set('x-galaxy-dev-auth', 'admin@galaxy.local')
+        .expect(200);
+      // Vitest/esbuild does not emit DTO design metadata. Exercise the real
+      // domain + database here; browser acceptance uses the compiled HTTP route.
+      const service = app.get(TasksService);
+      const response = await service.list(actor.body, {
+        search: title,
+        page: 3,
+        pageSize: 50,
+      });
+      expect(response).toMatchObject({
+        total: 125,
+        totalPages: 3,
+        statusCounts: { TODO: 110, DONE: 15 },
+        computedAt: expect.any(String),
+      });
+      expect(response.items).toHaveLength(25);
+      const open = await service.list(actor.body, {
+        search: title,
+        open: true,
+        page: 1,
+        pageSize: 50,
+      });
+      expect(open).toMatchObject({
+        total: 110,
+        statusCounts: { TODO: 110 },
+      });
+      expect(open.items).toHaveLength(50);
+    } finally {
+      await prisma.task.deleteMany({
+        where: { organizationId, title, createdBy: adminId },
+      });
+    }
+  });
+
+  it('updates task content, assignees and history together without partial writes', async () => {
+    const task = await prisma.task.create({
+      data: {
+        organizationId,
+        title: 'Atomic task update',
+        createdBy: adminId,
+        updatedBy: adminId,
+      },
+    });
+    try {
+      const actor = await request(app.getHttpServer())
+        .get('/api/v1/me')
+        .set('x-galaxy-dev-auth', 'admin@galaxy.local')
+        .expect(200);
+      const service = app.get(TasksService);
+      await expect(
+        service.update(
+          { ...actor.body, permissions: ['task.read', 'task.update'] },
+          task.id,
+          { title: 'Must not bypass assignment permission', assigneeIds: [] },
+        ),
+      ).rejects.toThrow('Task assignment permission is required');
+      await expect(
+        service.update(actor.body, task.id, {
+          title: 'Must not persist',
+          assigneeIds: [crypto.randomUUID()],
+        }),
+      ).rejects.toThrow('Assignable user not found');
+      expect(
+        await prisma.task.findUniqueOrThrow({ where: { id: task.id } }),
+      ).toMatchObject({ title: task.title, version: task.version });
+
+      const updated = await service.update(actor.body, task.id, {
+        title: 'Saved with assignment',
+        assigneeIds: [restrictedId],
+      });
+      expect(updated).toMatchObject({
+        title: 'Saved with assignment',
+        version: task.version + 1,
+        assignees: [{ userId: restrictedId }],
+      });
+      expect(
+        await prisma.activity.findMany({
+          where: { organizationId, entityType: 'Task', entityId: task.id },
+          orderBy: { createdAt: 'asc' },
+        }),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ event: 'TASK_ASSIGNED' }),
+          expect.objectContaining({
+            event: 'TASK_UPDATED',
+            actorId: adminId,
+            metadata: {
+              fields: ['title', 'assigneeIds'],
+              fromVersion: task.version,
+              toVersion: task.version + 1,
+            },
+          }),
+        ]),
+      );
+      const failingAudit = new TasksService(
+        prisma.$extends({
+          query: {
+            activity: {
+              create({ args, query }) {
+                if (args.data.event === 'TASK_UPDATED')
+                  throw new Error('Injected audit failure');
+                return query(args);
+              },
+            },
+          },
+        }) as unknown as PrismaService,
+      );
+      await expect(
+        failingAudit.update(actor.body, task.id, {
+          title: 'Must roll back',
+          assigneeIds: [adminId],
+        }),
+      ).rejects.toThrow('Injected audit failure');
+      expect(await service.get(actor.body, task.id)).toMatchObject({
+        title: updated.title,
+        version: updated.version,
+        assignees: [{ userId: restrictedId }],
+        activity: expect.any(Array),
+      });
+      expect(
+        await prisma.activity.count({
+          where: { organizationId, entityType: 'Task', entityId: task.id },
+        }),
+      ).toBe(2);
+      expect(
+        await prisma.notification.findMany({
+          where: { organizationId, entityType: 'Task', entityId: task.id },
+        }),
+      ).toMatchObject([{ recipientId: restrictedId }]);
+    } finally {
+      await prisma.notification.deleteMany({
+        where: { organizationId, entityType: 'Task', entityId: task.id },
+      });
+      await prisma.activity.deleteMany({
+        where: { organizationId, entityType: 'Task', entityId: task.id },
+      });
+      await prisma.taskAssignee.deleteMany({ where: { taskId: task.id } });
+      await prisma.task.delete({ where: { id: task.id } });
+    }
   });
 
   it('denies organization update and department creation without permission', async () => {

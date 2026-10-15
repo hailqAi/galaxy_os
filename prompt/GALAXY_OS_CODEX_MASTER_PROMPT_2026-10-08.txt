@@ -1,0 +1,437 @@
+GALAXY OS — PROMPT TRIỂN KHAI, SỬA RUNTIME, CHUẨN HÓA P04 VÀ AI LÀM VIỆC
+Ngày: 08/10/2026. Múi giờ nghiệp vụ: Asia/Ho_Chi_Minh.
+Đích nhận: Codex đang có quyền làm việc với repository và WSL thực tế của Galaxy OS.
+
+ĐỌC TOÀN BỘ TRƯỚC KHI THỰC HIỆN
+
+Tôi cần bạn sửa hệ thống và bàn giao bản chạy thực tế tại địa chỉ đang dùng. Hãy thực hiện công việc trong phạm vi được phép, không chỉ tư vấn hoặc gửi lại kế hoạch. Tiếp tục trên code đã có; kiểm chứng trạng thái hiện tại trước khi sửa. Phân tách công việc thành các mốc có thể triển khai và nghiệm thu độc lập. Không dồn mọi thay đổi thành một lần phát hành lớn.
+
+Mục tiêu:
+1. Người dùng mở lại Codex và vận hành Galaxy OS ổn định.
+2. Bản đã kiểm thử phải được phát hành đúng vào ứng dụng người dùng đang mở.
+3. Giao diện chat theo đúng năm PDF P04 mới.
+4. AI có thể hiểu yêu cầu, tìm hồ sơ, gọi công cụ, tạo/sửa bản nháp và file, theo dõi công việc, tiếp tục tác vụ sau mất kết nối.
+5. Một Project là không gian hồ sơ, hội thoại, nhiệm vụ, quyết định và kết quả riêng; gọi “todo list”/“project tracker” là lấy được dữ liệu thật.
+6. Có kiến trúc tích hợp công cụ/plugin và skill có kiểm soát, có thể bổ sung OpenAI trả phí sau mà không xây lại hệ thống.
+
+Phạm vi này cho phép sửa code, test, tạo commit local và phát hành local theo cơ chế đã có, bảo toàn dữ liệu. Không cho phép push/merge/remote deploy, mở public domain, mua credit, auto-topup, tự bật paid fallback hoặc vượt approval/sandbox của môi trường. Nếu một thao tác bị automatic approval review từ chối, không đổi đường đi để thực hiện cùng tác động. Làm hết phần chuẩn bị an toàn, rồi trình đúng thao tác, phạm vi ảnh hưởng, bằng chứng, rollback và lý do cần phê duyệt. Phần bị chặn không làm dừng các phần độc lập vẫn được phép.
+
+======================================================================
+01. CĂN CỨ VÀ HIỆN TRẠNG ĐƯỢC BÁO — PHẢI XÁC MINH LẠI
+======================================================================
+
+Repository: /home/galaxy_os
+Worktree đầu mối: /home/galaxy_os/.worktrees/m2-a-20260928
+Branch được báo: m2/project-chat-20260928
+Thiết kế local: /home/galaxy_os/figma
+Figma: https://www.figma.com/design/t2kz5OnqTd8e3j29NBRCnL/Galaxy-Os?node-id=11-4
+
+Báo cáo mới nhất của người dùng thay thế mốc “code chưa commit”:
+- CODE_SHA / TESTED_SHA: 0738358ed153195a8b68927945875e703eb3ae41
+- TESTED_TREE: f51d35d735efd236ce751f18fdb332f5d7e76892
+- DOCS_COMMIT_SHA: 7b1408482adc059fa1d439b71509f8e2505be086
+- Candidate đã build: local-a9b073642935; CHƯA DEPLOYED tại thời điểm báo cáo.
+- Main đang chạy: local-a0429faf5733.
+- Git được báo sạch, không push/merge.
+- API 1370, Web 567, Edge 5, document 1, scripts 59 đạt theo báo cáo.
+- Chrome fixture/artifact đạt ở các lượt riêng; không đồng nghĩa main/vendor đã nghiệm thu.
+- localhost và 192.168.1.80:3000 được báo health tốt; phải kiểm IP hiện tại.
+
+Đọc trước:
+- docs/galaxy-os/milestones/M3/ui-figma/FIVE-PDFS-20261006.md
+- docs/galaxy-os/handoffs/2026-10-06-five-pdfs-project-tools.md
+- AGENTS.md và hướng dẫn runtime/release áp dụng thực tế trong repository.
+- Bản thiết kế quy trình nghiệp vụ tổng thể v0.2 và các quyết định mới hơn có liên quan.
+
+Kiểm read-only: branch, HEAD, staged/unstaged/untracked, commit graph, tree, release manifest, artifact đang phục vụ, PID/owner/cgroup/command của process. Nếu có code mới hơn thì bảo toàn và đánh giá delta; không tự checkout về SHA trong prompt. Không reset, clean, stash, git add toàn repo hoặc làm mất thay đổi của người khác.
+
+Phân biệt 4 thứ trong mọi báo cáo: CODE_SHA, TESTED_SHA/TESTED_TREE, ARTIFACT_DIGEST, DEPLOYED_RELEASE. Digest không phải Git SHA. Commit docs sau code không tự làm code đã test thành chưa test; phải chứng minh cây code nào được build và chạy.
+
+======================================================================
+02. CỐT LÕI NGHIỆP VỤ PHẢI GIỮ
+======================================================================
+
+Một Project/mã hồ sơ xuyên suốt. Tiềm năng/đã ký là các góc theo dõi của cùng hồ sơ; chuyển qua lại không xóa chat/file/lịch sử/nghĩa vụ. Một khách có hai công trình vẫn là hai Project riêng.
+
+Giữ đủ 12 giai đoạn: Tiềm năng → Khảo sát/yêu cầu → Thiết kế → Lựa chọn → Báo giá → Hợp đồng/phụ lục → Thu tiền/công nợ → Đặt hàng → Sản xuất/logistics → Kho/giao hàng → Thi công/lắp đặt → Nghiệm thu/bàn giao/bảo hành.
+
+Bốn nhóm dùng chung nguồn Project theo quyền: Tư vấn & báo giá; Hợp đồng & tài chính; Cung ứng & giao hàng; Thi công & hậu mãi. Không tách thành bốn bộ nhớ hoặc buộc tuần tự cứng.
+
+Task có người chịu trách nhiệm, thời hạn, kết quả, nguồn, trạng thái và lịch sử. Hồ sơ quan trọng giữ phiên bản. AI-generated/draft/confirmed/approved là các loại khác nhau. AI không tự ký, duyệt, ghi tiền, đặt hàng, nghiệm thu hoặc phát hành cho khách thay người có thẩm quyền.
+
+Tách ba căn cứ: nghiệp vụ đã chốt; source/test thực tế; thiết kế trình bày. PDF không chứng minh API tồn tại. Code có lỗi không trở thành quy tắc đúng. Mâu thuẫn phải ghi rõ.
+
+======================================================================
+03. BA VẤN ĐỀ RIÊNG CẦN CHẨN ĐOÁN
+======================================================================
+
+A. Ảnh khởi động Codex:
+“Background server has incompatible feature settings”
+“This session requires api_key_model_discovery to be enabled”
+Ảnh liệt kê api_key_model_discovery=true, auth_elicitation=true, code_mode_host=true, mcp_oauth_refresh_coordination=false; có cảnh báo restart có thể ảnh hưởng client và việc đang chạy.
+Các lựa chọn: “Run without daemon this time”; “Restart with these settings”; “Cancel”.
+
+Đây là thông báo về background server Codex. Không coi nó là lỗi API key hoặc D-Bus của Galaxy OS. Người dùng có thể chọn “Run without daemon this time” cho phiên hiện tại theo UI đã có; không tự bịa cờ CLI tương đương. Để xử lý bền vững: kiểm phiên bản client/server, executable thực tế, cấu hình hiệu lực và phiên đang dùng daemon. Chỉ đồng bộ cấu hình/khởi động lại daemon qua cơ chế được hỗ trợ sau khi xác định ảnh hưởng. Không chép bốn cờ vào global config một cách máy móc; không tắt cơ chế approval. Không gọi lỗi này là đã sửa chỉ vì đóng cửa sổ cảnh báo.
+
+B. Lệnh pnpm dev của Galaxy OS:
+pnpm dev → python3 scripts/local-runtime-entry.py up
+systemctl --user show galaxy-os-api.service --property=ActiveState,MainPID,ControlGroup --no-pager
+Failed to connect to bus: No such file or directory
+
+Log chứng minh lệnh điều khiển không nối được user bus; chưa chứng minh API/Web process chết. Điều tra đúng owner/session/distro và socket. Không tự kết luận do venv, sai API key, lỗi Next.js hoặc cần tạo D-Bus mới.
+
+C. Người dùng không thấy thiết kế/chức năng mới:
+Candidate local-a9b073642935 chưa deployed, trong khi main vẫn local-a0429faf5733 theo báo cáo. Trước hết đối chiếu release đang phục vụ. Chỉ điều tra browser cache/service worker/proxy sau khi chứng minh artifact mới thật sự đã chạy. Không yêu cầu người dùng xóa cache để thay cho việc phát hành.
+
+======================================================================
+04. GÓI R0 — KHÔI PHỤC ĐIỀU KHIỂN RUNTIME VÀ PHÁT HÀNH BẢN ĐÃ CÓ
+======================================================================
+
+R0.1. Điều tra không phá hủy:
+- Xác định distro WSL, Linux UID/owner hiện tại và owner runtime thực tế; không hard-code UID hoặc IP.
+- Kiểm PID 1, trạng thái systemd, user manager đang tồn tại, login session và runtime directory của đúng UID.
+- Chỉ đọc các biến cần thiết như XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS; không dump toàn env hoặc secret.
+- Kiểm socket liên quan có tồn tại, loại file, owner, permissions, process sở hữu; xác định biến môi trường thiếu/sai hay manager/socket thật sự không còn.
+- Kiểm Windows keeper/task đang dùng owner và distro nào; đọc cấu hình liên quan, không thay toàn bộ lịch chạy.
+- Đọc unit/template/drop-in, ExecStart, WorkingDirectory, release pointer, dependencies và journal trong khoảng cutover lỗi.
+- Kiểm ai đang giữ 3000/3001 và đường đi localhost/LAN → edge → web/api → DB; giữ galaxy-edge.service.
+- Xác định cụ thể template unit đã lỗi ở field/cú pháp/instance/substitution nào. Sửa nguồn sinh template; kiểm bằng validator phù hợp của systemd và bản systemd hiện có trước khi dùng lại.
+
+R0.2. Chọn sửa tối thiểu theo bằng chứng:
+- Nếu socket/manager đúng đang sống, sửa cách entrypoint nhận môi trường/đúng owner để nối chính manager đó. Chỉ đặt địa chỉ sau khi xác minh; không export mù hoặc tạo socket/directory giả.
+- Nếu mất session/manager, chuẩn bị phương án phục hồi qua cơ chế login/systemd/WSL được hỗ trợ, nêu rõ service ngoài Galaxy có thể chịu ảnh hưởng.
+- Automatic approval review từng từ chối D-Bus tạm vì tác động vượt hai service và chưa rõ cleanup. Không dùng dbus-run-session, bus riêng, thay socket, đổi namespace hoặc wrapper chỉ để làm lại tác động đã bị từ chối. Không tự restart user@UID, terminate-user, bật linger, sửa PAM hay shutdown WSL để thử vận may.
+- Nếu cần tác động rộng, trước tiên hoàn thành chẩn đoán, bản sửa, kiểm template và kế hoạch phục hồi; rồi xin phê duyệt cụ thể ở bước cuối theo cơ chế cho phép. Không coi prompt này là phê duyệt blanket cho user manager.
+- local:status phải phân biệt APP_SERVING/APP_DOWN với CONTROL_PLANE_UNAVAILABLE; không báo khỏe toàn bộ khi control plane chết, cũng không báo app chết chỉ vì systemctl không truy cập được.
+- Các lệnh local:up/status/logs/stop phải cho lỗi có thể hành động, không che exit code thất bại. Giữ quy ước pnpm dev hiện có trừ khi có lý do được ghi rõ; không biến nó thành next dev tạm.
+
+R0.3. Cutover có kiểm soát:
+- Xác minh candidate tồn tại, provenance khớp source/test, migration tương thích, config/secret được tham chiếu đúng, static assets đủ và rollback khả dụng.
+- Nếu candidate cũ không còn hợp lệ, build lại từ cây source đã xác minh; không tự nhận candidate cũ là bản cuối.
+- Bảo toàn DB, uploads và hai binary thiếu chưa được xác nhận phục hồi. Không seed/reset main DB, tạo file rỗng hoặc xóa record để che thiếu.
+- Phát hành bằng runtime/release mechanism chính thức hiện hữu. Không tranh cổng 3000/3001, không thay app chính bằng process của agent; cổng fixture không là địa chỉ làm việc hằng ngày.
+- Readiness phải kiểm đường web/api chính và version tương thích, không chỉ TCP/HTTP 200.
+- Nếu thất bại, rollback app có bằng chứng. Migration không đảo ngược được phải có kế hoạch dữ liệu riêng trước cutover; rollback code không được giả là rollback DB.
+- Sau cutover: kiểm release thật qua localhost và LAN hiện tại; mở Chrome đúng origin, đúng Project đang dùng, không chỉ trang fixture. Đối chiếu UI mới và build identity.
+- Thêm hoặc tái sử dụng “Phiên bản đang chạy” trong trang thông tin hệ thống/admin và version endpoint nội bộ: release, code SHA, build time, API/Web version. Không đặt bảng chẩn đoán giữa chat.
+- Kiểm phục hồi sau mở terminal/đăng nhập lại; các bài restart WSL/Windows chỉ thực hiện trong phạm vi maintenance được phép. Nếu chưa chạy thì ghi NOT_RUN.
+
+Mốc R0 phải báo riêng: control plane đã khôi phục hay còn chặn; release nào người dùng thật sự thấy. Không chờ xây hết tính năng AI mới mới đưa bản UI đã đạt lên main.
+
+======================================================================
+05. GÓI UI — BÁM ĐÚNG NĂM PDF P04
+======================================================================
+
+Dùng bản mới nhất của đúng năm file; hậu tố (1) chỉ có thể là bản sao tải xuống, cần đối chiếu nội dung/hash, không suy từ tên:
+1. P04_Main_Workspace_Empty_State.pdf
+2. P04_Main_Workspace_Conversation_Selected.pdf
+3. P04_Main_Workspace_AI_Mode_Direct.pdf
+4. P04_Mobile_Chat_Screen.pdf
+5. P04_Error_And_Provider_States_Exploration.pdf
+
+Đọc text và render hình. Text extraction PDF có thể lỗi font tiếng Việt; lấy hình gốc để đối chiếu chữ/bố cục, không chép nguyên text lỗi vào UI. Không dùng PDF làm background.
+
+Yêu cầu nhìn thấy:
+- Empty: sidebar navy; cột hội thoại với bốn nhóm dạng 2×2, search/list; trung tâm empty state và CTA; cột phải model/nguồn/lịch sử theo quyền.
+- Selected: cùng cấu trúc; tin nhắn, câu trả lời, thẻ so sánh và citation ở GIỮA; composer ở đáy vùng hội thoại. Cột phải không biến thành một khung AI chat thứ hai.
+- Direct AI: sau sidebar chính là danh sách Project; hội thoại giữa; lịch sử phiên của Project đang chọn bên phải. Giữ Project đang chọn rõ ràng; hoạt động kể cả Project có 0 phòng nhóm.
+- Mobile: một cột, header quay lại/tên cuộc trao đổi/menu; bubble và thẻ nguồn dễ đọc; nguồn/công cụ gần composer; hỗ trợ bàn phím, safe area, upload và cuộn. Không co nguyên desktop vào màn nhỏ.
+- Error/provider PDF: đây là thư viện trạng thái. Chỉ hiện lỗi/loading/read-only phù hợp tình huống; quản trị provider/logs ở nơi có quyền. Không xếp tất cả lỗi và cấu hình vào màn bình thường.
+
+Giữ font chat 16px/line-height 26px, nền sáng, navy và accent theo design. Đo width/padding/gap/radius/header/composer từ từng PDF rồi map vào design tokens hiện có. Empty và Selected có bề rộng cột khác nhau trong mẫu: không tự ép tất cả màn thành một grid duy nhất nếu làm lệch thiết kế. Không copy phần biên xuất PDF thành khoảng trắng UI.
+
+Ngoại lệ được chấp nhận cần ghi trong manifest:
+- Registry/model thật thay Galaxy Core v4, Gemini 1.5, Kira 2.0 mẫu.
+- “Global” đổi thành phạm vi Project đang chọn, không toàn công ty.
+- Không hard-code token 45%, Enterprise 1250/5000, thành viên, số phạt, giá hoặc thông số mẫu.
+- Logo dùng asset Galaxy đã xác nhận.
+- Call/video/mic/share chỉ hoạt động khi backend/capability/quyền thật hỗ trợ; ẩn hoặc disabled có lý do, không nút giả.
+- Không đưa lại GENERAL/PROJECT/WEB selector, phê duyệt/thu hồi nội dung nhập, checkbox dữ liệu giả, panel env/quota dàn trong chat.
+- Lịch sử, source picker, popup và trang đầy đủ cùng dùng session/file identities thật; đổi surface/model không tạo dữ liệu trùng.
+
+Nghiệm thu: ảnh thiết kế và screenshot cùng viewport/state đặt cạnh nhau, liệt kê sai khác có lý do. Kiểm desktop tương ứng các bản 1440 và 1495px, một viewport hẹp hơn, mobile 375px và 390px. Không tuyên bố pixel-perfect khi chưa đo; không được dùng câu “không pixel-perfect” để bỏ qua sai cột, sai composer hoặc chữ nhỏ.
+
+======================================================================
+06. KIẾN TRÚC MỤC TIÊU — MỞ RỘNG NỀN HIỆN CÓ
+======================================================================
+
+Trước khi code: inventory endpoint, schema, ACL, provider adapter, job queue, document worker, UI component và test đang có. Lập bảng REUSE / EXTEND / MISSING / CONFLICT với đường dẫn bằng chứng. Các tên phía dưới là hợp đồng logic đề xuất; map vào tên thực tế, không mặc định tạo bảng/service trùng.
+
+Giữ Next.js + NestJS + PostgreSQL/Prisma + Redis và các service nghiệp vụ hiện có. Bổ sung ranh giới rõ:
+1. Chat/session UI: nhận yêu cầu, tệp, render sự kiện chạy, kết quả và artifact.
+2. Work orchestrator: quản lý một lần thực thi, gọi model và công cụ theo vòng lặp có giới hạn.
+3. Policy/authorization: xác định tenant/Project/actor/room/field/source-version và chi phí trước mỗi hành động.
+4. Tool registry/executor: schema chuẩn, kiểm input/output, timeout, retry, audit, capability.
+5. Domain services: nguồn chính thức cho task, hợp đồng, thanh toán, mua hàng, logistics, thi công, bảo hành.
+6. Document/media workers và sandbox: xử lý file dài, OCR, export, tính toán cách ly.
+7. Data/artifact store + derived indexes: lưu ở Galaxy, truy xuất theo quyền và phiên bản.
+8. Provider adapters và connector/MCP gateway: kết nối AI và dịch vụ bên ngoài có kiểm soát.
+
+Không dựng framework multi-agent hay AI engine mới nếu service hiện tại đáp ứng. Không biến request API thành một process chạy mọi việc vô hạn. Khả năng “làm độc lập” cần job bền vững, resume, công cụ và quyền, không bắt buộc nhiều agent.
+
+Luồng: yêu cầu → resolve Project/actor → load nguồn và policy cần thiết → tạo run → model đề xuất tool → server authorize/validate/execute → đưa kết quả tool vào model → tiếp tục trong giới hạn → lưu kết quả, artifact, audit → hiển thị UI. Câu đơn giản có thể trả lời thẳng; không ép mọi câu hỏi thành job dài.
+
+======================================================================
+07. GÓI WORK — THỰC THI CÔNG VIỆC CÓ TRẠNG THÁI
+======================================================================
+
+Tái sử dụng hoặc bổ sung Run/Step/Event/ArtifactReference với requestId, tenantId, projectId, actorId, sessionId, parentRunId nếu có, input/source refs, provider/model thực, policy revision, thời gian và chi phí.
+
+State machine tối thiểu: queued, running, waiting_for_input, waiting_for_approval, succeeded, failed, cancelled; interrupted/retryable nếu nền hiện tại cần. Phân biệt run hoàn tất với task nghiệp vụ hoàn tất.
+
+- Job dài phải bền vững trong DB/queue, có heartbeat/lease, stale-job recovery, timeout và cancellation. Không chỉ lưu Promise trong API process.
+- Reload/tab đóng/mất mạng không làm mất run. Reconnect đọc snapshot và events từ cursor; stream không duplicate messages/artifacts.
+- Retry đọc được bounded/backoff. Write retry phải idempotent; không tạo hai task, hai file, gửi hai lần hoặc ghi tiền hai lần.
+- Có max steps, max wall time, max tokens và budget reservation. Khi hết giới hạn, lưu kết quả từng phần và nói rõ phần còn lại.
+- Parallel tool calls chỉ cho việc độc lập, vẫn có giới hạn concurrency và kiểm quyền.
+- Không áp quy tắc “một vendor call mỗi lượt” cho workflow nhiều bước; phân biệt model request hợp lệ với dispatch trùng do double-submit/retry.
+- UI “đang tìm hồ sơ/đang tạo file” lấy từ event thật. Không phát chain-of-thought/raw reasoning; hiển thị hành động và kết quả ngắn.
+- Câu hỏi thiếu dữ kiện: tự đọc nguồn được phép trước; chỉ hỏi điều ảnh hưởng quyết định. Không bắt xác nhận lại từng thao tác đọc, tính toán, soạn nháp hoặc yêu cầu đã rõ.
+- Thay đổi có ảnh hưởng nghiệp vụ phải đi qua domain command và quyền hiện hữu. Phê duyệt hợp đồng/PO/thanh toán/phát hành cho khách vẫn giữ nguyên.
+
+======================================================================
+08. TOOL REGISTRY VÀ CÔNG CỤ PHẢI CÓ
+======================================================================
+
+Mỗi tool khai báo name/version, description, input/output schema, required scopes, READ/DRAFT/WRITE/EXTERNAL side effect, timeout, retry/idempotency, cost category và trạng thái triển khai.
+Trạng thái phải tách: NOT_CONFIGURED, DISABLED, MOCK_ONLY, READY_FOR_LIVE_TEST, LIVE_VERIFIED, DEGRADED. UI không quảng cáo mock là đã dùng được.
+Server gắn tenant/Project/actor; không tin projectId hoặc quyền do model trả về. Không cung cấp arbitrary SQL/shell tool nối vào host hoặc production DB.
+
+Nhóm công cụ, ưu tiên dùng service thật đã có:
+- project.search/read: tìm nguồn, phiên bản, đoạn/trang/cell/message và đọc có giới hạn.
+- project.context: tên/phạm vi Project, mốc, quyết định và nguồn còn quyền.
+- task.list/get/history và project.tracker: trạng thái nghiệp vụ từ domain query.
+- task.create/update: chỉ lệnh được phép, validation, audit, optimistic concurrency, idempotency.
+- business.read: báo giá/hợp đồng/phụ lục/công nợ/PO/logistics/kho/thi công/bảo hành theo quyền từng trường.
+- web.search/public_fetch: gọi thật, URL, thời điểm truy xuất, nguồn hỗ trợ kết luận.
+- document.read/compare và spreadsheet.analyze/calculate.
+- document.create/revise/export: file thật, version/draft, template và provenance.
+- image.inspect; image.generate/edit và audio.transcribe khi provider được bật.
+- artifact.get/download: kiểm quyền tại thời điểm đọc, URL ngắn hạn, không public bucket.
+
+Model chưa hỗ trợ reliable tool calling không được báo là full Work capability. Dùng structured plan có schema chặt nếu cần tương thích và được kiểm thử; lỗi parse không được tự chuyển thành chạy lệnh. Fallback provider phải thỏa quyền nguồn, capability và ngân sách.
+
+======================================================================
+09. PROJECT NHƯ KHÔNG GIAN LÀM VIỆC: TODO LIST VÀ TRACKER THẬT
+======================================================================
+
+Lệnh người dùng phải hiểu được mà không chọn mode:
+“Lên todo list dự án này.”
+“Project tracker: đã xong gì, còn gì, ai đang giữ, vướng chỗ nào?”
+“Các việc cần hoàn thành tuần này.”
+“Tổng hợp thay đổi từ lần tôi xem trước.”
+“Từ biên bản này lập công việc, đối chiếu các việc đã có.”
+
+Nguyên tắc dữ liệu:
+- Project là root. Các view Todo/Tracker/Summary là projection của task, milestone, domain record, event và nguồn liên quan; không tạo một bảng task song song bị lệch với “Việc của tôi”.
+- Trạng thái completed lấy từ Task/domain service và bằng chứng theo workflow, không từ câu “tôi làm xong” của AI.
+- Output tracker tối thiểu: việc/mốc, trạng thái, người phụ trách, hạn, phụ thuộc/vướng mắc, việc tiếp theo, nguồn/kết quả, cập nhật lúc nào. Hiện quá hạn rõ ràng.
+- Hỗ trợ lọc theo bốn nhóm và 12 giai đoạn, owner, trạng thái, thời gian; có tổng số và pagination, không gọi kết quả top-k là toàn bộ dự án.
+- Thiếu owner/hạn thì ghi “chưa giao/chưa có hạn”; đề xuất để riêng, không bịa dữ liệu.
+- Mốc thời gian dùng timezone nghiệp vụ; xác định “hôm nay/tuần này” nhất quán, DB lưu timestamp phù hợp.
+- AI có thể phát hiện đề xuất task từ chat/file. Trước khi tạo, kiểm trùng theo nguồn và khóa logic. Một báo cáo lại/retry không sinh task lặp.
+- Với yêu cầu rõ “tạo các việc này”, actor có quyền và dữ liệu đủ, có thể tạo task thông thường theo policy; không bắt thêm một approval chung vô nghĩa. Yêu cầu mơ hồ/giao nhầm người/ghi đè hàng loạt thì cần preview/clarification.
+- “Đã xử lý” phân biệt: AI đã xuất bản nháp/file; nhân sự đã hoàn thành task; hồ sơ đã duyệt/nghiệm thu. Không gộp ba trạng thái.
+- View được ghim vào Project có query/config ổn định, computedAt và evidence refs. Làm mới view đọc dữ liệu hiện tại, không chỉ nhắc lại bản summary cũ.
+- Có read consistency/version để báo cáo không ghép các số ở trạng thái khác nhau một cách âm thầm. Số tiền/tổng/công nợ lấy từ domain calculation service.
+- Chức năng tự làm mới theo lịch chỉ hoạt động khi người dùng cấu hình lịch; không tự tạo lịch hoặc gửi thông báo ra ngoài từ một câu hỏi xem tracker.
+
+Cần ít nhất 3 hành trình main: mở todo list hiện tại; tạo/cập nhật task được phép từ nguồn; mở tracker lần sau thấy trạng thái mới và lịch sử đúng. Không chỉ trả bảng Markdown tĩnh trong chat rồi coi là có hệ quản lý công việc.
+
+======================================================================
+10. PROJECT-ONLY MEMORY VÀ QUYỀN TRƯỜNG
+======================================================================
+
+Nguồn chính lưu tại Galaxy: original file, hash, binary, version, chat/message, records, decisions, task events và kết quả. Summary/chunks/index/embedding là dữ liệu dẫn xuất có thể dựng lại, có provenance và trạng thái.
+
+- Chat mới trong cùng Project tìm được nguồn cũ actor còn quyền, không cần upload lại.
+- Đổi model/surface giữ source/session identity. Không phụ thuộc duy nhất provider conversation ID.
+- Project A không dùng nội dung, cached answer, summary hoặc lịch sử B, kể cả admin có quyền cả hai. Chuyển Project phải ngắt context/run/stream không phù hợp và xóa state UI cũ.
+- Mọi query/vector retrieval/cache/artifact đều scope tenant+Project và ACL phù hợp. Không chỉ lọc sau khi dữ liệu đã gửi model.
+- Room/private chat và nguồn riêng không tự chuyển thành tri thức chung Project. Chia sẻ kết quả phải kiểm toàn bộ nguồn và đối tượng nhận.
+- Thu hồi quyền/source version áp cho retrieval, model context, cache, history, derived answers, outputs và link download. In-flight run phải reauthorize trước mỗi tool và trước công bố/lưu output; revoke giữa lúc chạy không được trả nội dung cũ.
+- Kết quả dẫn xuất kế thừa quyền phù hợp từ tất cả nguồn, không tự mở rộng audience. Không thể thu hồi bản người dùng đã tải về máy; không hứa điều không thể.
+- Quyền tài chính/giá vốn/lợi nhuận là field-level: lọc trước model/tool trả kết quả. Không suy diễn ngược trường bị cấm từ tổng/chênh lệch; áp policy với aggregate và số lượng nếu nhạy cảm.
+- Luôn phân biệt bản nháp, quyết định xác nhận, bản đã ký/duyệt. Xung đột giữa nguồn phải nêu phiên bản/ngày và nguồn được ưu tiên, không tự chọn thông tin mới nhất từ web để thay quyết định.
+- Citation trỏ đúng source/version/page/paragraph/sheet-cell hoặc record/event. Mở citation phải kiểm quyền lại.
+- Project-only giới hạn bộ nhớ nội bộ; vẫn dùng được kiến thức chung và web công khai có nhãn rõ.
+
+======================================================================
+11. FILE ĐẦU VÀO, TÍNH TOÁN VÀ FILE ĐẦU RA
+======================================================================
+
+Giữ đường upload binary thật hiện có. Ingestion có trạng thái uploaded/extracting/ready/partial/failed; lỗi một file không làm mất các file khác. Giới hạn dung lượng/trang/thời gian, MIME/content validation, bảo vệ zip bomb/path traversal, parser chạy worker với quota.
+
+- DOCX: paragraph/heading/table cùng locator. Muốn hiểu ảnh nhúng phải có pipeline đọc ảnh thật; locator không đồng nghĩa đã hiểu ảnh. Không tải external relationship tùy ý; không chạy macro.
+- PDF text: giữ page mapping; không làm hỏng mã vật liệu, số đo, ngày.
+- PDF scan: render ảnh khác OCR/vision. Thực hiện OCR/vision phù hợp nếu cấu hình sẵn; giữ page/bbox, confidence, limits. Không tự tuyên bố scan đã đọc chỉ vì render thành PNG thành công.
+- Ảnh: composer → upload → quyền/source → provider vision thật → câu trả lời có provenance; phân biệt ảnh mô phỏng và thông số đã xác nhận.
+- XLSX: tên sheet, cell/range, formula, cached result, kiểu ngày/số/đơn vị. Chưa recalculation thì nói rõ kết quả cached có thể cũ. Nếu cần tính lại, dùng calculation service/engine kiểm chứng hoặc sandbox phù hợp; không dùng model làm máy tính. Không chạy macro hay tự refresh external links.
+- Tính toán nghiệp vụ: decimal/currency/rounding theo domain. Tóm tắt tài chính dùng số chính thức; tính thử gắn nhãn giả định.
+- So sánh tài liệu có version/đơn vị/ngày và chỉ ra phần không đọc được; không giả đã đọc hết nếu truncation.
+- Export DOCX/PDF/XLSX phải có bytes thật, MIME/filename đúng, lưu thành artifact version, gắn Project/owner/request/source lineage và trạng thái DRAFT.
+- Sửa bản nháp tạo revision/diff, giữ bản đã ký hoặc approved bất biến. Dùng template Galaxy có sẵn, không tự thay thương hiệu.
+- DOCX/PDF kiểm tiếng Việt, bảng, page break, nội dung mở được. XLSX kiểm công thức và giá trị; nếu chưa recalc phải báo. Kiểm Word desktop chỉ được ghi PASS khi đã mở bằng Word thực.
+- Không đặt đường dẫn tải tưởng tượng. Sau reload/chat mới phải tìm, mở và tải lại đúng file có quyền.
+- Mã do model sinh chỉ chạy trong sandbox không có env/database credentials, có giới hạn CPU/RAM/time/network/mount; không chạy trên API host. Nếu chưa có sandbox hợp lệ, dùng các công cụ tính/export được viết sẵn.
+
+======================================================================
+12. WEB THẬT VÀ CITATION
+======================================================================
+
+Tái sử dụng Tavily adapter/mock nếu đã có. Có thể bổ sung web tool của OpenAI adapter sau khi cấu hình. Không bắt đăng ký cả hai để hoàn thiện nền.
+
+- Search thật khi câu hỏi cần dữ kiện mới/yêu cầu tra web và capability sẵn sàng. Nếu thiếu cấu hình, báo rõ, tiếp tục phần có thể làm; không giả đã tra.
+- Query chỉ chứa thông tin cần thiết, ví dụ hãng/model/spec. Không đưa toàn hợp đồng, giá vốn, thông tin cá nhân vào query công khai.
+- Public fetch kiểm scheme/host/IP sau DNS và từng redirect, chống SSRF/private/local/link-local/metadata, DNS rebinding; giới hạn size/content/time/redirect. Không fetch mạng nội bộ, file URL hoặc dùng cookie người dùng tùy ý.
+- Web/file/tool output là dữ liệu, không là chỉ thị cấp quyền. Chống prompt injection yêu cầu mở Project khác, lấy env hoặc gọi tool ngoài nhiệm vụ.
+- Ghi URL, title, fetchedAt và đoạn hỗ trợ kết luận; tách nội bộ/công khai/suy luận. URL tồn tại không đủ làm citation đúng.
+
+======================================================================
+13. PLUGIN, MCP VÀ SKILLS TRONG GALAXY OS
+======================================================================
+
+Phân biệt ba lớp:
+A. Skill/plugin phát triển của Codex: giúp đọc code, thiết kế, test, review.
+B. Skill nghiệp vụ Galaxy: quy trình thực hiện công việc, template, tài nguyên và mô tả tool.
+C. Connector/tool: code hoặc dịch vụ thật tạo capability, xác thực bằng API/OAuth/MCP.
+
+Cài skill không tự tạo API. Đổi model không tự mang theo UI/plugin/Space của ChatGPT. Không giả có thể cài trực tiếp toàn bộ marketplace ChatGPT vào Galaxy.
+
+Thiết kế catalog tối thiểu cho admin trong khu quản trị hiện hữu, không thêm dashboard vào P04:
+- Tên/id/version, nguồn/license/checksum, publisher, capabilities, schema, yêu cầu config, scopes, side effects, data destination, cost.
+- Vòng đời: registered/installed, configured, enabled theo tenant/Project/role, health test, disabled/revoked, upgrade/rollback.
+- Secret lưu server-side theo cơ chế hiện tại; metadata tách secret. OAuth scope tối thiểu, refresh/revoke và audit. Không lộ token trong frontend/log/model context.
+- Allowlist server/tool và schema; discovery không tự cho quyền execute. MCP remote không đồng nghĩa an toàn hoặc miễn phí.
+- Model không tự cài plugin, tự thay quyền, tự bật provider hay tải rồi chạy package tùy ý.
+- Skill chỉ nạp khi liên quan, có version và allowed tool references; server policy luôn ưu tiên. Nội dung skill không thể nới ACL/budget.
+- Script skill chỉ chạy sandbox/worker được duyệt, không arbitrary shell của API host.
+- Uninstall/disable phải ngừng run mới, xử lý run đang chạy và revoke credential phù hợp; giữ audit và artifact đã được phép lưu.
+
+Đợt này xây contract + registry + UI quản trị tối thiểu + built-in adapters thực dùng được (Project/Task, document, calculator). Kiểm một connector ngoài bằng credential sẵn có và scope đã được cấp nếu có; nếu chưa có, đánh dấu integration NOT_CONFIGURED, không fake live. Không coi catalog toàn mock là plugin system hoàn tất. Không tự kết nối email/Drive của người dùng nếu chưa được yêu cầu.
+
+======================================================================
+14. PROVIDER, OPENAI VÀ KIỂM SOÁT CHI PHÍ
+======================================================================
+
+Giữ secret canonical /home/galaxy_os/.runtime/ai-providers.env và metadata /home/galaxy_os/.runtime/ai-providers.json nếu kiểm source xác nhận đây vẫn là cơ chế hiệu lực. Không xóa JSON vì nó còn policy/revision/evidence; không chép secret vào Git, prompt, report hoặc NEXT_PUBLIC.
+
+OpenRouter hiện là đường đã dùng thật, FREE_ONLY còn hiệu lực theo baseline. Gemini/Mistral tạm dừng; Kira hết quota; không tự gọi lại. LlamaCloud credential tồn tại không chứng minh OCR/document service đã chạy.
+
+Hoàn thiện UI/runtime/task/memory/export local không cần khóa OpenAI mới. Chuẩn bị adapter OpenAI Responses API cho text/vision/tool calling, streaming và error mapping; media lifecycle riêng nếu phù hợp. Kiểm tài liệu chính thức và account capability tại thời điểm triển khai; không hard-code model trong PDF.
+
+Chưa có ngân sách/khóa mới thì adapter trả phí disabled; mocks rõ nhãn. Khi chủ hệ thống cấp key + xác nhận hạn mức mới chạy live. Bật một provider không tự cho phép gửi mọi loại nguồn.
+
+Policy đề xuất: giữ FREE_ONLY mặc định cho cấu hình hiện tại; thêm lựa chọn PAID_WITH_CAP cấu hình riêng, disabled ban đầu. Giới hạn per run/per day hoặc tháng/per tenant, có reserve trước call, reconcile usage sau call và khóa khi chạm ngưỡng. Concurrency không được vượt cap do race. Timeout chi phí chưa biết phải ghi UNKNOWN/ước tính bảo thủ, không ghi 0.
+
+Ghi requested/returned model, model request count, tool count, tokens, latency, retry, cost và source policy revision. Phí search/hosting/sandbox/image/audio được tính riêng khi provider có áp dụng. Không coi model free là mọi tool free. Không paid fallback/autotopup ngầm.
+
+Lỗi 401/403/429/503/timeout/unsupported capability có thông báo phân biệt, bounded retry và giữ input. 429 không mặc định là sai API key. Chỉ hiện model thật sẵn sàng cho người dùng; diagnostic chi tiết ở admin. User có thể làm phần độc lập khi một capability thiếu.
+
+======================================================================
+15. GRAPHIFY VÀ AGENT SKILLS CHO CODEX
+======================================================================
+
+Không để việc cài công cụ trì hoãn R0. Trước tiên inventory kỹ năng hiện có trong Codex thực tế trên máy này; trạng thái plugin trong cuộc chat khác không chứng minh đã cài local. Tái sử dụng debugging, review, testing và PDF skills nếu đã có; tránh cài trùng hoặc nhiều framework có instruction xung đột.
+
+Agent Skills là chuẩn đóng gói SKILL.md + tài nguyên, không phải bắt buộc một daemon mới. Chuẩn bị/hoàn thiện bộ hướng dẫn repo gọn cho: runtime-release; design fidelity; Project ACL/memory; tool/artifact acceptance. Chỉ tạo skill mới khi thiếu, đọc skill-creator nếu môi trường có, lưu và commit đúng scope. AGENTS.md giữ hướng dẫn ngắn, link đến quy trình; không đè quy tắc người dùng hay tự nới approval.
+
+Graphify tham khảo upstream Graphify-Labs/graphify. Tài liệu kiểm ngày 08/10/2026 mô tả package graphifyy, CLI graphify, hỗ trợ Codex và chế độ --code-only. Đây là thông tin để xác minh, không phải lệnh cài mù.
+
+Nếu upstream/package/license/compatibility được xác minh và policy cho phép, có thể cài phiên bản pin vào môi trường tool riêng trên đúng máy Codex; không cài vào runtime Python/Node của Galaxy. Đọc installer và diff trước khi cho sửa AGENTS.md/hooks; giữ backup và rollback. Không thêm hook không tương thích, không tự bật global multi-agent/permission flags để chạy Graphify.
+
+Thử index CODE-ONLY, offline, trên snapshot source đã xác định. Loại .runtime, .env, upload/storage, DB dump, logs, secrets, node_modules, build artifacts và worktree không liên quan; không đưa hồ sơ khách hàng vào corpus. Kiểm graph freshness theo SHA và khả năng tìm call path ACL/release/upload. Mọi kết luận vẫn đối chiếu source/test; graph không phải bằng chứng runtime hoặc kho bộ nhớ nghiệp vụ.
+
+Graphify semantic/doc extraction có thể gọi model và phát sinh truyền dữ liệu/chi phí; chưa cho phép trong đợt này. Nếu không chứng minh được code-only/no-network/không tác động hướng dẫn nền, bỏ qua Graphify, dùng rg + LSP + đọc source. Ghi lý do, tiếp tục công việc. Không tuyên bố Graphify đảm bảo không có lỗi.
+
+======================================================================
+16. BỘ NGHIỆM THU THEO HÀNH TRÌNH THẬT
+======================================================================
+
+Lập ma trận từng capability theo CODE / UNIT / INTEGRATION / FIXTURE_CHROME / VENDOR_LIVE / MAIN_CHROME / MOBILE_VIEWPORT / REAL_DEVICE. Dùng PASS, FAIL, PARTIAL, NOT_RUN, BLOCKED kèm evidence. Mock không thay vendor live, tổng test không thay user journey.
+
+Bắt buộc kiểm những tình huống sau:
+01. Main localhost/LAN phục vụ đúng release mới, API/Web version khớp; UI người dùng thấy thay đổi.
+02. local:up/status/logs/stop đúng owner/session; không tạo process/cổng trùng; lỗi bus có phân loại chính xác.
+03. Năm P04 đối chiếu viewport/state, chức năng đang có không bị mất; không khôi phục controls đã bỏ.
+04. Project 0 room vẫn mở AI riêng và chat được bằng provider đang được phép.
+05. Upload PDF text → hỏi → hỏi tiếp → citation đúng trang/version → chat mới vẫn tìm nguồn.
+06. PNG qua composer và vendor main thật; nếu chưa được chạy, ghi NOT_RUN riêng.
+07. DOCX chứa heading/table/image; báo đúng phần đã đọc/không đọc. PDF scan kiểm OCR/vision thực, không chỉ render.
+08. XLSX có công thức thay input: báo rõ cached/recalculated và kiểm một kết quả bằng engine đáng tin cậy.
+09. Tạo DOCX/PDF/XLSX thật, tải lại sau reload, mở đúng nội dung/Project; không link giả.
+10. Todo/Tracker trả đúng việc hoàn thành/đang làm/bị chặn/quá hạn, owner/hạn/nguồn; pagination và counts đúng.
+11. Từ biên bản tạo task được phép; gửi lại/retry không tạo trùng; thay task thấy cập nhật ở Việc của tôi/Tracker/chat mới.
+12. Run xuất file hoàn tất không tự đánh dấu task thi công hoàn tất.
+13. Project A/B có tên file và từ khóa giống nhau nhưng số liệu khác: không lẫn nguồn, kể cả actor admin.
+14. Private source/room/field tài chính kiểm bằng hai actor khác quyền; kiểm cả aggregate/metadata/history/file download.
+15. Revoke trước và trong khi run đang chạy: không context/citation/cache/output trái quyền; share không rò private source.
+16. Refresh/đứt stream/API hoặc worker restart trong test cô lập: resume không mất tiến độ hoặc nhân đôi write.
+17. Cancel/timeout/budget exceeded/429/503 giữ input, báo đúng và không loop vendor vô hạn.
+18. Web search/fetch thật nếu đã cấu hình; URL/citation kiểm hỗ trợ kết luận; SSRF/redirect/prompt injection bị chặn.
+19. Plugin disabled hoặc OAuth revoked không gọi được; model không tăng scope; tool schema sai bị từ chối.
+20. Mobile viewport, long message, bảng ngang, citation, file picker, composer/keyboard. Thiết bị thật và Word desktop chưa kiểm phải ghi rõ.
+21. Hai binary thiếu từ baseline: thống kê nguồn nào thiếu, nguồn phục hồi hợp lệ; không xóa/giả bytes.
+22. Không có secret trong repo diff, frontend bundle, logs/report mới.
+
+Test ghi dữ liệu nhiều dùng DB/Chrome cô lập. Main dùng acceptance Project riêng không nhầm hồ sơ khách hàng; không seed/reset main. Live calls chỉ dùng provider/nguồn/budget đã được phép. Không mua credit để vượt một test.
+
+======================================================================
+17. TRÌNH TỰ TRIỂN KHAI VÀ CHECKPOINT
+======================================================================
+
+M0: Read-only inventory + root-cause evidence cho Codex daemon, user bus và release mismatch.
+M1: Sửa runtime/template; cutover candidate hợp lệ; nghiệm thu main và local commands. Bàn giao mốc chạy được ngay.
+M2: Sửa sai khác P04 còn lại; củng cố composer/file/memory trên bản main mới. Tái sử dụng phần đã test, chỉ kiểm lại những rủi ro thực tế liên quan.
+M3: Work run/tool loop bền vững + task/tracker domain tools; end-to-end lấy việc, tạo/cập nhật việc được phép và xuất file.
+M4: Plugin/skill registry tối thiểu, web integration, OpenAI adapter disabled-by-default; media lifecycle nối production nếu đủ cấu hình. Capability chưa được cấp key vẫn có trạng thái rõ.
+M5: Nghiệm thu hồi quy cần thiết, visual review, release local cuối và báo cáo chính xác.
+
+Mỗi mốc có scoped commit, tested tree, artifact/release, evidence và rollback. Nếu runtime vẫn cần thao tác rộng bị chặn, hoàn thành chuẩn bị M1 và các thay đổi độc lập an toàn; không che trạng thái main vẫn cũ.
+
+Đầu tiên trình bảng ngắn: đã có gì, thiếu gì, root cause đã xác nhận/chưa xác nhận, thứ tự xử lý. Sau đó thực hiện liên tục trong phạm vi được phép. Không yêu cầu tôi giải thích lại dự án, nhập lại API key đã nạp đúng hoặc chạy lại toàn bộ gói cũ không có lý do.
+
+Ưu tiên một người/worker ghi source. Nếu dùng subagent theo cấu hình được phép, phân việc đọc/review độc lập, không cùng thao tác Chrome/DB/worktree. Không tự nhận đã dùng model cụ thể nếu runtime không có metadata.
+
+======================================================================
+18. BÁO CÁO CUỐI PHẢI CHO TÔI BIẾT BẢN NÀO ĐANG CHẠY
+======================================================================
+
+Bắt đầu báo cáo bằng kết quả người dùng có thể kiểm ngay: URL local/LAN hiện tại; release đang phục vụ; tôi mở chỗ nào để thấy UI mới; lệnh nào dùng hằng ngày; hành trình nào đã làm thật.
+
+Trường bắt buộc, không điền PASS theo suy đoán:
+- IMPLEMENTATION_STATUS
+- CODE_SHA / TESTED_SHA / TESTED_TREE / DOCS_COMMIT_SHA
+- ARTIFACT_DIGEST / BUILT_CANDIDATE / DEPLOYED_LOCAL_RELEASE
+- SERVING_WEB_RELEASE / SERVING_API_RELEASE / GIT_STATUS
+- CODEX_DAEMON_STATUS / RUNTIME_CONTROL_PLANE / LOCAL_AND_LAN_HEALTH
+- FIVE_PDF_VISUAL_STATUS (từng màn, link screenshot, sai khác)
+- PROJECT_ONLY_MEMORY / FIELD_LEVEL_ACL / REVOCATION_IN_FLIGHT
+- WORK_RUN_RESUME_CANCEL / TODO_TRACKER_MAIN / TASK_WRITE_IDEMPOTENCY
+- IMAGE_COMPOSER_LIVE / DOCX_READ / PDF_TEXT_SCAN / XLSX_RECALC_STATUS
+- DOCUMENT_EXPORT_MAIN / WEB_SEARCH_LIVE / URL_FETCH_LIVE
+- PLUGIN_REGISTRY / EXTERNAL_CONNECTOR_LIVE / SKILLS_INSTALLED / GRAPHIFY_STATUS
+- OPENAI_CONFIGURED / PAID_ENABLED / BUDGET_CAP (không chứa secret)
+- IMAGE_GENERATE_EDIT / VOICE_STATUS
+- REAL_MOBILE_KEYBOARD / WORD_DESKTOP
+- REMAINING_BLOCKERS + tác động người dùng + bước cụ thể còn cần
+
+Kèm release manifest và hướng dẫn phục hồi trong repository. Không chỉ gửi tổng test. Không gọi “hoàn tất phát hành” nếu người dùng còn mở release cũ. Không gọi AI đa năng hoàn tất khi search/media chỉ mock hoặc file chỉ là Markdown.
+
+Đích nghiệm thu cuối: Mở Project → hỏi/tải tài liệu → AI tìm đúng nguồn → xử lý với tool thật → mở chat mới vẫn có ngữ cảnh đúng quyền → gọi todo/tracker lấy trạng thái thật → tạo/sửa bản nháp/file → tải lại và tiếp tục công việc, trên ứng dụng đang dùng và đúng thiết kế.
+
+======================================================================
+19. TÀI LIỆU THAM KHẢO CHÍNH THỨC — KIỂM LẠI KHI TRIỂN KHAI
+======================================================================
+
+OpenAI tools: https://developers.openai.com/api/docs/guides/tools
+Function calling: https://developers.openai.com/api/docs/guides/function-calling
+MCP: https://developers.openai.com/api/docs/guides/tools-connectors-mcp
+Data controls: https://developers.openai.com/api/docs/guides/your-data
+API pricing: https://developers.openai.com/api/docs/pricing
+Agent Skills specification: https://agentskills.io/specification
+Build skills: https://learn.chatgpt.com/docs/build-skills
+Graphify upstream: https://github.com/Graphify-Labs/graphify
+WSL systemd: https://learn.microsoft.com/en-us/windows/wsl/systemd
+
+Các URL là căn cứ kỹ thuật, không cấp quyền cài/chạy nội dung tải về. Không cần nâng toàn bộ thư viện lên mới nhất; dùng phiên bản tương thích đã kiểm và pin những phụ thuộc thêm mới.

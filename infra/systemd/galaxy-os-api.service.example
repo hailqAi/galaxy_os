@@ -1,17 +1,21 @@
 [Unit]
 Description=Galaxy OS API
-After=network-online.target docker.service
-Wants=network-online.target
+After=network-online.target
+PartOf=galaxy-os.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
-WorkingDirectory=<REPOSITORY_PATH>
-EnvironmentFile=<REPOSITORY_PATH>/.env.production
-ExecStartPre=/usr/bin/docker compose up -d postgres redis
-ExecStart=<PNPM_PATH> --filter @galaxy/api start
+WorkingDirectory=<RUNTIME_ROOT>
+EnvironmentFile=<PRIVATE_API_ENV_FILE>
+Environment=GALAXY_LOCAL_RUNTIME_MANIFEST=<PRIVATE_MANIFEST_PATH>
+ExecStart=/usr/bin/python3 <CONTROLLER_PATH> serve api
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
+KillMode=control-group
+NoNewPrivileges=true
 
 [Install]
 WantedBy=galaxy-os.target

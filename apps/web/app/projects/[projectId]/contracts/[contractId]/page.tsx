@@ -1,4 +1,5 @@
 'use client';
+import { createCommandKey } from '../../../../lib/create-command-key';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
@@ -72,7 +73,7 @@ export default function ContractPage() {
         method: 'POST',
         body: JSON.stringify({
           ...values,
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: createCommandKey(),
         }),
       });
       event.currentTarget.reset();

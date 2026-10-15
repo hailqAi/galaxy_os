@@ -21,6 +21,8 @@ const tokenHash = (token: string) =>
   createHash('sha256').update(token).digest('hex');
 const forgotAttempts = new Map<string, number[]>();
 const loginAttempts = new Map<string, number[]>();
+const accountLockFailureLimit = 5;
+const accountLockMilliseconds = 15 * 60_000;
 
 @Injectable()
 export class AuthService {
@@ -49,18 +51,21 @@ export class AuthService {
       },
     });
     const credential = user?.credential;
+    const accountLocked = Boolean(
+      credential?.lockedUntil && credential.lockedUntil.getTime() > Date.now(),
+    );
     if (
       !user ||
       user.status !== 'active' ||
       !credential ||
+      accountLocked ||
       Buffer.byteLength(password) > 72 ||
       !(await compare(password, credential.passwordHash).catch(() => false))
     ) {
-      if (user && credential) {
+      if (user && credential && !accountLocked) {
         const membership = user.organizationMembers[0];
         await this.failedLogin(
           user.id,
-          credential.failedLoginCount,
           membership?.id,
           membership?.organizationId,
           user.email,
@@ -456,19 +461,24 @@ export class AuthService {
 
   private async failedLogin(
     userId: string,
-    count: number,
     membershipId?: string,
     organizationId?: string,
     email?: string,
     displayName?: string,
   ) {
-    const failedLoginCount = count + 1;
     await this.prisma.$transaction(async (tx) => {
+      const [credential] = await tx.$queryRaw<
+        { failedLoginCount: number }[]
+      >`SELECT "failedLoginCount" FROM "PasswordCredential" WHERE "userId" = ${userId}::uuid FOR UPDATE`;
+      const failedLoginCount = (credential?.failedLoginCount ?? 0) + 1;
       await tx.passwordCredential.update({
         where: { userId },
         data: {
           failedLoginCount,
-          lockedUntil: null,
+          lockedUntil:
+            failedLoginCount >= accountLockFailureLimit
+              ? new Date(Date.now() + accountLockMilliseconds)
+              : null,
         },
       });
       if (membershipId && organizationId && email && displayName)

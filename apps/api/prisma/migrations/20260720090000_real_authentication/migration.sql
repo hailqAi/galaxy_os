@@ -16,7 +16,6 @@ CREATE TABLE "PasswordCredential" (
   "failedLoginCount" INTEGER NOT NULL DEFAULT 0,
   "lockedUntil" TIMESTAMP(3),
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "lastSeenAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" TIMESTAMP(3) NOT NULL,
   CONSTRAINT "PasswordCredential_pkey" PRIMARY KEY ("userId")
 );
@@ -29,6 +28,7 @@ CREATE TABLE "Session" (
   "expiresAt" TIMESTAMP(3) NOT NULL,
   "revokedAt" TIMESTAMP(3),
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "lastSeenAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "Session_pkey" PRIMARY KEY ("id")
 );
 

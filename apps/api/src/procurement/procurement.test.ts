@@ -491,3 +491,46 @@ describe('Supplier payables', () => {
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
   });
 });
+
+it('redacts nested PI banking details when reading supplier payables without bank permission', async () => {
+  const invoice = {
+    id: 'pi',
+    piNumber: 'PI-1',
+    bankReferenceProtected: 'protected-bank-data',
+  };
+  const prisma = {
+    project: { findMany: vi.fn().mockResolvedValue([{ id: 'project' }]) },
+    supplierPayable: {
+      findFirst: vi
+        .fn()
+        .mockResolvedValue({ id: 'payable', proformaInvoice: invoice }),
+    },
+  } as unknown as PrismaService;
+  const policy = {
+    projectWhere: vi.fn().mockReturnValue({}),
+  } as unknown as BusinessEntityPolicy;
+  const service = new ProcurementService(prisma, policy);
+  const reader = { ...actor, permissions: ['supplier_payable.read'] };
+  expect(
+    (
+      await service.getSupplierPayable(
+        reader,
+        'payable',
+        'supplier_payable.read',
+      )
+    ).proformaInvoice,
+  ).not.toHaveProperty('bankReferenceProtected');
+  expect(
+    (
+      await service.getSupplierPayable(
+        {
+          ...reader,
+          permissions: [...reader.permissions, 'bank_information.read'],
+        },
+        'payable',
+        'supplier_payable.read',
+      )
+    ).proformaInvoice,
+  ).toEqual(invoice);
+  expect(invoice.bankReferenceProtected).toBe('protected-bank-data');
+});

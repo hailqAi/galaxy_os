@@ -1,0 +1,86 @@
+GALAXY OS — BỘ NHỚ DỰ ÁN VÀ MỐC BÀN GIAO 08/10/2026
+Cập nhật theo yêu cầu người dùng lúc 08:41, giờ Việt Nam (UTC+7).
+Mục đích: giữ quyết định, bằng chứng, giới hạn và bước tiếp tục cho các phiên ChatGPT/Codex sau.
+
+QUY TẮC ĐỌC
+Đây là hồ sơ bền vững của dự án, không phải bằng chứng rằng máy /home/galaxy_os đã được kiểm tra trong phiên soạn hồ sơ. Các SHA, test và release dưới đây do người dùng chuyển từ báo cáo Codex. Phải xác minh tại repository trước khi sửa hoặc tuyên bố hoàn tất. Thay đổi mới hơn của người dùng được ưu tiên; không checkout lùi hoặc xóa thay đổi để khớp hồ sơ này.
+
+1. MỤC TIÊU DÀI HẠN
+Galaxy OS là trung tâm dữ liệu và vận hành Galaxy Centre; ChatGPT phục vụ trao đổi/nghiên cứu/công việc hằng ngày; Galaxy OS phục vụ chat và thực thi theo Project; Codex phục vụ phát triển, kiểm thử và bảo trì phần mềm. Người dùng muốn ba nơi liên thông, tiếp tục công việc được và nhìn cùng trạng thái chính thức.
+Hai chiều tích hợp dự kiến: (a) model/agent phục vụ chat trong Galaxy OS qua đường OpenAI được hỗ trợ; (b) plugin Galaxy OS với MCP/skills để ChatGPT và Codex đọc, ghi công cụ Galaxy theo quyền. Cùng một Project/task/file/version và audit, không ba bản dữ liệu cạnh tranh.
+Đăng nhập ChatGPT không tự cấp quyền đọc toàn bộ chat/memories/file ChatGPT. Chuyển nội dung bằng thao tác được yêu cầu như Lưu vào Project, kèm nguồn và quyền. Không tự nhập hội thoại cá nhân vào tri thức công ty.
+Giữ nền Next.js, NestJS, PostgreSQL/Prisma, Redis và các domain service đang có. Không viết lại hệ thống chỉ để thay provider hoặc giao diện.
+
+2. NGHIỆP VỤ VÀ THIẾT KẾ ĐÃ CHỐT
+Chuẩn nghiệp vụ: Bản thiết kế tổng thể v0.2 và các quyết định bổ sung đã được người dùng chấp nhận.
+Một Project xuyên suốt, dữ liệu nhập một lần; Tiềm năng/Đã ký là góc theo dõi cùng hồ sơ. Một khách nhiều công trình vẫn có Project riêng.
+Giữ 12 giai đoạn theo master: Tiềm năng; Khảo sát/yêu cầu; Thiết kế; Lựa chọn; Báo giá; Hợp đồng/phụ lục; Thu tiền/công nợ; Đặt hàng; Sản xuất/logistics; Kho/giao hàng; Thi công/lắp đặt; Nghiệm thu/bàn giao/bảo hành.
+Bốn nhóm: Tư vấn & báo giá; Hợp đồng & tài chính; Cung ứng & giao hàng; Thi công & hậu mãi. Dùng chung dữ liệu Project theo quyền, không tách bốn kho nhớ.
+Task phải có trạng thái, owner/hạn nếu đã được xác định, nguồn, lịch sử. Phân biệt AI làm xong bản nháp, nhân sự hoàn thành công việc, người có thẩm quyền phê duyệt.
+Project-only memory, private room/source và quyền trường tài chính phải được kiểm trước context/tool/output. Không trộn nguồn giữa Project A/B ngay cả admin có quyền cả hai.
+UI theo năm PDF P04, cỡ chữ chat 16px/line-height 26px, navy, desktop/mobile đúng bố cục. Không thêm nút/model/capability giả. Không biến bản PDF thành quy tắc nghiệp vụ; giữ chức năng thật chưa được vẽ.
+
+3. QUYẾT ĐỊNH MỚI NHẤT: CHỈ QUẢN TRỊ HỆ THỐNG QUẢN LÝ KẾT NỐI CHATGPT
+Đăng nhập Galaxy OS bằng cơ chế tài khoản Galaxy hiện có.
+Sau khi đăng nhập, quản trị hệ thống vào Hệ thống → Kết nối ChatGPT (có thể dưới AI & tích hợp nếu phù hợp navigation hiện tại).
+Chỉ quản trị hệ thống được tạo/đổi/ngắt/kiểm tra kết nối và quản lý chính sách sử dụng. Project admin hoặc trưởng bộ phận không tự có quyền này.
+Tài khoản thường không cấu hình, không nhập API key, không bị yêu cầu đăng nhập ChatGPT riêng và không nhận token. Họ dùng chat/công cụ theo quyền Galaxy khi đường cung cấp AI đã được xác minh hỗ trợ nhóm người dùng đó.
+Yêu cầu UX này thay thế phần mỗi actor tự kết nối trong addendum cũ. Không đồng nghĩa đã có quyền dùng gói ChatGPT cá nhân của admin cho toàn công ty.
+Tại mốc này: SIWC_ELIGIBILITY=UNCONFIRMED; phạm vi dùng chung nhiều người=UNCONFIRMED. Cần xác minh riêng ứng dụng, topology, grant và chính sách sử dụng của nhà cung cấp. Không dùng token admin toàn cục hoặc gắn cờ tự xác nhận để mở cho nhân viên.
+Nếu chỉ có quyền cá nhân, giữ cấu hình quản trị tập trung, cho pilot đúng chủ thể nếu đủ điều kiện, chặn dispatch của actor ngoài phạm vi; người thường thấy AI chưa được quản trị viên kích hoạt, không hiện nút tự kết nối. UI và chức năng Project độc lập vẫn phải phát hành.
+Chưa cho phép kích hoạt API-key provider trả phí, mua gói, credits, auto-topup hay paid fallback.
+
+4. MỐC CODE NGƯỜI DÙNG BÁO NGÀY 08/10/2026
+CODE_SHA = TESTED_SHA: e9a15df26903e806fc14dd23fd291a146756a273
+TESTED_TREE: 8e46baf0677838a1de02a65e460bfbd09b3a0afd
+Candidate đã build: local-773c89f14d04
+DEPLOYED_LOCAL_RELEASE: local-a0429faf5733
+Chưa hoàn tất toàn bộ yêu cầu, chưa phát hành candidate lên runtime main.
+Đã pause 4 provider API key trên main; kiểm cuối được báo không có answer lease đang chạy. Đây là snapshot, phải kiểm lại khi tiếp tục.
+Code mới được báo có ChatGPT-only policy, runtime diagnostics, Task pagination/count, cập nhật atomic với kiểm quyền/lịch sử/rollback. Task tools có CAS/idempotency.
+Regression được báo: API 1.387, Web 568, Edge 5, document 1; lint/typecheck/format/build đạt. Chrome artifact mới có 7 hành trình fixture đạt.
+Không cài công cụ mới; Graphify chưa sử dụng.
+Health localhost API/Web và LAN 192.168.1.80:3000 được báo đạt trên bản cũ. IP phải xác minh lại; health không chứng minh UI mới.
+Callback/lifecycle ChatGPT chưa hoàn thiện; model live và tool live NOT_RUN. Tracker đủ bốn nhóm/12 giai đoạn, resume/registry và nghiệm thu đủ năm PDF trên main còn chưa hoàn tất. Không suy từ CAS/idempotency đã có rằng tất cả Task nghiệp vụ đã xong.
+Git sạch hoặc docs commit mới chưa được báo trong mốc này; không kế thừa kết luận git sạch của mốc trước.
+
+5. HAI LỖI CÒN NGUYÊN VÀ UI CŨ
+Lỗi ứng dụng:
+pnpm dev → python3 scripts/local-runtime-entry.py up
+CONTROL_PLANE_UNAVAILABLE: không nối được user manager của UID hiện tại; kiểm owner/session và socket. Không tự phục hồi D-Bus hoặc khởi chạy stack khác.
+ELIFECYCLE, exit code 1.
+Thông báo chẩn đoán rõ hơn chưa phải lỗi đã được sửa. Chưa nối được manager không tự chứng minh API/Web process đã chết.
+
+Lỗi Codex:
+Error: Cannot use the shared background server: This session requires api_key_model_discovery to be enabled.
+To work without the background server, rerun the same command with --no-daemon (including resume or fork and its arguments).
+Ảnh đã xem trực tiếp trong phiên soạn hồ sơ: Background server has incompatible feature settings; các lựa chọn Run without daemon this time / Restart with these settings / Cancel. Ảnh cảnh báo restart có thể ngắt việc và ảnh hưởng client khác; không tự chép cả bộ feature flags vào global config.
+codex --no-daemon là cách mở phiên riêng theo chính lỗi trả về; không phải đã sửa daemon lâu dài, không phải thay đổi approval và không phải yêu cầu mua API key.
+
+UI cũ: theo báo cáo runtime main vẫn phục vụ local-a0429faf5733; candidate mới chưa cutover. Phải đối chiếu artifact/build identity trước khi đổ cho cache. Không dùng fixture port thay địa chỉ làm việc hằng ngày.
+
+6. REPOSITORY, HỒ SƠ VÀ RANH GIỚI VẬN HÀNH
+Repo /home/galaxy_os; worktree /home/galaxy_os/.worktrees/m2-a-20260928; branch trước đó m2/project-chat-20260928, cần xác minh.
+Handoff mới: docs/galaxy-os/handoffs/2026-10-08-chatgpt-plan-only.md
+Maintenance: docs/galaxy-os/handoffs/2026-10-08-runtime-maintenance.md
+Thiết kế: docs/galaxy-os/milestones/M3/ui-figma/FIVE-PDFS-20261006.md
+Handoff cũ: docs/galaxy-os/handoffs/2026-10-06-five-pdfs-project-tools.md
+Các đường dẫn docs được hiểu tương đối với worktree chứa file thực, không giả main checkout đã có nội dung mới.
+Đã có automatic approval review từ chối D-Bus tạm vì phạm vi ảnh hưởng vượt hai service và cleanup chưa rõ. Chưa có bằng chứng phê duyệt riêng gói phục hồi mới. Không dùng dbus-run-session, kill manager, WSL shutdown, bus/socket/namespace khác để thực hiện tương đương hành động bị từ chối.
+Phạm vi được giao: sửa code, kiểm thử, commit local và phát hành local bảo toàn dữ liệu theo cơ chế hợp lệ. Tác động manager/WSL/shared daemon vượt phạm vi phải được chuẩn bị cụ thể và đi qua phê duyệt cần thiết. Không tự push/merge/public deploy.
+
+7. THỨ TỰ TIẾP TỤC
+P0: vào được Codex; chẩn đoán và sửa nguyên nhân daemon; phân biệt giải pháp phiên riêng với sửa bare codex.
+P1: phục hồi control plane hợp lệ, sửa unit/template nếu cần, chuẩn bị rollback và cutover release mới.
+P2: phát hành UI P04 mới và trang quản trị kết nối ChatGPT có trạng thái thật trên localhost/LAN; không chờ SIWC live để phát hành UI.
+P3: hoàn thiện OAuth/callback/lifecycle/model/tool theo grant được hỗ trợ; xác minh riêng quyền phục vụ nhiều người.
+P4: hoàn thiện Task/tracker/memory/resume/registry và tích hợp hai chiều ChatGPT–Galaxy OS–Codex theo từng mốc độc lập.
+Graphify/skills chỉ bổ sung khi cần, không trì hoãn sửa runtime/UI. Graphify code-only, không index secrets/hồ sơ khách hàng, không API trả phí.
+
+8. CÁCH DUY TRÌ BỘ NHỚ CHO CÁC PHIÊN SAU
+Codex có quyền repo cần đưa nội dung quyết định ổn định này vào tài liệu dự án hiện có (hoặc docs/galaxy-os/PROJECT_MEMORY.md nếu chưa có), link ngắn từ AGENTS.md sau khi kiểm file hiện tại; không ghi đè hướng dẫn cũ. Ghi mốc runtime trong handoff riêng với thời điểm và evidence.
+Mỗi lần tiếp tục phải đọc bộ nhớ và handoff mới nhất rồi xác minh source/runtime; không coi bản lưu này tự cập nhật.
+Các trạng thái PASS chỉ ghi khi có bằng chứng phù hợp CODE/TEST/FIXTURE/MAIN/LIVE. Chỉ AI có grant thật và terminal success mới được ghi LIVE.
+Hồ sơ này được tạo để lưu lại quyết định và mốc báo cáo; không khẳng định đã sửa máy, đã triển khai UI hoặc đã cập nhật một hệ thống memory tự động của tài khoản ChatGPT.
+
+Tài liệu triển khai đi cùng: GALAXY_OS_RECOVERY_UI_ADMIN_CHATGPT_PROMPT_2026-10-08.txt.

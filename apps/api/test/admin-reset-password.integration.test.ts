@@ -4,6 +4,9 @@ import { spawnSync } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { assertG00Isolation } from '../scripts/g00-isolated-environment.mjs';
+
+assertG00Isolation();
 
 describe.sequential('admin:reset-password', () => {
   const prisma = new PrismaClient();
@@ -114,6 +117,10 @@ describe.sequential('admin:reset-password', () => {
   it('refuses production execution', () => {
     const result = run({
       NODE_ENV: 'production',
+      // The parent remains clock-observed. This refusal-only subprocess must
+      // reach the CLI's production guard before any database connection.
+      M2_CLOCK_OBSERVE: 'false',
+      DATABASE_URL: 'postgresql://unused:unused@127.0.0.1:1/never_connect',
       ADMIN_TEMP_PASSWORD: temporaryPassword,
     });
     expect(result.status).toBe(1);

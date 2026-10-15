@@ -14,7 +14,14 @@ const actor = () => ({
   membership: { id: 'test', status: 'active', joinedAt: '' },
   departments: [],
   roles: [],
-  permissions: ['user.read', 'user.capabilities.read'],
+  permissions: [
+    'dashboard.read',
+    'user.read',
+    'user.capabilities.read',
+    'project.read',
+    'project.update',
+    'project.stage1.submit',
+  ],
   administrationScope: 'ORGANIZATION',
   managedDepartmentIds: [],
   administrationTier: 0,
@@ -51,6 +58,177 @@ createServer((request, response) => {
     }
     response.writeHead(200, { 'content-type': 'application/json' });
     return response.end(JSON.stringify(actor()));
+  }
+  if (request.url === '/api/v1/uploads/initiate' && request.method === 'POST') {
+    let body = '';
+    request.on('data', (chunk) => (body += chunk));
+    request.on('end', () => {
+      response.writeHead(201, {
+        'content-type': 'application/json',
+        location: '/api/v1/uploads/fixture-session',
+        'upload-offset': '0',
+      });
+      response.end(
+        JSON.stringify({
+          method: request.method,
+          body: JSON.parse(body),
+          cookie: request.headers.cookie,
+          csrf: request.headers['x-csrf-token'],
+        }),
+      );
+    });
+    return;
+  }
+  const projectId = request.url?.match(
+    /^\/api\/v1\/projects\/(project-70[12])(?:\/|$)/,
+  )?.[1];
+  if (projectId) {
+    const project = {
+      id: projectId,
+      code: projectId === 'project-701' ? 'PRJ-701' : 'PRJ-702',
+      name:
+        projectId === 'project-701'
+          ? 'Galaxy Tower Lobby'
+          : 'Galaxy Tower Annex',
+      customerId: 'customer-1',
+      customer: { id: 'customer-1', displayName: 'Galaxy Centre' },
+      projectType: 'DESIGN_AND_BUILD',
+      location: 'Quận 1, TP.HCM',
+      projectManagerId: 'user-1',
+      projectManager: { id: 'user-1', displayName: 'Browser Test' },
+      startDate: '2026-08-01T00:00:00.000Z',
+      expectedCompletionDate: '2026-12-15T00:00:00.000Z',
+      status: 'ACTIVE',
+      healthStatus: 'ON_TRACK',
+      stageOnePlan: { scopeNotes: 'Lobby fit-out' },
+      members: [
+        {
+          userId: 'user-1',
+          user: { id: 'user-1', displayName: 'Browser Test', status: 'ACTIVE' },
+        },
+      ],
+    };
+    const workspace = {
+      project: { ...project, currentStage: 'STAGE_1' },
+      stages: [
+        {
+          stageKey: 'STAGE_1',
+          title: 'GĐ 1 — KHỞI TẠO, HỒ SƠ DỰ ÁN & PHÊ DUYỆT',
+          objective:
+            'Hoàn thiện thông tin khởi tạo, hồ sơ chủ chốt và quy trình phê duyệt ban đầu.',
+          status: 'Đang thực hiện',
+          completedSteps: 2,
+          totalSteps: 5,
+          progressPercent: 40,
+          updatedAt: '2026-08-18T00:00:00.000Z',
+          nextAction: 'Tiếp tục Lập & Thẩm định hồ sơ đề xuất',
+        },
+        ...[
+          [
+            'STAGE_2',
+            'GĐ 2 — THIẾT KẾ, SẢN PHẨM & DỰ TOÁN',
+            'Quản lý khảo sát, thiết kế, lựa chọn sản phẩm, vật liệu, kích thước, BOQ, dự toán và phê duyệt.',
+          ],
+          [
+            'STAGE_3',
+            'GĐ 3 — THƯƠNG MẠI, HỢP ĐỒNG & MUA HÀNG',
+            'Quản lý báo giá, thương lượng, hợp đồng khách hàng, nhà cung cấp, RFQ, PO, PI và kế hoạch mua hàng.',
+          ],
+          [
+            'STAGE_4',
+            'GĐ 4 — SẢN XUẤT, LOGISTICS, KHO & LẮP ĐẶT',
+            'Quản lý sản xuất, QC, vận chuyển, hải quan, nhập kho, giao hàng, lắp đặt và tiến độ thực hiện.',
+          ],
+          [
+            'STAGE_5',
+            'GĐ 5 — NGHIỆM THU, BÀN GIAO & BẢO HÀNH',
+            'Quản lý nghiệm thu, punch list, bàn giao, quyết toán, tài sản khách hàng, bảo hành và hậu mãi.',
+          ],
+        ].map(([stageKey, title, objective]) => ({
+          stageKey,
+          title,
+          objective,
+          status: 'Chưa bắt đầu',
+          completedSteps: null,
+          totalSteps: null,
+          progressPercent: null,
+          updatedAt: null,
+          nextAction: 'Bắt đầu giai đoạn',
+        })),
+      ],
+    };
+    const stageOne = {
+      steps: [
+        {
+          id: 'step-finance',
+          step: 'FINANCIAL_PLANNING',
+          status: 'IN_PROGRESS',
+          dueDate: '2026-08-18T00:00:00.000Z',
+        },
+      ],
+      requiredDocuments: { required: 1, approved: 0, rejected: 0, overdue: 0 },
+      routing: null,
+      readiness: {
+        status: 'IN_PROGRESS',
+        satisfied: 1,
+        total: 2,
+        progress: 50,
+        cards: [
+          {
+            key: 'FINANCE',
+            applicable: true,
+            satisfied: 0,
+            total: 1,
+            status: 'NOT_STARTED',
+          },
+        ],
+      },
+      redFlags: [
+        {
+          code: 'FINANCIAL_PLAN_MISSING_WHEN_REQUIRED',
+          severity: 'WARNING',
+          title: 'Preliminary finance is missing',
+          description: 'THB 99.00 is pending for 2026-08-18.',
+          owner: 'PROJECT_MANAGER',
+          dueDate: '2026-08-18T00:00:00.000Z',
+          remediation: 'Complete finance.',
+        },
+      ],
+    };
+    const path = request.url;
+    if (path === `/api/v1/projects/${projectId}/stage-1/initiation`) {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      return response.end(
+        JSON.stringify({
+          project,
+          routing: {
+            projectType: 'DESIGN_AND_BUILD',
+            workstreams: ['PROJECT_MANAGEMENT'],
+            steps: ['ASSIGNMENT', 'FINANCIAL_PLANNING'],
+            requiresSurvey: true,
+            requiresPreliminaryFinance: true,
+            documentTypes: ['PROJECT_DOSSIER', 'PRELIMINARY_FINANCIAL_PLAN'],
+            riskLevel: 'HIGH',
+            nextActionBasis: 'ASSIGNMENT',
+          },
+        }),
+      );
+    }
+    if (path === `/api/v1/projects/${projectId}/workspace-summary`) {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      return response.end(JSON.stringify(workspace));
+    }
+    if (path === `/api/v1/projects/${projectId}/stage-1/summary`) {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      return response.end(JSON.stringify(stageOne));
+    }
+    if (
+      request.method === 'PATCH' ||
+      (request.method === 'POST' && path.includes('/stage-1/'))
+    ) {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      return response.end(JSON.stringify({}));
+    }
   }
   const user = {
     id: 'cf9b5f15-5fa2-4910-b0a6-671f54d345e6',
@@ -129,4 +307,4 @@ createServer((request, response) => {
   }
   response.writeHead(404, { 'content-type': 'application/json' });
   response.end(JSON.stringify({ message: 'Not found' }));
-}).listen(3101, '127.0.0.1');
+}).listen(Number(process.env.PORT ?? 3101), '127.0.0.1');

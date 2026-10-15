@@ -1,0 +1,10 @@
+table inet galaxy_e05_deployment {
+  chain input {
+    type filter hook input priority -10; policy accept;
+    iifname != "lo" tcp dport { 3000, 3001 } ct state new reject with tcp reset
+  }
+  chain output {
+    type filter hook output priority -10; policy accept;
+    fib daddr type local meta skuid != 0 tcp dport { 3000, 3001 } ct state new reject with tcp reset
+  }
+}

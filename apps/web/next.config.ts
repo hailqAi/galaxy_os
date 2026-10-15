@@ -24,9 +24,22 @@ const headers = [
     key: 'Permissions-Policy',
     value: 'camera=(), microphone=(), geolocation=()',
   },
+  ...(process.env.NODE_ENV === 'production'
+    ? [
+        {
+          key: 'Strict-Transport-Security',
+          value: 'max-age=31536000; includeSubDomains',
+        },
+      ]
+    : []),
 ];
 
 const config: NextConfig = {
+  // Test builds must not replace the user's running development artifacts.
+  distDir:
+    process.env.GALAXY_TEST_ISOLATION === 'confirmed'
+      ? '.next/m2-build'
+      : '.next',
   poweredByHeader: false,
   allowedDevOrigins: developmentHosts(),
   experimental: {
@@ -39,7 +52,64 @@ const config: NextConfig = {
     },
   },
   async headers() {
-    return [{ source: '/(.*)', headers }];
+    return [
+      { source: '/(.*)', headers },
+      {
+        source:
+          '/api/v1/project-chat/projects/:projectId/ai/files/:sourceId/preview',
+        headers: [{ key: 'X-Frame-Options', value: 'SAMEORIGIN' }],
+      },
+    ];
+  },
+  async redirects() {
+    return [
+      {
+        source: '/projects/:projectId/stage-1/initiation',
+        destination: '/projects/:projectId/stage-1?step=1',
+        permanent: false,
+      },
+      {
+        source: '/projects/:projectId/stage-1/survey',
+        destination: '/projects/:projectId/stage-1?step=2',
+        permanent: false,
+      },
+      {
+        source: '/projects/:projectId/stage-1/requirements',
+        destination: '/projects/:projectId/stage-1?step=3',
+        permanent: false,
+      },
+      {
+        source: '/projects/:projectId/stage-1/approval',
+        destination: '/projects/:projectId/stage-1?step=5',
+        permanent: false,
+      },
+      {
+        source: '/projects/:projectId/design-products/products',
+        destination: '/projects/:projectId/products',
+        permanent: false,
+      },
+      {
+        source: '/projects/:projectId/design-products/products/new',
+        destination: '/projects/:projectId/products/new',
+        permanent: false,
+      },
+      {
+        source: '/projects/:projectId/design-products/products/:lineId/edit',
+        destination: '/projects/:projectId/products/:lineId/edit',
+        permanent: false,
+      },
+      {
+        source:
+          '/projects/:projectId/design-products/products/:lineId/revisions/:revisionId',
+        destination: '/projects/:projectId/products/:lineId',
+        permanent: false,
+      },
+      {
+        source: '/projects/:projectId/design-products/products/:lineId',
+        destination: '/projects/:projectId/products/:lineId',
+        permanent: false,
+      },
+    ];
   },
 };
 

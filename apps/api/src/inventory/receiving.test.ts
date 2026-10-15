@@ -18,7 +18,7 @@ const actor = {
   email: 'user@example.test',
   displayName: 'User',
   mustChangePassword: false,
-  permissions: [],
+  permissions: ['file.read', 'project.stage1.finance.read', 'estimate.read'],
   administrationScope: 'ORGANIZATION',
   managedDepartmentIds: [],
   administrationTier: 1,
@@ -109,6 +109,45 @@ describe('Goods receipt and quality', () => {
         ],
       }),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
+  });
+
+  it('rejects temporary or other-Project inspection evidence', async () => {
+    const findMany = vi.fn(({ where }) =>
+      Promise.resolve(where.attachments ? [] : [{ id: 'file' }]),
+    );
+    const service = new ReceivingService(
+      { fileAsset: { findMany } } as unknown as PrismaService,
+      {} as BusinessEntityPolicy,
+      {} as InventoryService,
+    );
+    vi.spyOn(service, 'get').mockResolvedValue({
+      status: 'RECEIVED',
+      projectId: 'project',
+      lines: [],
+    } as never);
+
+    await expect(
+      service.createInspection(actor, 'receipt', {
+        inspectionNumber: 'QC-1',
+        lines: [
+          {
+            goodsReceiptLineId: '00000000-0000-4000-8000-000000000002',
+            inspectedQuantity: '1',
+            passedQuantity: '1',
+            failedQuantity: '0',
+            quarantinedQuantity: '0',
+            evidenceFileId: '00000000-0000-4000-8000-000000000001',
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          attachments: { some: { projectId: 'project' } },
+        }),
+      }),
+    );
   });
 
   it('prevents inspectors from approving their own inspection', async () => {

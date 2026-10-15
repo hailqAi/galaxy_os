@@ -1,13 +1,12 @@
 'use client';
 
 import { FormEvent, Suspense, useRef, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { apiUrl } from '../lib/api';
 import { authenticate, permittedReturnTo, validateLogin } from './model';
 
 function LoginForm() {
-  const router = useRouter();
   const query = useSearchParams();
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -29,13 +28,17 @@ function LoginForm() {
     setLoading(true);
     try {
       const actor = await authenticate(email, password);
-      router.replace(
+      if (typeof BroadcastChannel !== 'undefined') {
+        const channel = new BroadcastChannel('galaxy-auth');
+        channel.postMessage('changed');
+        channel.close();
+      }
+      window.location.replace(
         actor.mustChangePassword
           ? '/account/change-password'
           : (permittedReturnTo(query.get('returnTo'), actor.permissions) ??
-              '/'),
+              (actor.membershipKind === 'EXTERNAL' ? '/work' : '/')),
       );
-      router.refresh();
     } catch (error) {
       setPassword('');
       setMessage((error as Error).message);

@@ -109,9 +109,31 @@ const permissions = [
   'project.create',
   'project.update',
   'project.delete',
+  'project.key_dossier.manage',
+  'project.key_dossier.item.delete',
   'project.manage_members',
   'project.manage_departments',
   'project.change_phase',
+  'project.stage.bypass',
+  'project.stage1.submit',
+  'project.stage1.review',
+  'project.stage1.finance.read',
+  'project.stage1.finance.manage',
+  'project.stage1.complete_gate',
+  'project.survey.not_applicable',
+  'project.product.view',
+  'project.product.create',
+  'project.product.update',
+  'project.product.revise',
+  'project.product.submit_customer',
+  'project.product.approve_customer',
+  'project.product.submit_technical',
+  'project.product.approve_technical',
+  'project.product.submit_commercial',
+  'project.product.approve_commercial',
+  'project.location.manage',
+  'project.document.manage',
+  'project.document.review',
   'task.read',
   'task.create',
   'task.update',
@@ -323,6 +345,30 @@ const roles = [
   ['employee', 'Nhân viên'],
   ['secretary', 'Thư ký'],
 ];
+const permissionDetails = new Map([
+  [
+    'project.delete',
+    ['Xóa dự án', 'Xóa mềm toàn bộ dự án trong phạm vi được cấp'],
+  ],
+  [
+    'project.key_dossier.manage',
+    [
+      'Quản lý Hồ sơ chủ chốt',
+      'Thêm, sửa và sắp xếp mốc hoặc mục Hồ sơ chủ chốt trong phạm vi được cấp',
+    ],
+  ],
+  [
+    'project.key_dossier.item.delete',
+    [
+      'Xóa mục Hồ sơ chủ chốt',
+      'Xóa mềm một mục Hồ sơ chủ chốt trong phạm vi được cấp',
+    ],
+  ],
+  [
+    'file.delete',
+    ['Xóa tệp đính kèm', 'Gỡ liên kết tệp đính kèm trong phạm vi được cấp'],
+  ],
+]);
 
 async function seed() {
   const organization = await prisma.organization.upsert({
@@ -361,18 +407,22 @@ async function seed() {
       });
   }
   for (const code of permissions) {
+    const [name, description] = permissionDetails.get(code) ?? [
+      code,
+      `Allows ${code}`,
+    ];
     await prisma.permission.upsert({
       where: { code },
       create: {
         code,
-        name: code,
-        description: `Allows ${code}`,
+        name,
+        description,
         module: code.split('.')[0],
         isProtected: code.startsWith('system.'),
       },
       update: {
-        name: code,
-        description: `Allows ${code}`,
+        name,
+        description,
         module: code.split('.')[0],
         isProtected: code.startsWith('system.'),
       },
@@ -633,6 +683,9 @@ async function seed() {
                                   'handover.override',
                                   'warranty.goodwill.approve',
                                   'warranty.claim.decide',
+                                  'project.delete',
+                                  'project.key_dossier.manage',
+                                  'project.key_dossier.item.delete',
                                 ].includes(permission.code) &&
                                 ([
                                   'project.',

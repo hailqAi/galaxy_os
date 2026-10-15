@@ -1,4 +1,5 @@
 'use client';
+import { createCommandKey } from '../../../lib/create-command-key';
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '../../../lib/api';
@@ -15,7 +16,7 @@ export default function NewShipmentPage() {
         body: JSON.stringify({
           shipmentNumber: form.get('shipmentNumber'),
           purchaseOrderId: form.get('purchaseOrderId'),
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: createCommandKey(),
           mode: form.get('mode'),
           originCountry: form.get('originCountry'),
           originLocation: form.get('originLocation'),

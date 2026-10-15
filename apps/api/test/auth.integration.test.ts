@@ -3,13 +3,14 @@ import { PrismaClient } from '@prisma/client';
 import { Test } from '@nestjs/testing';
 import { hash } from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
+import { join } from 'node:path';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module';
 import { EmailService } from '../src/auth/email.service';
+import { assertG00Isolation } from '../scripts/g00-isolated-environment.mjs';
 
-process.env.DATABASE_URL ??=
-  'postgresql://galaxy:galaxy_local@localhost:5432/galaxy_os?schema=public';
+const isolated = assertG00Isolation();
 process.env.PASSWORD_BCRYPT_ROUNDS = '4';
 
 describe.sequential('real authentication and personal account', () => {
@@ -24,7 +25,12 @@ describe.sequential('real authentication and personal account', () => {
   beforeAll(async () => {
     vi.stubEnv('ALLOW_DEV_AUTH', 'false');
     vi.stubEnv('NODE_ENV', 'test');
-    vi.stubEnv('AVATAR_STORAGE_PATH', `/tmp/galaxy-auth-test-${Date.now()}`);
+    vi.stubEnv('UPLOAD_GLOBAL_QUOTA_BYTES', '1099511627776');
+    vi.stubEnv('UPLOAD_STAGING_CAPACITY_BYTES', '824633720832');
+    vi.stubEnv(
+      'AVATAR_STORAGE_PATH',
+      join(isolated.testRoot, `auth-avatars-${Date.now()}`),
+    );
     const organization = await prisma.organization.findUniqueOrThrow({
       where: { slug: 'galaxy-centre' },
     });
@@ -93,7 +99,7 @@ describe.sequential('real authentication and personal account', () => {
       .expect(401);
     expect(unknown.body.message).toBe('Email hoặc mật khẩu không đúng.');
     expect(invalid.body.message).toBe(unknown.body.message);
-    for (let attempt = 0; attempt < 4; attempt++)
+    for (let attempt = 0; attempt < 3; attempt++)
       await request(app.getHttpServer())
         .post('/api/v1/auth/login')
         .send({ email, password: randomBytes(24).toString('base64url') })
@@ -255,19 +261,22 @@ describe.sequential('real authentication and personal account', () => {
       .get('/api/v1/me')
       .set('Cookie', cookie)
       .expect(401);
-    process.env.NODE_ENV = 'production';
-    process.env.APP_PUBLIC_ORIGIN = 'https://galaxy.example';
-    process.env.TRUST_PROXY = 'true';
-    process.env.SMTP_HOST = 'smtp.example';
-    process.env.EMAIL_FROM = 'no-reply@galaxy.example';
-    const login = await request(app.getHttpServer())
-      .post('/api/v1/auth/login')
-      .send({ email, password: newPassword })
-      .expect(201);
-    const setCookie = login.headers['set-cookie'] as unknown as string[];
-    expect(setCookie[0]).toContain('Secure');
-    cookie = setCookie[0]!.split(';')[0]!;
-    process.env.NODE_ENV = 'test';
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('APP_PUBLIC_ORIGIN', 'https://galaxy.example');
+    vi.stubEnv('TRUST_PROXY', 'true');
+    vi.stubEnv('SMTP_HOST', 'smtp.example');
+    vi.stubEnv('EMAIL_FROM', 'no-reply@galaxy.example');
+    try {
+      const login = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email, password: newPassword })
+        .expect(201);
+      const setCookie = login.headers['set-cookie'] as unknown as string[];
+      expect(setCookie[0]).toContain('Secure');
+      cookie = setCookie[0]!.split(';')[0]!;
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('logout revokes the session and a disabled user cannot reuse one', async () => {
@@ -385,13 +394,16 @@ describe.sequential('real authentication and personal account', () => {
   });
 
   it('does not recreate a logged-out actor from the development flag alone', async () => {
-    process.env.ALLOW_DEV_AUTH = 'true';
-    process.env.DEV_AUTH_USER_EMAIL = email;
-    await request(app.getHttpServer()).get('/api/v1/me').expect(401);
-    await request(app.getHttpServer())
-      .get('/api/v1/me')
-      .set('x-galaxy-dev-auth', email)
-      .expect(200);
-    process.env.ALLOW_DEV_AUTH = 'false';
+    vi.stubEnv('ALLOW_DEV_AUTH', 'true');
+    vi.stubEnv('DEV_AUTH_USER_EMAIL', email);
+    try {
+      await request(app.getHttpServer()).get('/api/v1/me').expect(401);
+      await request(app.getHttpServer())
+        .get('/api/v1/me')
+        .set('x-galaxy-dev-auth', email)
+        .expect(200);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

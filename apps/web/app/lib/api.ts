@@ -4,10 +4,22 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly body: unknown = null,
   ) {
     super(message);
   }
 }
+
+export const apiErrorCategory = (error: ApiError) =>
+  typeof error.body === 'object' &&
+  error.body !== null &&
+  ('code' in error.body || 'category' in error.body)
+    ? 'code' in error.body && typeof error.body.code === 'string'
+      ? error.body.code
+      : 'category' in error.body && typeof error.body.category === 'string'
+        ? error.body.category
+        : undefined
+    : undefined;
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiUrl}${path}`, {
@@ -30,12 +42,14 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
         ? body.message.join(', ')
         : (body?.message ?? `HTTP ${response.status}`),
       response.status,
+      body,
     );
   }
   return response.json() as Promise<T>;
 }
 
 export type Actor = {
+  membershipKind?: string;
   userId: string;
   email: string;
   displayName: string;

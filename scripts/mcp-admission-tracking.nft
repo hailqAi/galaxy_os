@@ -1,0 +1,10 @@
+table inet galaxy_e05_deployment {
+ chain input {
+  type filter hook input priority -10; policy accept;
+  ct state established accept
+ }
+ chain output {
+  type filter hook output priority -10; policy accept;
+  ct state established accept
+ }
+}

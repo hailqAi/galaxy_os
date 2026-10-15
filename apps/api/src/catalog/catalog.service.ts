@@ -77,7 +77,13 @@ export class CatalogService {
     const [items, total] = await this.prisma.$transaction([
       this.prisma.product.findMany({
         where,
-        include: { brand: { select: { id: true, name: true } } },
+        include: {
+          brand: { select: { id: true, name: true } },
+          variants: {
+            where: { activeStatus: 'active' },
+            orderBy: { name: 'asc' },
+          },
+        },
         orderBy: { name: 'asc' },
         skip: (page - 1) * pageSize,
         take: pageSize,

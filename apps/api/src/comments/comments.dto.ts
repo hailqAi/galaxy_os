@@ -9,6 +9,8 @@ const entityTypes = [
   'Task',
   'Survey',
   'Requirement',
+  'ProjectProductLine',
+  'ProjectRequiredDocument',
   'MarketingContent',
 ] as const;
 export class CreateCommentDto {

@@ -8,6 +8,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
+import { findProjectFile } from '../files/project-file';
 import { PrismaService } from '../prisma.service';
 import {
   CreateCustomsDto,
@@ -54,7 +55,9 @@ export class LogisticsService {
       mode: query.mode,
       status: query.status,
       purchaseOrder: {
-        purchaseRequest: { project: this.policy.projectWhere(actor) },
+        purchaseRequest: {
+          project: this.policy.projectWhere(actor, 'logistics.shipment.read'),
+        },
       },
       OR: query.search
         ? [
@@ -116,7 +119,9 @@ export class LogisticsService {
         id,
         organizationId: actor.organizationId,
         purchaseOrder: {
-          purchaseRequest: { project: this.policy.projectWhere(actor) },
+          purchaseRequest: {
+            project: this.policy.projectWhere(actor, 'logistics.shipment.read'),
+          },
         },
       },
       include: {
@@ -469,13 +474,12 @@ export class LogisticsService {
     data: ShipmentDocumentDto,
   ) {
     const shipment = await this.get(actor, id);
-    const file = await this.prisma.fileAsset.findFirst({
-      where: {
-        id: data.fileId,
-        organizationId: actor.organizationId,
-        deletedAt: null,
-      },
-    });
+    const file = await findProjectFile(
+      this.prisma,
+      actor,
+      shipment.projectId,
+      data.fileId,
+    );
     if (!file) throw new NotFoundException('File not found');
     const latest = await this.prisma.shipmentDocument.aggregate({
       where: { shipmentId: id, type: data.type },

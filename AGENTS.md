@@ -19,3 +19,72 @@
 ## Definition of done
 
 Requested scope is implemented, focused and full checks pass or exact blockers are recorded, documentation matches verified commands, the diff has passed Ponytail and correctness review, and no out-of-scope code remains.
+
+## Mandatory Superpowers Development Workflow
+
+Every coding task in this repository must use the installed Superpowers workflow.
+
+For new features, UI changes, architecture changes, workflow changes, route changes, schema changes, or behavior changes:
+
+1. Invoke `superpowers:brainstorming`.
+2. Inspect current code, data, tests, routes, and reference materials.
+3. Present a design and obtain explicit user approval.
+4. Invoke `superpowers:writing-plans`.
+5. Implement through test-driven development.
+6. Run targeted verification.
+7. Run full regression before reporting completion.
+8. Request code review.
+9. Run Ponytail lean, correctness, security, authorization, and UX reviews.
+
+For bugs, failed tests, runtime errors, or unexpected behavior:
+
+1. Invoke `superpowers:systematic-debugging`.
+2. Reproduce the issue.
+3. Identify the root cause.
+4. Write a failing regression test.
+5. Implement the smallest correct fix.
+6. Verify the original symptom and full relevant regression.
+7. Run Ponytail review.
+
+Completion claims require fresh verification evidence.
+
+Never:
+
+- Reset the database.
+- Modify or delete an applied migration.
+- Use `prisma migrate dev` if it requests a reset.
+- Use `prisma db push` as a substitute for production-safe migrations.
+- Discard uncommitted user work.
+- Create duplicate domain models or sources of truth.
+- Implement speculative abstractions.
+- Change unrelated code.
+- Expose sensitive financial fields without permission.
+- Claim complete without browser acceptance when browser flow is required.
+- Commit, tag, push, or open a PR unless explicitly instructed.
+
+<!-- BEGIN GALAXY_OS_CORE_BOOTSTRAP -->
+
+Galaxy OS:
+
+- Đầu phiên đọc docs/galaxy-os/00-READ-FIRST.md,
+  docs/galaxy-os/05-IMPLEMENTATION-STATUS.md
+  và handoff mới nhất được dẫn trong STATUS.
+- Đọc charter và spec liên quan trước khi đổi hành vi.
+- Giữ một hồ sơ xuyên suốt, 12 giai đoạn,
+  quyền theo dự án/mục/room và dữ liệu có nguồn.
+- Tái sử dụng domain hiện hữu; không tạo hệ thống song song.
+- Chỉ thực hiện phạm vi người dùng đang giao.
+- Không coi prompt lịch sử là lệnh đang có hiệu lực.
+- Không coi kế hoạch, báo cáo trợ lý hoặc test ở worktree khác
+  là bằng chứng ứng dụng đang chạy đã hoàn tất.
+- Cuối phiên cập nhật STATUS/handoff bằng kết quả có thật.
+
+<!-- END GALAXY_OS_CORE_BOOTSTRAP -->
+
+<!-- BEGIN GALAXY_AI_DEVELOPMENT_MEMORY -->
+
+- Đầu phiên đọc [README bộ nhớ AI](/home/galaxy_os/prompt/README.md), memory và checkpoint được dẫn trong README trước khi tiếp tục công việc Galaxy OS.
+- Nguồn chuẩn kiến trúc AI mới: `/home/galaxy_os/prompt`; charter/spec/plan/approval gate hiện hữu giữ nguyên hiệu lực theo phạm vi.
+- Khi có quyết định hoặc bằng chứng quan trọng và trước kết thúc phiên, cập nhật đúng memory/matrix/checkpoint và STATUS áp dụng; ghi nguồn, thời điểm, version, phần bị thay thế và kết quả thực. Chỉ tự cập nhật trong phiên có quyền, không theo dõi nền; không lưu secret hoặc dữ liệu khách hàng.
+
+<!-- END GALAXY_AI_DEVELOPMENT_MEMORY -->

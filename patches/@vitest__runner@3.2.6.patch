@@ -1,0 +1,13 @@
+diff --git a/dist/chunk-hooks.js b/dist/chunk-hooks.js
+index 59908e26ff1e58a646673c14c2114609a035f54c..13b79900c6b87be1599338c46489036043f6cb16 100644
+--- a/dist/chunk-hooks.js
++++ b/dist/chunk-hooks.js
+@@ -1834,7 +1834,7 @@ async function publicCollect(specs, runner) {
+ 	return files;
+ }
+ 
+-const now = Date.now;
++const now = globalThis.performance ? globalThis.performance.now.bind(globalThis.performance) : Date.now;
+ const collectorContext = {
+ 	tasks: [],
+ 	currentSuite: null

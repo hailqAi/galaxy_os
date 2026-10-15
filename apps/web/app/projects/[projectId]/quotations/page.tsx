@@ -31,10 +31,8 @@ export default function QuotationsPage() {
   return (
     <div className="grid gap-6">
       <p>
-        <Link href={`/projects/${projectId}?workspace=quotations`}>
-          Không gian dự án
-        </Link>{' '}
-        → Báo giá
+        <Link href={`/projects/${projectId}/stage-1`}>Không gian dự án</Link> →
+        Báo giá
       </p>
       <header className="flex items-start justify-between">
         <div>

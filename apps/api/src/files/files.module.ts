@@ -4,10 +4,16 @@ import { PrismaService } from '../prisma.service';
 import { FileStorage } from './file-storage';
 import { FilesController } from './files.controller';
 import { FilesService } from './files.service';
+import { MultipartAdmissionInterceptor } from './multipart-admission.interceptor';
 @Module({
   imports: [AccessControlModule],
   controllers: [FilesController],
-  providers: [FilesService, FileStorage, PrismaService],
-  exports: [FileStorage],
+  providers: [
+    FilesService,
+    FileStorage,
+    MultipartAdmissionInterceptor,
+    PrismaService,
+  ],
+  exports: [FileStorage, FilesService, MultipartAdmissionInterceptor],
 })
 export class FilesModule {}

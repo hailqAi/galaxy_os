@@ -1,0 +1,15 @@
+# Galaxy only. No default model/provider/sandbox/approval override.
+[agents]
+max_concurrent_threads_per_session = 2
+
+[mcp_servers.galaxy_chrome]
+command = "/mnt/c/WINDOWS/system32/cmd.exe"
+args = ["/d", "/c", 'C:\Users\Admin\AppData\Local\GalaxyOS\Tools\galaxy-chrome-mcp.cmd']
+cwd = "/mnt/c/Users/Admin/AppData/Local/GalaxyOS/Tools"
+startup_timeout_sec = 30
+
+# In Galaxy only, avoid launching the inherited generic Linux Chrome server.
+[mcp_servers.chrome-devtools]
+command = "npx"
+args = ["-y", "chrome-devtools-mcp@1.10.1"]
+enabled = false

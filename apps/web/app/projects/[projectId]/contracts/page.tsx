@@ -53,10 +53,8 @@ export default function ContractsPage() {
   return (
     <div className="grid gap-6">
       <p>
-        <Link href={`/projects/${projectId}?workspace=contracts`}>
-          Không gian dự án
-        </Link>{' '}
-        → Hợp đồng
+        <Link href={`/projects/${projectId}/stage-1`}>Không gian dự án</Link> →
+        Hợp đồng
       </p>
       <header>
         <h1 className="text-2xl font-semibold">Hợp đồng</h1>

@@ -2,7 +2,9 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDate,
+  IsDateString,
   IsIn,
   IsNumberString,
   IsOptional,
@@ -19,8 +21,9 @@ export class EstimateLineDto {
   @IsOptional() @IsUUID() supplierId?: string;
   @IsOptional() @IsString() customDescription?: string;
   @IsNumberString() quantity!: string;
+  @IsOptional() @IsNumberString() purchaseQuantity?: string;
   @IsString() @Length(1, 30) unit!: string;
-  @IsNumberString() netPurchasePrice!: string;
+  @IsOptional() @IsNumberString() netPurchasePrice?: string;
   @IsString() @Length(3, 3) currency!: string;
   @IsNumberString() exchangeRateSnapshot!: string;
   @IsOptional() @IsNumberString() freightEstimate?: string;
@@ -29,6 +32,16 @@ export class EstimateLineDto {
   @IsOptional() @IsNumberString() otherCost?: string;
   @IsNumberString() sellingPrice!: string;
   @IsOptional() @IsString() notes?: string;
+  @IsOptional()
+  @IsIn(['CONFIRMED', 'PROVISIONAL', 'MISSING'])
+  priceStatus?: 'CONFIRMED' | 'PROVISIONAL' | 'MISSING';
+  @IsOptional()
+  @IsIn(['SUPPLIER_QUOTATION', 'HISTORICAL', 'STANDARD', 'MANUAL'])
+  priceSourceType?: 'SUPPLIER_QUOTATION' | 'HISTORICAL' | 'STANDARD' | 'MANUAL';
+  @IsOptional() @IsDateString() priceQuotedAt?: string;
+  @IsOptional() @IsDateString() priceValidUntil?: string;
+  @IsOptional() @IsString() @Length(1, 500) sourceDocument?: string;
+  @IsOptional() @IsBoolean() contributesToTotal?: boolean;
 }
 
 export class CreateEstimateDto {

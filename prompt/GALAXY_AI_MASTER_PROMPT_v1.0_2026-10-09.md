@@ -1,0 +1,658 @@
+# GALAXY AI — MASTER PROMPT, BỘ NHỚ KIẾN TRÚC VÀ KẾ HOẠCH TRIỂN KHAI
+
+**Baseline:** GALAXY-AI-ARCH-20261009-v1.0  
+**Ngày chốt tạm:** 09/10/2026 — Asia/Ho_Chi_Minh  
+**Chủ dự án:** Nguyen Thanh Tien / Joe Nguyen — Galaxy Centre  
+**Đích nhận:** Codex đang làm việc với repository Galaxy OS.  
+**Chế độ hiện tại:** RECORD_AND_PLAN — ghi quyết định dài hạn, đối chiếu hiện trạng, lập kế hoạch. Không bắt đầu triển khai kiến trúc mới, cài hàng loạt công cụ hoặc phát hành chỉ vì nhận tài liệu này.  
+**Tính chất:** yêu cầu kiến trúc và kế hoạch tổng thể; chưa phải báo cáo đã triển khai. Chủ dự án sẽ bổ sung sau.
+
+---
+
+## 0. LỆNH CHỦ ĐẠO CHO CODEX
+
+Đọc toàn bộ tài liệu. Chuyển các quyết định ổn định thành bộ nhớ kiến trúc có phiên bản trong repo Galaxy OS; đối chiếu với source, spec/plan P1–P3 và approval đã có; lập kế hoạch triển khai đủ các yêu cầu dưới đây.
+
+Không dựng lại Galaxy OS. Không thay kết nối SIWC đã hoạt động bằng một hệ thống khác. Không coi danh sách GitHub là lệnh cài tất cả. Không kết luận một capability hoạt động chỉ vì tài liệu nhà cung cấp nói có hỗ trợ.
+
+Phải tách ba lớp trạng thái:
+
+1. **DECISION:** điều chủ dự án đã yêu cầu hoặc tạm chốt.
+2. **DESIGN/PLAN:** cách dự kiến thực hiện, còn phải gắn với code và điều kiện thực tế.
+3. **IMPLEMENTED/VERIFIED/DEPLOYED:** chỉ ghi khi có bằng chứng tương ứng.
+
+Lượt nhận prompt này ưu tiên lưu chuẩn và kế hoạch. Không diễn giải thành phê duyệt mua gói/credits, xuất dữ liệu thật, tạo credential, publish Workspace Agent, đổi OAuth, migration hoặc cutover mới. Không làm mất approval hợp lệ của phần P1 đã được duyệt; cũng không dùng approval P1 để suy ra mọi phần mở rộng đã được duyệt.
+
+Khi chủ dự án yêu cầu thực thi tiếp: tiếp tục các task đã được phê duyệt; chỉ trình đúng thay đổi mới hoặc gate còn thiếu. Không lặp discovery/design/plan cho cùng phạm vi không đổi.
+
+---
+
+## 1. PHÂN BIỆT HAI LOẠI BỘ NHỚ
+
+### 1.1. Bộ nhớ phát triển Galaxy OS — nằm trong tài liệu repo
+
+Lưu mục tiêu, quyết định, lý do, ranh giới, hợp đồng công cụ, lựa chọn công nghệ, kế hoạch và bằng chứng nghiệm thu. Dành cho GPT/Codex/đội phát triển tiếp tục công việc.
+
+Không đưa tài liệu khách hàng, nội dung chat nghiệp vụ, token, private key, .env, raw logs nhạy cảm hoặc dữ liệu runtime vào Git.
+
+### 1.2. Project Memory của sản phẩm Galaxy — nằm trong DB/storage có ACL
+
+Lưu lịch sử hỏi–đáp, quyết định, nguồn, file và trí nhớ riêng/chia sẻ của từng Project kinh doanh. Đây là một chức năng phải triển khai và kiểm thử; việc viết PROJECT_MEMORY.md trong repo không chứng minh chức năng này đã tồn tại.
+
+Chỉ lưu tri thức dự án phát triển này vào memory kiến trúc. Không tự đưa nó vào toàn bộ Project khách hàng.
+
+---
+
+## 2. CÁCH LƯU CHUẨN TRONG REPO VÀ DUY TRÌ QUA CÁC PHIÊN
+
+### 2.1. Tìm đúng nguồn hiện tại
+
+Đầu mối lịch sử, phải kiểm tra tồn tại và nội dung thật:
+
+- Repo: `/home/galaxy_os`.
+- Worktree từng dùng: `/home/galaxy_os/.worktrees/m2-a-20260928`.
+- `AGENTS.md` áp dụng.
+- `docs/galaxy-os/PROJECT_MEMORY.md` và charter v0.2/các bổ sung đã duyệt.
+- `docs/superpowers/specs/2026-10-09-p1-project-ai-memory-design.md`.
+- `docs/superpowers/plans/2026-10-09-p1-project-ai-memory.md`.
+- Handoff P1, P2, P3, SIWC, file/artifact và runtime mới nhất.
+
+Theo báo cáo người dùng từng chuyển: SIWC owner đã live; model catalog đã trả model thật; Project Chat và task_list từng chạy; sau đó phát hiện pilot chỉ cho Showroom dù owner có quyền ở nhiều Project, history tám lượt, thiếu file/context/tool; uploader chat và memory còn hạn chế. Đây là **mốc báo cáo**, không phải trạng thái đã tự kiểm ở phiên mới.
+
+Không checkout về SHA cũ để khớp tài liệu. Kiểm worktree, HEAD, diff, untracked, schema, process và artifact thực tế; giữ thay đổi người dùng.
+
+### 2.2. Ghi vào cấu trúc tài liệu hiện hữu
+
+Ưu tiên cập nhật tài liệu tương đương đã có thay vì sinh nhiều bản cạnh tranh. Nếu chưa có, đề xuất cấu trúc:
+
+```text
+docs/galaxy-os/PROJECT_MEMORY.md                 # Mục lục và quyết định dài hạn ngắn gọn
+docs/galaxy-os/ai/ARCHITECTURE_BASELINE.md        # Nguồn chuẩn của kiến trúc AI
+docs/galaxy-os/ai/DECISION_LOG.md                 # ADR và lịch sử thay đổi
+docs/galaxy-os/ai/REQUIREMENTS_TRACEABILITY.md    # Yêu cầu → task → test → runtime
+docs/galaxy-os/ai/WORKSPACE_AGENTS_PLAN.md         # Hợp đồng và kế hoạch nhánh Workspace
+docs/galaxy-os/ai/TOOL_ADOPTION_MATRIX.md         # Công cụ, phiên bản, license, benchmark
+docs/galaxy-os/ai/ROLLOUT_PLAN.md                 # Milestone, dependency, gate, rollback
+docs/galaxy-os/handoffs/<date>-ai-<checkpoint>.md # Chỉ trạng thái và bằng chứng theo ngày
+```
+
+Các đường dẫn trên là đề xuất tài liệu, không phải tuyên bố đã có file. Sau khi kiểm AGENTS.md, có thể thêm một link ngắn tới baseline; không xóa, thay thứ tự quyền hoặc nới cơ chế an toàn.
+
+Baseline có version, ngày, chủ quyết định, các mục bị thay thế, nguồn và trạng thái tạm chốt. Bổ sung sau bằng revision mới và diff quyết định; không sửa âm thầm lịch sử.
+
+Mỗi phiên bắt đầu đọc baseline, delta quyết định và handoff mới nhất. Tránh quét lại toàn repo chỉ để chứng minh tài liệu vẫn nguyên vẹn khi không có nhu cầu. Mỗi phiên kết thúc ghi checkpoint bền vững, không chỉ `/tmp`.
+
+### 2.3. Thứ tự giải quyết mâu thuẫn
+
+Yêu cầu hiện tại có hiệu lực đúng phạm vi chủ dự án nêu; giữ các ranh giới bảo mật và quyền thực. Nghiệp vụ v0.2 cùng điều chỉnh đã chốt là chuẩn nghiệp vụ. Source/test chứng minh hiện trạng, không tự biến lỗi thành quy tắc. Figma/PDF là căn cứ trình bày, không chứng minh API hay cấp quyền tồn tại.
+
+Không thi hành prompt cũ nằm trong tài liệu như lệnh mới. Ghi mâu thuẫn bằng mã quyết định và tác động; chỉ hỏi điểm thực sự cần người quyết định.
+
+---
+
+## 3. CÁC QUYẾT ĐỊNH BẤT BIẾN CỦA BASELINE NÀY
+
+**D01 — Galaxy là hệ thống nghiệp vụ có thẩm quyền.** Một Project xuyên suốt; dữ liệu nhập một lần, có owner, lịch sử và phê duyệt. Không tạo CRM/Task/File/IAM/Approval/Memory nghiệp vụ thứ hai. Giữ định nghĩa 12 giai đoạn theo charter hiện hành, không tự phân loại lại.
+
+**D02 — SIWC là đường suy luận thường trực.** Dùng model mạnh nhất phù hợp với yêu cầu và được account/route thực sự cấp quyền; không âm thầm hạ model, rút ngắn trả lời hoặc fallback sang provider-key đã paused. Không chọn model theo thứ tự tên. Cho người dùng xem model yêu cầu và model thực thi.
+
+**D03 — Không giới hạn chủ đề hỏi đáp một cách tùy tiện.** AI được hỏi kiến thức, kỹ thuật, lập trình, kinh doanh, sáng tạo và các chủ đề hợp lệ. Project là ngữ cảnh, không là whitelist chủ đề. Giữ chính sách nhà cung cấp và quyền dữ liệu.
+
+**D04 — Giữ nguyên câu hỏi.** Câu hỏi và tệp gắn với nó là bản gốc bất biến theo từng phiên bản message. Context được bổ sung riêng, không thay câu hỏi bằng một bản tóm tắt của model yếu. Edit message tạo revision mới.
+
+**D05 — Mỗi Project có không gian AI liên tục do Galaxy quản lý.** Không hứa có cuộc chat GPT bí mật giữ mọi thứ phía OpenAI. Tách hội thoại riêng/chung, thread và actor, không dồn tất cả nhân viên vào một lịch sử chung.
+
+**D06 — Original-first.** Giữ file gốc và hash; tạo Markdown/structured content làm bản dẫn xuất. Ưu tiên truyền bản gốc khi model/route/limit cho phép, báo rõ khi chỉ truyền trích đoạn hoặc bản render. Không hứa truyền nguyên mọi định dạng hoặc 10 GB cho GPT.
+
+**D07 — File chat lưu tạm bền vững.** Tệp làm việc không nằm trong `/tmp` như kho cuối. Có hạn mức/retention, có thể chuyển sang hồ sơ khi người có quyền yêu cầu. Promote không đồng nghĩa phê duyệt tài liệu hay công bố cho khách hàng.
+
+**D08 — Bảo toàn đầu ra.** Giữ đầy đủ nội dung trả lời có thể cung cấp cho người dùng, nguồn, ảnh/tệp, bản Markdown và quan hệ đầu vào–đầu ra. Không tự rút gọn câu trả lời tốt bằng một model khác. Không yêu cầu trích chain-of-thought ẩn.
+
+**D09 — Kiểm chứng thay vì tin lời AI.** Code kiểm quyền, tính toán, định dạng, file tồn tại; model hỗ trợ rà soát có nguồn; người có thẩm quyền duyệt nghiệp vụ. “AI làm xong bản nháp” khác “công việc hoàn thành” và “tài liệu đã phát hành”.
+
+**D10 — Memory là tri thức có nguồn, không phải toàn bộ lời AI thành sự thật.** Lưu lịch sử đầy đủ riêng; trích memory cốt lõi có trạng thái, nguồn, version và hiệu lực. Tách user-confirmed/source-grounded/AI-proposed/superseded.
+
+**D11 — Cách ly Project là ranh giới dữ liệu.** Áp dụng tại DB, source query, cache, retrieval, embeddings, worker, summaries, tool result và provider session; kể cả admin có quyền nhiều Project cũng không tự trộn nguồn.
+
+**D12 — Workspace Agents là nhánh bổ trợ có điều kiện.** Credential, workspace entitlement, chi phí, tool access, output destination, privacy và live acceptance riêng. Không phá SIWC và không làm điều kiện chặn toàn bộ nền tảng.
+
+**D13 — Không hứa “phiên ẩn” cho Workspace.** SIWC không tạo cuộc chat UI theo thiết kế đang chọn. Workspace có liên hệ tới hội thoại ChatGPT; visibility/retention cần xác minh và người dùng chấp thuận trước khi đưa dữ liệu thật.
+
+**D14 — Công cụ bổ sung qua adapter có hợp đồng.** Tham khảo tư tưởng model/harness/tools/skills/session/storage tách rời của DeepSeek Harness; không đổi sang model DeepSeek hay thay toàn backend. Công cụ chỉ AVAILABLE khi executor sẵn sàng và quyền/capability phù hợp.
+
+**D15 — Giữ các giới hạn hiện hành.** Không sửa OAuth/callback/refresh SIWC hay remote OAuth trong đợt này; không bật lại bốn API-key provider; không tự mua credits/gói/GPU/VPS; không reset DB/volume/Git; không công khai cổng nội bộ. Domain hiện có tiếp tục phục vụ bằng kiến trúc hiện hữu.
+
+**D16 — Baseline tạm chốt, có thể bổ sung.** Thay đổi sau cần có diff quyết định và đánh giá ảnh hưởng, không buộc bắt đầu lại toàn bộ kiến trúc.
+
+---
+
+## 4. KHUNG KIẾN TRÚC LOGIC — TÁI SỬ DỤNG SERVICE HIỆN CÓ
+
+```text
+Galaxy Project Chat
+  → Identity / Project & Source Policy
+  → Session + Context Assembly + Model Policy
+  → SIWC GPT ───────────────────────────────────────┐
+      ├─ trả lời trực tiếp                          │
+      ├─ Galaxy read/draft tools → local workers    │
+      └─ giao job → Workspace Adapter (optional)    │
+                     → Galaxy Result Receiver ─────┤
+  ← Output Validation + Artifact Store + Renderer ──┘
+  → Full interaction archive / Markdown snapshots
+  → Memory extraction → reconciliation → authorized Project Memory
+```
+
+Giữ Next.js/NestJS, PostgreSQL/Prisma, Redis/queue và document service hiện có sau khi xác minh. Không bắt buộc mỗi hộp là một microservice mới. Các worker tài liệu/ảnh có thể tách tiến trình vì tài nguyên và sandbox; policy điều hành vẫn của Galaxy.
+
+Vai trò tác nhân có thể gồm researcher, analyst, spreadsheet/document/presentation specialist, verifier. Chỉ dùng nhiều vai trò khi có lợi; không tạo 10 lượt AI cho câu hỏi đơn giản. SIWC không phải “AI yếu” mặc định; Workspace không mặc nhiên thông minh hơn.
+
+Yêu cầu rõ như “xuất PDF”, “tìm web”, “chỉ Project” có kiểm tra đầu ra bằng quy tắc. Model được quyền đề xuất công cụ nhưng không tự cấp quyền, thêm provider, chọn Project hay duyệt nghĩa vụ.
+
+Tác nhân chịu trách nhiệm chuyên môn có thể soạn trực tiếp câu trả lời cuối. Bộ điều phối không phải viết lại tất cả. Giữ bản gốc, sửa có căn cứ, lưu revision.
+
+---
+
+## 5. HỢP ĐỒNG DỮ LIỆU VÀ TRUY NGUYÊN
+
+Đây là hợp đồng khái niệm cần map vào schema thật; không phải lệnh tạo bảng mới trùng domain.
+
+| Khái niệm                        | Trường/nội dung tối thiểu và yêu cầu                                                                            |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| ProjectAISpace                   | tenant, project, memory/retention policy; không tự cấp quyền source                                             |
+| AIConversation                   | project, visibility, owner/members, revision; không tin projectId frontend                                      |
+| AIMessageRevision                | nguyên văn user/assistant content, attachments, source refs, trạng thái hoàn tất                                |
+| AIContextManifest                | nguồn và version, vị trí trang/ô/slide, inclusion/exclusion reasons, token budget, policy revision              |
+| AIRun                            | actor/project/conversation/message revision, route, requested/actual model, idempotency key, status, parent job |
+| SourceAsset / FileVersion        | storage identity, hash, size/MIME, ACL, version, retention, working/record classification                       |
+| DerivedDocument                  | Markdown và structured content, parser/version, source coordinates, warnings; ACL không rộng hơn source         |
+| Artifact                         | loại file, storage key, hash, sources, generator/model, validation, draft state, access policy                  |
+| MemoryCandidate / MemoryRevision | fact/proposal/decision, provenance, visibility, confirmation, supersession, effective dates                     |
+| DelegatedJob                     | agent/trigger/run IDs nếu có, authorized scope, lease/revision, context hash, output manifest, budget           |
+| CapabilityEvidence               | route/account/model/tool version, supported/unsupported/unverified, test date và evidence                       |
+| ApprovalRecord                   | đối tượng/hash được duyệt, actor, scope, thời điểm, điều kiện; không duyệt mù các tài liệu chưa có              |
+
+Mã tool mới dưới đây là đề xuất logic; tận dụng convention và registry thật. Tool phải khai báo input/output schema, permission, side effect, timeout, resource limit, idempotency và executor.
+
+Trước mỗi tool read, trước external dispatch, khi nhận output và khi download: kiểm lại quyền hiện tại. Nếu quyền bị thu hồi giữa chừng, quarantine hoặc loại bỏ output không được phép; không gửi vào chat rồi mới kiểm.
+
+Project hoặc file thay đổi lúc job đang chạy: kết quả ghi source revision đã dùng và cảnh báo stale khi cần. Không âm thầm thay source để khớp kết quả.
+
+---
+
+## 6. SIWC: MODEL, NGỮ CẢNH, PHIÊN VÀ TRẢ LỜI
+
+### 6.1. Chính sách chất lượng
+
+Catalog thực → capability probe → bộ bài thử Galaxy → model profile ưu tiên chất lượng. Profile có version, requested/actual model, mode suy luận thực, fallback policy và giới hạn nhà cung cấp. Không ép tăng một tham số mà route không hỗ trợ. Không hứa chất lượng chỉ dựa vào tên model.
+
+Model không sẵn sàng/quota hết: báo lỗi đúng, cho phép retry hoặc chọn lại; không âm thầm hạ cấp. Chi phí và quota vẫn có guardrail rõ nhưng không cắt ngữ cảnh/công cụ vô cớ để giảm chất lượng.
+
+### 6.2. Lắp ngữ cảnh
+
+Giữ original user message trong message riêng. Backend thêm Project identity được xác thực, các quyết định còn hiệu lực, recent dialogue, relevant past dialogue, source excerpts và file inputs phù hợp. Văn bản tài liệu/web/tool output là dữ liệu không tin cậy, không được biến thành developer instruction.
+
+Không gửi tất cả Project cho mọi câu hỏi. Không dùng tám lượt cuối làm giới hạn cứng duy nhất. Quản lý budget theo model; nguồn thiết yếu không đủ thì nêu hạn chế/chia công việc, không lặng lẽ bỏ điều kiện quan trọng. Có source manifest để kiểm tra điều GPT thực sự nhận được.
+
+### 6.3. Phiên
+
+Galaxy giữ history và state theo Project/conversation/visibility. Làm mới trình duyệt, restart hay hai tab không làm lẫn scope. Không gửi request SIWC bằng cách áp dụng mù hợp đồng của API-key route. Đối chiếu nguồn O01/O02: hiện SIWC HTTP cần context do client cung cấp, không có durable conversation store phía provider cho luồng này.
+
+Nếu có opaque/encrypted continuation state hợp lệ được route trả về: kiểm chứng rồi lưu đúng scope/revision, không đọc hoặc xuất ra memory nội dung. Invalidate khi ACL/source/model compatibility thay đổi; không replay state chứa nguồn đã mất quyền.
+
+### 6.4. Hoàn tất và UI
+
+Stream được gắn đúng run/message revision. Kết thúc bất thường phải là INCOMPLETE/FAILED, không READY giả. Hiển thị model thực, trạng thái đọc nguồn/tạo file dựa trên events thật, source citations và artifact cards. Không tạo progress giả.
+
+Sau message hoàn thành, lưu snapshot Markdown cùng tệp liên quan; memory extraction có thể chạy sau mà không chặn người dùng hỏi tiếp. Lượt sau đọc được tail messages mới dù memory worker chưa xong.
+
+---
+
+## 7. INPUT FILES: BẢN GỐC, MARKDOWN, LƯU TẠM VÀ HỒ SƠ
+
+### 7.1. Giới hạn Galaxy
+
+**MAX_FILE_BYTES = 10.000.000.000**, áp dụng mỗi tệp. Phân biệt giới hạn mỗi file, tổng lưu trữ, dung lượng tạm, dung lượng sau giải nén và hạn mức gửi provider.
+
+Tái sử dụng resumable uploader. Không nạp toàn tệp vào RAM, không base64 10 GB trong browser, không một request JSON khổng lồ. Kiểm chunk/session offsets, cumulative size, hash cuối, quota reservation, idempotency, pause/cancel/resume/restart, backpressure và cleanup. Không tin Content-Length hoặc MIME khai báo.
+
+Không cấp upload 10 GB nếu storage capacity chưa đủ; UI phải báo giới hạn vận hành thật. Test file lớn trong môi trường kiểm soát, không làm đầy WSL hoặc DB nghiệp vụ.
+
+### 7.2. Chuỗi tiếp nhận
+
+Receive → authorize → persist original → scan/validate → attach đúng message → extract/preview/index → prepare provider input.
+
+States cần phân biệt: UPLOADING, STORED, SCANNING, PROCESSING, READY_FOR_RETRIEVAL, PARTIAL, UNSUPPORTED, FAILED, CANCELLED. Storage thành công không tự là AI đọc được.
+
+Bản gốc bất biến theo version và hash. Không ghi đè khi chuyển đổi. Markdown/JSON/previews đều là derivatives, có parser version, tọa độ nguồn và warnings. Không coi Markdown là bản không mất mát của Excel/PDF/PPT/ảnh.
+
+### 7.3. Gửi file lên GPT
+
+Ưu tiên truyền original bằng đường được tài khoản/model/route hỗ trợ trong giới hạn thật. Không tự bật Files API hoặc gửi OAuth credential vào bất kỳ library “OpenAI-compatible” nào.
+
+Khi không truyền nguyên được: ghi rõ ORIGINAL_SENT / DERIVATIVE_SENT / EXCERPTS_SENT / UNSUPPORTED và coverage. Bản gốc vẫn nằm trong Galaxy. Không hứa toàn bộ đã được đọc khi chỉ gửi trích đoạn, summary hoặc các dòng đầu.
+
+Dùng nguồn O07 làm mốc kiểm tra file input và đọc lại tại triển khai. Không lấy giới hạn upload của Workspace hoặc Galaxy thay giới hạn request SIWC.
+
+### 7.4. Định dạng và mức hỗ trợ
+
+- PDF: text, bảng, page images, scan/OCR khi cần; giữ page/region và cảnh báo đọc thiếu.
+- DOC/DOCX/RTF/ODT, PPT/PPTX/ODP: text, bảng, section/slide, embedded objects; render bổ sung khi layout/ảnh cần thiết.
+- XLS/XLSX/CSV/TSV/ODS: sheet/range/formula/value/number formats/merged cells/units; không chỉ Markdown. Có test dữ liệu quan trọng ở sau dòng 1.000.
+- JPG/PNG/WEBP/TIFF/BMP/GIF/HEIC: original, safe preview, OCR khi cần, vision theo capability, phân biệt quan sát và thông số được xác nhận.
+- TXT/MD/HTML/XML/JSON/YAML/log/code: đọc như dữ liệu; không thực thi script/SQL/macro.
+- DWG/DXF/IFC/RVT/SKP: store/preview/metadata/geometry là các mức khác nhau; chỉ bật mức đã có parser/license/test.
+- ZIP/7Z/RAR: giới hạn số tệp, recursion, expansion size, đường dẫn, symlink; không giải nén vô hạn.
+- Audio/video: lưu và metadata; transcript/frame extraction/generation là capability riêng, không giả SIWC có audio/video input.
+
+### 7.5. Tệp làm việc và hồ sơ
+
+Working Attachment được lưu bền vững ngoài Git và public web root. Quan trọng hoặc được yêu cầu → promote sang Project Record bằng quyền phù hợp, giữ source identity/version/audit. Promote từ private sang shared cần kiểm quyền và preview phạm vi; không tự phát hành/duyệt nội dung.
+
+Retention policy phải có quyết định riêng cho upload dang dở, tệp làm việc, artifact, hồ sơ và các bản backup. Không tự chọn hạn xóa hồ sơ khách hàng. Khi tệp được memory/record dùng làm bằng chứng, có reference/pin phù hợp; chủ động xóa phải xử lý derivatives/index/memory và hạn lưu backup rõ ràng.
+
+Lỗi parser không được làm mất bản gốc. Link tải luôn kiểm quyền hiện hành hoặc URL ký ngắn hạn có phạm vi phù hợp; không public vĩnh viễn.
+
+---
+
+## 8. OUTPUTS: XLSX, DOCX, PDF, PPTX, ẢNH VÀ VIDEO
+
+### 8.1. Mốc làm được việc đầu tiên
+
+Một câu lệnh trong Project Chat tạo báo giá DRAFT bằng XLSX và PDF có dữ liệu thử được phép, ảnh hợp lệ, số học khớp và link tải hoạt động sau reload. Không chờ memory engine nâng cao hoặc Workspace đủ quyền mới làm được luồng này qua công cụ Galaxy.
+
+Tái sử dụng `create_document`, `revise_draft`, File domain, document service và artifact registry. Registry có tên tool nhưng thiếu executor không được ghi READY.
+
+### 8.2. Hợp đồng tương thích
+
+Kiểm tra contract cũ trước khi mở công thức/tài chính. Nếu create_document v1 giới hạn số XLSX dạng chuỗi/không công thức, giữ behavior v1; đề xuất version mới hoặc capability riêng có schema, permission và test. Không âm thầm đổi ý nghĩa tool đang có.
+
+AI đề xuất nội dung; công cụ kiểm soát ghi tệp. Không cho model chạy shell tùy ý trên server nghiệp vụ. Code thực thi cho tài liệu phải ở sandbox/job workspace, không truy cập secret/DB/network nếu không cần.
+
+### 8.3. Kiểm chất lượng theo loại
+
+XLSX: Decimal và quy tắc làm tròn đã chốt; kiểm công thức/cached result; không macro/external data connection; không formula injection từ dữ liệu không tin cậy; không coi chuỗi định dạng số là phép tính đúng. Đối chiếu cả workbook khi yêu cầu, không chỉ 1.000 dòng đầu.
+
+DOCX: styles, header/footer, bảng/ảnh, Unicode tiếng Việt, page breaks và template Galaxy; mở/render lại để kiểm tra.
+
+PDF: chữ không thiếu/không lỗi font, bảng không tràn, ảnh rõ, page count, metadata và nguồn; không tự thêm dấu/chữ ký. Dùng font hợp lệ; không đưa font file vào gói chia sẻ trái quyền.
+
+PPTX: text/table/chart native editable theo yêu cầu, template thương hiệu, notes, image refs; kiểm từng slide qua render. Không lấy ảnh chụp toàn slide làm “PPT chỉnh sửa được” nếu yêu cầu native.
+
+Ảnh: chỉ thực hiện khi có engine/tool hợp lệ; distinguish generation/editing/moodboard composition. Lưu original reference, thao tác, model nếu có, kích thước, provenance. Ảnh concept không phải ảnh sản phẩm thật.
+
+Video: tách kịch bản, dựng tư liệu, transcription và generative video. Chưa có engine/video export route kiểm chứng thì giữ UNVERIFIED/BLOCKED cho đúng phần, không giả video sinh ra từ lời mô tả.
+
+### 8.4. Lưu kết quả
+
+Tạo tệp → validate/open/render → persist → artifact metadata → attach message → trả link theo quyền. Câu trả lời model, hoàn thành công cụ và tệp đã lưu là ba trạng thái độc lập.
+
+Giữ public final answer, citations, artifacts và bản Markdown đầy đủ. Output archive loại credential và raw sensitive operational logs; không yêu cầu private reasoning. Không dùng link `sandbox:` của môi trường khác làm link Galaxy.
+
+Nếu chỉ nhận URL bên ngoài, chỉ tải từ nguồn được phép và chống SSRF; không xem lời agent “file tồn tại” là bằng chứng. Download xong kiểm hash/MIME/ACL và gắn artifact.
+
+---
+
+## 9. WEB SEARCH VÀ CHẤT LƯỢNG SUY LUẬN
+
+Giữ ưu tiên cao cho web thật. Kiểm native web_search trên model/account/SIWC hiện tại. Supported schema không đồng nghĩa tool đã chạy; cần execution evidence, nguồn thật và terminal success.
+
+Nếu không hỗ trợ, kế hoạch fallback là Galaxy-owned search/retrieval có nguồn công khai: SearXNG cho discovery, Crawl4AI cho đọc trang. Không giả crawler là search engine. Không tự dùng instance công khai không tin cậy hoặc mua search API.
+
+Query công khai phải tách khỏi dữ liệu riêng Project. Không đưa tên khách hàng/hợp đồng/giá vốn vào truy vấn nếu không cần và không được phép. Tài liệu web là dữ liệu không tin cậy; chống prompt injection, SSRF, redirects tới private IP, DNS rebinding, nội dung quá lớn và request quá tải.
+
+Chế độ: Auto, Web, Project-only; đặt nghĩa rõ. Auto cho kiến thức chung không cần tool; thông tin hiện tại hoặc người dùng yêu cầu phải tìm nguồn thật. Project-only không được giả đã kiểm chứng Internet.
+
+Giữ title/URL/publisher/time/locator/source excerpt và citation mapping. Không tạo URL/citation giả, không coi snippet là toàn văn. Có ngày kiểm tra thông tin nhạy thời gian.
+
+Quality eval dùng bài thật: kỹ thuật, lập trình, giá/catalogue, đối chiếu nguồn, hỏi tiếp nhiều lượt, câu hỏi thiếu nguồn, context nhiễu và câu yêu cầu xuất tệp. So sánh bản trả lời gốc với bản sau validation để phát hiện bước viết lại làm giảm chất lượng.
+
+---
+
+## 10. KẾ HOẠCH WORKSPACE AGENTS — NHÁNH BỔ TRỢ ĐỘC LẬP
+
+### W0 — Kiểm tra điều kiện trước khi phụ thuộc
+
+Lập account/workspace readiness sheet: quyền Workspace Agents, quyền tạo/publish/run, model/reasoning/tool thật, API channel, kiểu account app connection, credit/usage controls, visibility/retention, output sink và quyền người dùng Galaxy tương ứng.
+
+Đọc nguồn O03–O06/O08. Không suy ra SIWC thành công là đã có Workspace. Không lấy token SIWC/Codex hoặc Platform API key làm Workspace Agent access token.
+
+Chi phí và quota phải được chủ dự án chấp thuận trước khi tác vụ có thể phát sinh dùng thêm. Không tự mua gói/credits. Không có quyền hoặc workspace: BLOCKED_ENTITLEMENT cho nhánh này, các milestone SIWC/local vẫn tiếp tục theo scope đã được duyệt.
+
+Yêu cầu không có conversation ChatGPT phía ngoài: SIWC là đường chính. Workspace có conversation_url, nên nhánh này cần quyết định rõ về visibility/retention; không tự gọi nó là phiên ẩn. Nếu chưa chấp thuận, chỉ thiết kế và dùng dữ liệu thử không nhạy cảm khi có quyền chạy.
+
+### W1 — Kết nối đầu vào/đầu ra văn bản
+
+Tạo custom Galaxy app/MCP output sink có contract tối thiểu; đây là công cụ phải triển khai, không phải callback có sẵn của trigger API.
+
+Các thao tác logic đề xuất:
+
+- read_job_context: đọc ngữ cảnh tối thiểu của một job được quyền.
+- read_job_source: đọc đúng nguồn/version được cấp cho job.
+- submit_job_result: trả final answer, citations, warnings và manifest đầu ra.
+
+Không coi jobId hoặc conversation_key là credential. Kết nối phải có identity xác thực và server-side binding với job/actor/project/policy. Quyền job ngắn hạn và tối thiểu; không đưa secret vào user prompt. Nhánh agent-owned account phải bị backend giới hạn thực, không chỉ chỉ dẫn bằng văn bản.
+
+Published API channel nhận input theo schema chính thức. Tại mốc kiểm tra, trigger trả Accepted/conversation URL; việc polling trạng thái có beta nhưng API không trả final response content. Vì vậy result sink phải chạy thật. Source of truth của trạng thái tích hợp là Galaxy job + output đã xác minh, không phải riêng status completed của provider.
+
+Test Preview ghi được vào sink trước, rồi mới test trigger. App write approval cho sink low-risk cần cấu hình có chủ đích; không tắt tất cả approvals. Nếu chờ phê duyệt phải hiện WAITING_APPROVAL, không treo vô hạn.
+
+### W2 — Nhận tệp/ảnh thật, không chỉ manifest
+
+Chứng minh được đường truyền byte từ môi trường agent tới storage Galaxy. Agent có thể gọi công cụ Galaxy tạo file ngay tại job store hoặc dùng file transfer mà connector hỗ trợ thật; không mặc định MCP có thể mở filesystem của agent.
+
+Tên tool khai báo không đủ. Trình bày transport cụ thể đã thử: object/file reference có contract, upload stream hoặc download URL được phép; chứng minh MIME/hash/size và file mở được sau reload.
+
+Không chuyển 10 GB dưới dạng tool argument/base64. Không tự mở URL public lâu dài. Nếu agent tạo tệp nhưng không có cách xuất byte hợp lệ, đánh dấu FILE_RETURN_BLOCKED; văn bản vẫn có thể pass, file không được pass theo.
+
+Nghiệm thu lần lượt văn bản → một PDF/XLSX → ảnh generation thật. Video kiểm riêng khi có bằng chứng engine và export route; không ghi mặc nhiên có video.
+
+### W3 — Điều phối, phiên và độ tin cậy
+
+Ánh xạ tenant/project/conversation/visibility/policy revision tới conversation_key do server tạo. Key là định tuyến, không là ACL. Reuse hội thoại chỉ khi source scope tương thích; thu hồi quyền phải tránh tái sử dụng state chứa dữ liệu cũ. Provider memory/files dùng chung phải được tắt hoặc cách ly thật trước rollout nhiều Project.
+
+Giữ input nguyên văn, context manifest và output contract. Workspace tự tạo final answer phù hợp; SIWC không bắt buộc viết lại. Trường hợp model Workspace khác requested model phải báo route/model thật, không che việc đổi.
+
+At-least-once delivery + idempotent processing: giữ idempotency key ổn định khi retry cùng job; revision mới dùng job/version mới. Result receiver kiểm duplicate, expiry, cancellation, signature/identity, scope và context hash.
+
+Có timeout, bounded retry, backoff, dead-letter/recovery và audit. Local cancel chặn dùng kết quả; chỉ báo remote cancel thành công khi API hỗ trợ và có xác nhận. Không bịa endpoint cancel/webhook.
+
+### W4 — Sử dụng có kiểm soát trong Project Chat
+
+Feature flag riêng. Domain/tool health, cùng actor hợp lệ, token lưu backend, scope read/draft tối thiểu. UI theo dõi job bất đồng bộ và output; không mô phỏng stream token khi API không cung cấp.
+
+Tắt nhánh Workspace không làm hỏng SIWC/history/files. Không thiết kế SIWC phải gọi Workspace mới trả lời được câu hỏi thông thường.
+
+### Checklist cần kiểm chứng chứ không giả định
+
+1. Account đủ quyền và budget được duyệt.
+2. Agent/tool/API channel thực sự được publish đúng cấu hình.
+3. Sink đọc/ghi job hoạt động và ACL kiểm phía Galaxy.
+4. Trigger → kết quả text → đúng chat chạy trọn vòng.
+5. Tệp/ảnh về byte thật, không chỉ URL sandbox.
+6. Hai Project và hai actor không rò nguồn/provider state.
+7. Retry/cancel/revoke không tạo trùng hoặc hồi sinh kết quả trái quyền.
+8. Chính sách visibility/retention được chấp thuận; không hứa hidden session.
+
+---
+
+## 11. MEMORY DÀI HẠN VÀ HỌC TỪ KẾT QUẢ
+
+### 11.1. Năm lớp, không phải năm hệ thống cạnh tranh
+
+Original source store → structured/Markdown derivatives → full conversation archive → distilled Project Memory → versioned reusable skills.
+
+Galaxy giữ authoritative facts. Memory engine hỗ trợ extraction/retrieval, không thay domain service, lịch sử phê duyệt hoặc ACL.
+
+### 11.2. Pipeline memory
+
+Hoàn thành message/tool/artifact → tạo candidate có nguồn → kiểm sự kiện/giả định → xử lý mâu thuẫn/duplicate → xác định visibility → commit memory revision theo policy.
+
+Recent messages dùng ngay; memory worker được idempotent, có extraction version và event ID. Retry không tạo nhiều facts giống nhau. Cạnh tranh cập nhật cần CAS/revision; timestamp không phải khóa thứ tự duy nhất.
+
+Trạng thái đề xuất: USER_CONFIRMED, SOURCE_GROUNDED, AI_PROPOSED, NEEDS_REVIEW, SUPERSEDED, REVOKED. Không dùng điểm confidence do model tự báo làm căn cứ duy nhất.
+
+Hợp đồng/bảng giá/bản vẽ giữ vị trí nguồn có thẩm quyền; nói trong chat không tự sửa nghĩa vụ đã ký. Quyết định mới có thể supersede lựa chọn cũ nhưng lịch sử không bị xóa âm thầm.
+
+### 11.3. Private/shared và quên dữ liệu
+
+Mọi derivative/memory giữ ACL không rộng hơn nguồn. Promotion lên shared có policy/approval. Thu hồi source rights loại thông tin khỏi retrieval, summary cache và continuation state.
+
+User delete phải xử lý lineage: original/derivative/index/memory/output khi thích hợp, nêu giới hạn backup/provider retention. Không hứa xóa dữ liệu khỏi provider nếu không có cơ chế xác nhận.
+
+### 11.4. Chọn engine
+
+Benchmark Galaxy P1 hiện hữu trước. Một registry nguồn và ACL, không ba kho truth. So sánh TencentDB Agent Memory và Supermemory bằng corpus thử giống nhau; không chạy hai engine production đồng thời.
+
+Đánh giá tiếng Việt, mã sản phẩm, số/kích thước, nhiều phiên bản, fact bị thay thế, thu hồi quyền, citation, backup/restore, latency và tài nguyên. Namespace/tag không tự là authorization.
+
+Embeddings/extraction có thể cần model/chi phí riêng; không giả SIWC cung cấp embeddings endpoint. Bắt đầu keyword/structured retrieval nếu phù hợp; local multilingual embedding chỉ khi kiểm license/tài nguyên. Không tự bật provider mới cho memory.
+
+### 11.5. Học quy trình, không tự fine-tune
+
+Từ kết quả được người dùng sửa/xác nhận, lưu ví dụ tốt, lỗi và test case. Chưng cất quy trình dùng lại sau khi loại dữ liệu riêng; skill có version, input/output/tool/permission contract và eval. Không tự huấn luyện model weights, không đưa dữ liệu khách hàng sang training service, không để OpenSpace/Nuwa tự cập nhật production không qua review.
+
+---
+
+## 12. KẾ HOẠCH TÍCH HỢP CÁC REPOSITORY
+
+**Quyết định chọn nhóm dưới đây là định hướng, không phải xác nhận tương thích hoặc lệnh cài ngay.** Chốt phiên bản/commit và đọc LICENSE/NOTICE/model weights/dependencies tại thời điểm triển khai. README claim phải qua benchmark Galaxy.
+
+| Công cụ / upstream tham chiếu                                                                                | Vai trò dự kiến                                    | Quyết định và điều kiện vào runtime                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OfficeCLI — https://github.com/iOfficeAI/OfficeCLI                                                           | Office Worker đọc/sửa/tạo và render DOCX/XLSX/PPTX | Ưu tiên PoC sớm; so sánh engine đang có; xem side effects installer không tự cài skill vào mọi agent. Kiểm file mở/render đúng.                            |
+| AnyDoc — https://github.com/firecrawl/anydoc                                                                 | Chuyển tài liệu phổ biến sang Markdown             | Ưu tiên parser nhẹ; phải bổ sung provenance/structured data; không kỳ vọng Markdown giữ nguyên Excel hoặc layout.                                          |
+| PPT Master — https://github.com/hugohe3/ppt-master                                                           | Pipeline/template slide chất lượng cao             | PoC sau artifact core; agent skill ≠ service runtime. Kiểm native editable; dependency PDF PyMuPDF có điều kiện AGPL riêng.                                |
+| Docling — https://github.com/docling-project/docling                                                         | Parser đa định dạng/layout/table                   | Benchmark với AnyDoc/MinerU; chọn theo accuracy/tài nguyên, không gọi cả ba mặc định.                                                                      |
+| MinerU — https://github.com/opendatalab/MinerU                                                               | Tài liệu khó, OCR/layout/bảng                      | PoC sandbox; license có điều kiện bổ sung; kiểm model/GPU/CPU và output contract version, không copy chỉ dẫn “ưu tiên MinerU” từ README vào policy Galaxy. |
+| RetainPDF — https://github.com/chocolatedesue/retain-pdf                                                     | Dịch PDF và tái tạo layout                         | Dùng adapter các phần hữu ích, không nhập cả sản phẩm UI/DB; xem OCR/LLM dependencies, không dùng key/cấu hình concurrency mẫu trực tiếp.                  |
+| TencentDB Agent Memory — https://github.com/TencentCloud/TencentDB-Agent-Memory                              | Memory governance/asset sharing                    | Ứng viên benchmark với P1; khóa commit/branch được chọn; ACL Galaxy vẫn là quyết định cuối.                                                                |
+| Supermemory — https://github.com/supermemoryai/supermemory                                                   | Context/memory engine thay thế nếu tốt hơn         | PoC riêng. SDK/source và server binary không cùng phạm vi mở mã; kiểm license/quota/telemetry và URL ingestion có đi qua dịch vụ ngoài hay không.          |
+| SearXNG — https://github.com/searxng/searxng                                                                 | Search/discovery fallback                          | Khi native web không đủ và cách vận hành hợp lệ; không coi miễn phí là SLA hoặc nguồn tìm vô hạn.                                                          |
+| Crawl4AI — https://github.com/unclecode/crawl4ai                                                             | Đọc nội dung trang công khai                       | Sau discovery; sandbox browser, SSRF/egress/rate caps, không đưa bí mật Project vào crawl config.                                                          |
+| PptxGenJS — upstream https://github.com/gitbrent/PptxGenJS ; link đã gửi https://github.com/f0rty7/pptxgenjs | Sinh slide bằng JS                                 | Link f0rty7 là fork; ưu tiên upstream đã xác minh, dùng fork chỉ khi có lý do/diff/test rõ. Kiểm render và editable output.                                |
+| ComfyUI — https://github.com/Comfy-Org/ComfyUI                                                               | Local image generation/editing/composition         | Chỉ khi đủ hardware/model license; pin custom nodes, không dùng đồ thị/node Internet chưa review; không tự tải model lớn.                                  |
+| ECC — https://github.com/affaan-m/ecc                                                                        | Hỗ trợ Codex phát triển/test/review                | Chọn lọc dev workflow; không chồng hook, thay AGENTS hoặc chạy thêm một bộ gate lặp. Không dùng memory ECC chứa code làm Project Memory khách hàng.        |
+| Nuwa Skill — https://github.com/alchaincyf/nuwa-skill                                                        | Tham khảo cách chưng cất heuristic/skill           | Không phải database fact; không tự sao chép danh tính người khác hoặc biến mô phỏng tư duy thành kiến thức đã xác minh.                                    |
+| DeepTutor — https://github.com/HKUDS/DeepTutor                                                               | Grounded research, đọc tài liệu nhiều bước, eval   | Tham khảo component/flow; không dựng hệ giáo dục/agent backend thứ hai hoặc kéo provider-key vào Galaxy.                                                   |
+| OpenSpace — https://github.com/HKUDS/OpenSpace                                                               | Skill registry, quality history, đề xuất cải tiến  | Thử nghiệm riêng; cải tiến tạo draft version, phải review/eval/rollback, không tự tiến hóa production.                                                     |
+| DeepSeek Harness — https://github.com/deepseek-ai/deepseek-harness                                           | Tư tưởng plugin boundary/lifecycle/harness         | Tham khảo kiến trúc, không đổi model/provider/UI. Upstream ở developer preview, cần tránh phụ thuộc cứng khi chưa cần.                                     |
+
+### 12.1. Cổng áp dụng công cụ
+
+Inventory source hiện hữu → đọc code/license/security → pin version → isolated fixture → adapter contract → quality/resource/ACL tests → quyết định ADOPT/DEFER/REJECT → limited rollout.
+
+Mỗi dòng cần owner, mã requirement phục vụ, integration point, mode local/cloud, external calls, data classification, dependency/model license, runtime footprint, rollback và evidence. Không lựa chọn dựa trên số sao hoặc khẩu hiệu benchmark.
+
+### 12.2. Không tuồn credential vào công cụ bên thứ ba
+
+Mọi công cụ cần LLM phải qua ModelGateway được review và đúng hợp đồng provider. Không truyền thẳng token SIWC cho library vốn dùng Chat Completions/API-key route. Nếu không tương thích, dùng phần parser/render thuần hoặc ghi blocker rõ; không bật provider-key paused để làm demo chạy.
+
+Khi đã có worker trong Workspace, tránh tạo trùng engine local cho cùng capability nếu không có lý do vận hành; vẫn cần local validation/storage. Ngược lại, không bỏ engine local đang tốt chỉ để gọi Workspace cho việc đơn giản.
+
+---
+
+## 13. QUY TRÌNH NGHIỆP VỤ TIÊU BIỂU
+
+### Q1. Báo giá có ảnh, Excel và PDF
+
+Đúng Project → yêu cầu nguyên gốc → thiết kế/danh mục/bảng giá được phép → draft line items có nguồn → thiếu giá để pending, không bịa → tính Decimal → sinh XLSX/PDF → kiểm tổng và ảnh → lưu artifact → người dùng tải → xác nhận/phát hành riêng. Hai định dạng dùng cùng dữ liệu đã kiểm, không để hai model tự tính độc lập ra hai số khác nhau.
+
+### Q2. Đối chiếu tài liệu và thông tin hãng
+
+Đọc file gốc/derivative theo quyền → tìm nguồn công khai bằng query đã tách bí mật → kiểm đúng model sản phẩm/phiên bản → phân biệt dữ liệu nội bộ và ngoài → nêu khác biệt → lưu báo cáo/source snapshot theo quyền.
+
+### Q3. Thuyết trình Project
+
+Yêu cầu/khán giả/template → nguồn Project được phép → slide outline → tạo native PPTX → render và kiểm bố cục → artifact PPTX/PDF → lưu chat và memory chỉ thông tin được xác nhận.
+
+### Q4. Dịch catalogue
+
+Original → parse/OCR đúng trang → glossary/thông số/đơn vị → translation → reflow/layout render → đối chiếu đủ nội dung/trang → giữ nguồn và bản dịch thành hai version/assets liên quan.
+
+### Q5. Concept hình ảnh/video
+
+Đọc yêu cầu và reference thực có → chọn capability đã được cấp → thực hiện → kiểm file → lưu source/operation/model. Không đổi concept thành ảnh sản phẩm chính hãng. Video cần pipeline riêng; không chuyển kịch bản thành nhãn VIDEO_READY.
+
+---
+
+## 14. BẢO MẬT, HẠ TẦNG VÀ KIỂM TRA CHẤT LƯỢNG
+
+Auth/source permissions được kiểm trong code trước retrieval và khi trả output. Prompt injection trong file/web không được điều khiển permissions/tool/publish. Memory tóm tắt không được hợp thức hóa dữ liệu đã mất quyền.
+
+Worker không root; mỗi job workspace riêng; không mount Docker socket, credential store, DB dumps hay repo secrets; network mặc định deny khi không cần; allowlist cho tải model/nguồn công khai có phê duyệt. Giới hạn CPU/RAM/GPU/disk/time/concurrency. Scan MIME/macro/archive bombs/active content; preview sanitize HTML và Markdown, chống XSS.
+
+Không dùng AI tự tin làm validator duy nhất. Validator cơ học cho arithmetic/schema/hash/format/permissions. LLM reviewer đánh giá nội dung có nguồn; cần bộ golden cases và human review cho nghiệp vụ rủi ro. Kết quả bị sửa phải versioned, không làm mất nội dung tác nhân tạo.
+
+Theo dõi chi phí/quota/tài nguyên từng route, p95 latency và lỗi thật. Không fake progress/usage. Không tạo runtime/stack Docker trùng volume. Trước migration/storage cutover: backup kiểm khôi phục, compatibility, rollout giới hạn và rollback/forward-fix có thể thực hiện.
+
+Các sự cố WSL/clock/CDP cũ chỉ điều tra lại khi tái hiện và chặn công việc. Không tự đổi kernel/network/OAuth trong phạm vi này. Browser không kết nối được không chặn mọi unit/integration work, nhưng không báo browser/live PASS khi chưa nghiệm thu.
+
+---
+
+## 15. ROADMAP VÀ DEPENDENCY — KHÔNG CHỜ TẤT CẢ MỚI CÓ CHỨC NĂNG
+
+Đây là kế hoạch rollout tổng thể. Codex phải map từng task vào file/function/test command thật trước khi coi là implementation plan. Không bịa số dòng, API đã tồn tại hoặc lịch theo ngày khi chưa kiểm nguồn lực.
+
+| Mốc                               | Đầu ra nhìn thấy được                                                                      | Phụ thuộc/gate                                                         |
+| --------------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| G0 — Baseline & delta             | Tài liệu chuẩn, decision/approval ledger, gap matrix; không nhận là code                   | Chế độ RECORD_AND_PLAN hiện tại                                        |
+| G1A — Cross-Project + model       | Owner chat ở nhiều Project đúng quyền/model, original prompt nguyên vẹn                    | Tái dùng P1-A đã duyệt; scope và entitlement thật                      |
+| G1B — Session & memory foundation | Reload/restart/hai tab đúng context; history có nguồn; private/shared không lẫn            | G1A; schema/ACL plan thực                                              |
+| G2A — Web & grounded answers      | Web thật, citation đúng, general QA không bị business whitelist                            | Tool dispatcher; không chờ Workspace                                   |
+| G2B — Artifact MVP                | Tạo/tải XLSX, DOCX, PDF, báo giá có ảnh hợp lệ                                             | File/artifact core + read/draft tool executor; không chờ các repo nặng |
+| G3 — Original/Markdown upload     | File chat đọc được, nguồn trang/ô/slide, working→record, resumable tới 10 GB theo capacity | Storage quota/retention/sandbox; G1B memory linkage                    |
+| W0 — Workspace readiness          | Quyền, token type, cost, visibility, tools, return transport đã rõ                         | Có thể nghiên cứu song song G1; không là blocker G1–G3                 |
+| W1 — Text round-trip              | Galaxy giao job, agent trả text về đúng chat                                               | W0 + result sink + auth/approval                                       |
+| W2 — File/image round-trip        | Byte tệp/ảnh thật về Galaxy, kiểm tra và tải                                               | W1 + capability/transport proof                                        |
+| W3 — Hybrid routing               | Chọn nhánh hợp lý; retry/revoke/cancel/visibility được kiểm                                | W2 + isolation + budget approval                                       |
+| G4 — PPT / PDF nâng cao           | PPTX editable, catalogue dịch giữ layout, parser khó khi cần                               | Benchmark OfficeCLI/AnyDoc/PPT Master/Docling/MinerU/RetainPDF         |
+| G5 — Memory/skills nâng cao       | Nhớ đúng lựa chọn dài hạn, xử lý thay đổi, skill có review                                 | Memory foundation có trước; engine ngoài chỉ khi benchmark thắng       |
+| G6 — Media mở rộng                | Local image hoặc video thật nếu đủ điều kiện                                               | Hardware/engine/model license/export proof; có thể BLOCKED riêng       |
+| G7 — Production acceptance        | Domain đúng artifact, backup/recovery, end-to-end và non-regression                        | Mỗi capability rollout riêng, không bắt G6 để phát hành G2             |
+
+Web và artifact MVP là ưu tiên chất lượng đầu ra; memory isolation nền phải có trước khi đưa dữ liệu nhiều Project. Advanced memory engine không phải điều kiện cho nhớ phiên cơ bản. Workspace là nhánh thử nghiệm song song, không thay toàn đường SIWC.
+
+Sau mỗi mốc, có deliverable code/test/evidence/runtime rõ. Việc cài package không phải deliverable nghiệp vụ.
+
+---
+
+## 16. REQUIREMENTS TRACEABILITY VÀ ACCEPTANCE
+
+Codex tạo bảng req → task/source → test → evidence → deployed artifact. Dưới đây là điều kiện tối thiểu, không tự điền PASS.
+
+| ID  | Điều kiện nghiệm thu                                                                                 |
+| --- | ---------------------------------------------------------------------------------------------------- |
+| A01 | Model actual khớp request/profile đã cho phép; quota/lỗi không hạ model âm thầm                      |
+| A02 | Original user message không bị thay bởi rewrite; edits tạo revision                                  |
+| A03 | Owner dùng AI ở Showroom và ít nhất hai Project khác có quyền                                        |
+| A04 | Actor không quyền bị từ chối ở backend, không chỉ ẩn UI                                              |
+| A05 | General QA hoạt động không cần source Project không liên quan                                        |
+| A06 | Hai tab/Project, switch/reload/restart không lẫn context, stream hoặc artifacts                      |
+| A07 | Hỏi tiếp thông tin ngoài tám lượt vẫn có căn cứ khi nguồn tồn tại và được phép                       |
+| A08 | Source/permission thay đổi làm invalidate context/cache/state phù hợp                                |
+| A09 | File gốc tải lại có hash không đổi sau parse/convert                                                 |
+| A10 | Markdown/JSON giữ locator page/sheet/range/slide và không bị mô tả là bản gốc                        |
+| A11 | GPT input coverage thể hiện original/derivative/excerpts thực đã gửi                                 |
+| A12 | PDF scan, bảng, DOCX hình, Excel >1.000 dòng được kiểm đúng phạm vi yêu cầu                          |
+| A13 | Upload resume sau mất mạng/restart đúng hash; file vượt 10.000.000.000 byte bị chặn                  |
+| A14 | Test upload lớn có capacity/cleanup, không làm đầy WSL; boundary test không thay large-transfer live |
+| A15 | Working attachment promote record không mất source/version, không tự mở quyền                        |
+| A16 | Xóa/retention xử lý derivatives/memory/index; không phục hồi nội dung đã xóa qua cache               |
+| A17 | XLSX/DOCX/PDF tồn tại, mở/render được, download theo quyền sau reload                                |
+| A18 | Excel/PDF cùng tổng, nguồn và missing-price warnings; không macro/formula injection                  |
+| A19 | PPTX native editable đáp ứng yêu cầu và preview không tràn                                           |
+| A20 | Web có execution thật, source hỗ trợ claim; không tìm được thì nói đúng                              |
+| A21 | Web query/crawl không rò private Project data hoặc SSRF                                              |
+| A22 | AI_PROPOSED không thành USER_CONFIRMED; quyết định mới supersede đúng                                |
+| A23 | Private memory không trở thành shared; admin không ngầm trộn hai Project                             |
+| A24 | Memory worker retry/idempotency/correction/revocation có test                                        |
+| A25 | Workspace credential/scope/entitlement đúng, không reuse SIWC token                                  |
+| A26 | Workspace text job trả qua sink đúng Project/actor và idempotent                                     |
+| A27 | Workspace file/image bytes thật được nhận; provider completed nhưng thiếu output không được PASS     |
+| A28 | Workspace isolation/visibility/budget được kiểm; conversation_key không được dùng như ACL            |
+| A29 | Late/duplicate/cancelled/revoked result không làm lộ dữ liệu hoặc ghi trùng                          |
+| A30 | Image/video được nghiệm thu riêng từng capability, không script masquerading as output               |
+| A31 | Parser/CLI/skill malicious input không đọc secrets/network/host ngoài phạm vi                        |
+| A32 | Tool contract v1 còn tương thích; capability mới có version/test khi cần                             |
+| A33 | Benchmark câu trả lời gốc và sau validation không giảm chất lượng vì rewrite                         |
+| A34 | Provider OAuth/task_list/domain flows đang hoạt động không bị regression                             |
+| A35 | Artifact deployed cùng tree đã test; rollback/restore có bằng chứng                                  |
+| A36 | Baseline/decision log/approval ledger đầy đủ; docs không được ghi là product complete                |
+
+Phân loại evidence: DOCUMENTATION_REVIEWED, UNIT, CONTRACT, INTEGRATION, FIXTURE, BROWSER, PROVIDER_LIVE, ARTIFACT_VERIFIED, DEPLOYED. Mỗi mục có PASS/FAIL/BLOCKED/NOT_RUN/DEFERRED đúng nghĩa. Các số test cũ không làm chứng nhận code mới.
+
+---
+
+## 17. APPROVAL, PHẠM VI HIỆN TẠI VÀ NHỮNG ĐIỂM CÒN MỞ
+
+### 17.1. Không tiếp tục vòng xin duyệt vô nghĩa
+
+Lập ApprovalRecord cho design/spec/plan đã thực sự được duyệt, kèm path/hash/revision/phạm vi. P1 approvals cũ được tái sử dụng nếu nội dung vẫn khớp; delta được tách riêng. Không hỏi lại “có muốn AI đa năng hay không”. Không mỗi tool/file/task lại quay về brainstorming.
+
+Đối với kiến trúc mở rộng mới, lượt hiện tại yêu cầu lưu chuẩn và lập kế hoạch, không triển khai mù. Trình các gate bắt buộc thành một danh sách tập trung, nêu rõ tài liệu nào đã có/chưa có và quyết định còn thiếu. Không diễn giải tạm chốt định hướng thành phê duyệt mọi file chưa viết.
+
+Sau khi triển khai được yêu cầu và đủ gate, chạy task-by-task TDD/verification, không dừng chỉ để cập nhật docs. Không thay approval settings hoặc AGENTS để né kiểm soát.
+
+### 17.2. Những quyết định phải được xác minh, không suy diễn
+
+| Mã     | Còn cần gì                                                        | Nhánh không bị chặn                                     |
+| ------ | ----------------------------------------------------------------- | ------------------------------------------------------- |
+| OPN-01 | Workspace entitlement/quyền token/publish/tool thật               | SIWC, local tools và memory                             |
+| OPN-02 | Chấp thuận visibility/retention Workspace khác mong muốn phiên ẩn | Phiên SIWC do Galaxy quản lý                            |
+| OPN-03 | Budget/cost cap và quyền phát sinh usage mới                      | Lập kế hoạch/fixture không chi phí; luồng được cấp sẵn  |
+| OPN-04 | Transport nhận tệp/ảnh từ Workspace                               | Text round-trip nếu đủ quyền                            |
+| OPN-05 | Retention và dung lượng tệp làm việc/records/backup               | Fixture nhỏ và thiết kế storage; không xóa thật tự động |
+| OPN-06 | Phần cứng/license engine ảnh, video và parser nặng                | Office/basic parsing/web                                |
+| OPN-07 | Lựa chọn một memory engine ngoài sau benchmark                    | Memory P1 native nền                                    |
+| OPN-08 | Nâng version contract tài liệu nếu cần công thức/quyền mới        | Contract v1 vẫn nguyên behavior                         |
+
+Không yêu cầu chủ dự án cung cấp mật khẩu/OTP/token qua chat. Khi đến bước credentials, chuẩn bị màn hình/hướng dẫn lưu secret an toàn và yêu cầu thao tác cần thiết.
+
+---
+
+## 18. ĐẦU RA YÊU CẦU Ở LƯỢT RECORD_AND_PLAN NÀY
+
+1. Baseline được ghi vào đúng repo docs, có version và link trong bộ nhớ phát triển.
+2. Bảng đối chiếu yêu cầu/source/test/runtime; nêu rõ chưa kiểm những gì, không tạo lại subsystem đã có.
+3. Decision log: quyết định giữ, quyết định thay thế, conflict và open conditions.
+4. Roadmap theo dependency và deliverable chạy được; viết detailed implementation plan vào source paths/test commands thực sau khi đọc repo.
+5. Workspace readiness/connection/result-return plan đầy đủ W0–W4.
+6. Tool adoption matrix đủ các repository, loại ADOPT_CANDIDATE/BENCHMARK/REFERENCE/CONDITIONAL, không có “đã cài” giả.
+7. Acceptance matrix A01–A36; ai kiểm gì, dữ liệu thử, nguồn evidence.
+8. Approval ledger gộp một nơi; bước tiếp theo cụ thể, không lặp câu hỏi đã có đáp án.
+
+Báo rõ các file docs thật vừa ghi và chưa hề thay product source/migration/runtime trong chế độ này nếu đúng. Đây là kết quả kế hoạch, không phải thất bại triển khai và cũng không phải chức năng đã hoàn thành.
+
+Khi người dùng yêu cầu thực thi, dùng chính baseline/plan này và approvals còn hiệu lực; không tái mở toàn bộ phân tích. Mỗi lần bổ sung chỉ xử lý delta.
+
+**ĐÍCH CUỐI:** GPT mạnh và đúng công cụ; câu hỏi nguyên gốc; ngữ cảnh đúng Project; original files và outputs được bảo toàn; memory có nguồn; Workspace bổ trợ khi đủ điều kiện; mọi kết quả tải được, kiểm được và dùng được trong Galaxy OS.
+
+---
+
+## PHỤ LỤC A — NGUỒN CÔNG KHAI ĐÃ ĐỐI CHIẾU NGÀY 09/10/2026
+
+Các nguồn sau là mốc tài liệu, không phải live proof trên tài khoản Galaxy. Đọc lại khi triển khai. Nếu tài liệu khác nhau, dùng hợp đồng endpoint thực được kiểm chứng và ghi chênh lệch; không âm thầm chọn mô tả thuận tiện.
+
+### OpenAI
+
+- **O01 — SIWC limitations:** https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations  
+  HTTP hiện cần store=false, stream=true và context trong input; không có persistent conversation storage cho flow này. Text/images/files theo model; web có điều kiện; không có hosted image generation/file_search/Code Interpreter/MCP trên route này, không có Files upload API/audio-video input. Đây là ranh giới thiết kế, cần probe theo model thực.
+- **O02 — Models and inference:** https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference  
+  Catalog bằng credential thật; terminal response.completed mới chứng minh inference hoàn tất, không chỉ HTTP success.
+- **O03 — Workspace trigger:** https://developers.openai.com/workspace-agents/trigger-runs  
+  Trigger bất đồng bộ, có conversation_key/URL; optional beta run status, không cung cấp final answer content qua endpoint này. Idempotency theo event được tài liệu mô tả.
+- **O04 — Workspace authentication:** https://developers.openai.com/workspace-agents/authentication  
+  Token Workspace Agents scope, provisioning qua admin access-token flow; không dùng credential của luồng khác thay thế.
+- **O05 — Workspace tools and administration:** https://help.openai.com/en/articles/20001143-chatgpt-workspace-agents-for-enterprise-and-business  
+  Tài liệu mô tả web search/image generation/custom MCP, app authentication và approvals; không tự suy ra account Galaxy đủ quyền hay video generation sẵn sàng. Phần mô tả trigger của trang Help có điểm khác Developer Docs tại mốc kiểm tra.
+- **O06 — Output destination cookbook:** https://developers.openai.com/cookbook/examples/chatgpt/workspace_agents/workspace-agents-api-trigger  
+  Cần cấu hình và thử destination mà agent ghi được, kể cả approvals; Accepted không chứng minh output đã tới.
+- **O07 — File input:** https://developers.openai.com/api/docs/guides/file-inputs  
+  Mốc tài liệu: dưới 50 MB mỗi tệp, 50 MB tổng/request; spreadsheet augmentation dùng tới 1.000 dòng đầu mỗi sheet; không-PDF không tự giữ toàn bộ hình nhúng. Galaxy cần kiểm coverage và xử lý bổ sung, không coi gửi file thành công là đọc đủ.
+- **O08 — Usage/pricing:** https://help.openai.com/en/articles/11481834-chatgpt-rate-card-business-enterpriseedu-credit-based-pricing  
+  Workspace usage thuộc cơ chế hạn mức/credits liên quan; kiểm account contract và không giả có quyền dùng miễn phí vô hạn.
+
+### Công cụ / giấy phép có điểm cần chú ý
+
+- OfficeCLI source/README/license: https://github.com/iOfficeAI/OfficeCLI
+- PPT Master README và dependency notice: https://github.com/hugohe3/ppt-master
+- AnyDoc: https://github.com/firecrawl/anydoc
+- MinerU license: https://github.com/opendatalab/MinerU/blob/master/LICENSE.md
+- RetainPDF: https://github.com/chocolatedesue/retain-pdf
+- TencentDB Agent Memory: https://github.com/TencentCloud/TencentDB-Agent-Memory
+- Supermemory self-hosting: https://supermemory.ai/docs/self-hosting/overview — bản server tải về từ codebase không công khai; cần xem telemetry/URL ingestion và model dependencies.
+- PptxGenJS upstream: https://github.com/gitbrent/PptxGenJS ; fork được cung cấp: https://github.com/f0rty7/pptxgenjs
+- Các repository còn lại có URL trong mục 12. Các nhận định ưu tiên là đề xuất cho Galaxy, không phải cam kết của upstream.
+
+### Nguồn nội bộ được tham khảo qua Library, không phải live repo
+
+- GALAXY_OS_PROJECT_MEMORY_2026-10-08.txt: một Project, shared source of truth, Project-only memory/ACL, tách roadmap và runtime evidence.
+- GALAXY_OS_KIEN_THUC_COT_LOI_2026-09-28.md: thứ tự căn cứ, không thi hành prompt lịch sử mù, không đưa bộ nhớ khách hàng vào Git.
+- GALAXY_OS_CHATGPT_PLAN_ONLY_ADDENDUM_2026-10-08.txt: không bật API-key billing/provider cũ, dùng kết nối chính thức, không scrape ChatGPT.
+- Các báo cáo P1/spec/plan/runtime trong hội thoại: được ghi là báo cáo chuyển tiếp của người dùng, không nâng thành tự xác minh source.
+
+---
+
+## PHỤ LỤC B — TÓM TẮT ĐƯA VÀO PROJECT_MEMORY.md
+
+Ngày 09/10/2026, chủ dự án tạm chốt GALAXY-AI-ARCH-20261009-v1.0, sẽ bổ sung theo revision. Giữ Galaxy OS v0.2 làm chuẩn nghiệp vụ và source of truth; SIWC dùng model mạnh nhất phù hợp được cấp quyền, không âm thầm downgrade/rewrite; giữ câu hỏi nguyên gốc, bổ sung ngữ cảnh đúng Project. Phiên liên tục do Galaxy quản lý, tách private/shared; không hứa phiên ChatGPT ẩn. Original files được lưu và kiểm hash, Markdown/structured data là dẫn xuất, memory là tri thức chắt lọc có nguồn. Upload Galaxy tối đa 10.000.000.000 byte mỗi file nhưng provider input theo khả năng thật; không nói đã đọc nguyên khi chỉ gửi phần. Tệp chat lưu bền vững dạng working, promote vào hồ sơ theo quyền. Kết quả trả lời/nguồn/ảnh/tệp được lưu đầy đủ, kiểm chứng, có link tải và Markdown; AI proposal không thành quyết định đã duyệt. Workspace là nhánh bổ trợ W0–W4, credential/cost/visibility/result-return và file transfer phải live-verify; không phá SIWC, remote OAuth vẫn hoãn. Công cụ GitHub qua adapter pin/version/license/sandbox/benchmark; ưu tiên OfficeCLI/AnyDoc/PPT Master, parser khó và memory engine đánh giá trước, không cài hàng loạt. Không đưa hồ sơ khách hàng vào Git, không bật provider-key paused, không tự mua credits/reset dữ liệu. Bản chuẩn và kế hoạch không chứng minh code hoàn thành; tái dùng approval P1 hợp lệ, bổ sung delta và nghiệm thu từng milestone.

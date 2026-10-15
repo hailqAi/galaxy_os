@@ -35,6 +35,22 @@ describe('LeadsService', () => {
     );
   });
 
+  it('lọc Lead đang xử lý trước phân trang cho drilldown S01', async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const db = {
+      lead: { findMany, count: vi.fn().mockResolvedValue(0) },
+      $transaction: vi.fn((ops) => Promise.all(ops)),
+    } as unknown as PrismaService;
+    await new LeadsService(db, {} as AuditService).list(actor, {
+      page: 1,
+      pageSize: 20,
+      active: true,
+    });
+    expect(findMany.mock.calls[0]![0].where.status).toEqual({
+      in: ['NEW', 'ASSIGNED', 'CONTACTED', 'QUALIFIED'],
+    });
+  });
+
   it('denies cross-department assignment before looking up the target', async () => {
     const prisma = {
       lead: {

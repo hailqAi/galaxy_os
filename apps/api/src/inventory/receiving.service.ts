@@ -9,6 +9,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { BusinessEntityPolicy } from '../access-control/business-entity.policy';
 import { CurrentActor } from '../access-control/current-actor';
+import { findProjectFiles } from '../files/project-file';
 import { PrismaService } from '../prisma.service';
 import { InventoryService } from './inventory.service';
 import {
@@ -351,13 +352,14 @@ export class ReceivingService {
     );
     if (
       evidenceIds.length &&
-      (await this.prisma.fileAsset.count({
-        where: {
-          id: { in: evidenceIds },
-          organizationId: actor.organizationId,
-          deletedAt: null,
-        },
-      })) !== new Set(evidenceIds).size
+      (
+        await findProjectFiles(
+          this.prisma,
+          actor,
+          receipt.projectId,
+          evidenceIds,
+        )
+      ).length !== new Set(evidenceIds).size
     )
       throw new NotFoundException('Inspection evidence not found');
     const byId = new Map(receipt.lines.map((line) => [line.id, line]));

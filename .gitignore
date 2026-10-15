@@ -6,6 +6,8 @@
 coverage/
 playwright-report/
 test-results/
+stage-one-test-results/
+.artifacts/
 dist/
 node_modules/
 *.log
@@ -22,3 +24,4 @@ venv/
 .local/
 .runtime/
 .env.edge
+.worktrees/

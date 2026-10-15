@@ -1,0 +1,334 @@
+GALAXY OS — TẬP TRUNG HOÀN THIỆN KẾT NỐI CHATGPT THẬT
+Ngày 08/10/2026. Mốc yêu cầu: báo cáo người dùng gửi lúc 12:04 giờ Việt Nam.
+Đích nhận: Codex có quyền làm việc tại /home/galaxy_os.
+
+YÊU CẦU TRIỂN KHAI
+Trong đợt này, tập trung làm cho quản trị viên kết nối ChatGPT tại host, nhận model thật, chat được và gọi được ít nhất một công cụ đọc của Galaxy. Không tiếp tục mở rộng Task writes/CAS, tracker, plugin hệ sinh thái hay Graphify trước khi hoàn thành hoặc xác định được blocker thực tế của luồng kết nối.
+
+Tôi muốn trải nghiệm đăng nhập qua trình duyệt tương tự Codex CLI, nhưng Galaxy phải có registration và credential riêng đúng luồng OpenAI hỗ trợ. Không lấy credential/client ID của Codex, không chạy proxy không chính thức và không dùng API key trả phí.
+
+======================================================================
+01. CHECKPOINT MỚI — KHÔNG QUAY LẠI SỬA RUNTIME ĐÃ PHỤC HỒI
+======================================================================
+Theo báo cáo tôi gửi, cần xác minh read-only trên máy trước khi sửa:
+- CODE_SHA = TESTED_SHA: a5e82d80129cc698860c501683b844b404c7f33b
+- TESTED_TREE: 3e04b19306cece71605018e419ee87caab221922
+- DEPLOYED_LOCAL_RELEASE: local-a3eb571a7fcc
+- Web/API/LAN cùng release, health 200; pnpm dev exit 0.
+- Recovery và cleanup đã hoàn tất theo packet được duyệt.
+- P04, trang /settings/chatgpt-connection và đọc tracker/registry đã lên main.
+- API 1400 / Web 573 / Edge 5 / document 1 / runtime 64 được báo đạt; lint/types/format/build đạt; Chrome fixture 8/8. Member main chưa nghiệm thu.
+- Registry có 12 contract; chưa có công cụ/model live qua ChatGPT được xác minh.
+- Callback/lifecycle/dispatcher ChatGPT chưa triển khai đầy đủ.
+- google_gemini, mistral, kira, openrouter: PAUSED_BY_USER; policy CHATGPT_PLAN_ONLY.
+- Codex launch/resume đạt; mismatch cũ chưa tái hiện nên chưa chứng minh sửa được nguyên nhân. Không mở lại điều tra daemon trong đợt này nếu không chặn công việc hiện tại.
+- CAS đang chờ duyệt thiết kế là hạng mục khác; không lấy đó làm blocker cho luồng kết nối hiện tại.
+
+Repo: /home/galaxy_os
+Worktree đầu mối: /home/galaxy_os/.worktrees/m2-a-20260928
+Đọc AGENTS.md áp dụng, source hiện tại và:
+- docs/galaxy-os/PROJECT_MEMORY.md
+- docs/galaxy-os/handoffs/2026-10-08-recovery-ui-admin-maintenance.md
+- handoff SIWC/provider/auth/registry hiện có.
+Các đường dẫn docs phải được tìm trong worktree có nội dung thực. Bảo toàn thay đổi root và worktree mới hơn; không reset, clean, stash, git add toàn repo hoặc checkout về SHA trong prompt.
+
+File này ưu tiên về phạm vi và thứ tự thực hiện trước các prompt MASTER, CHATGPT_PLAN_ONLY và RECOVERY. Giữ invariant nghiệp vụ, bảo mật, API-key pause và cơ chế phát hành của các prompt đó. Những việc ngoài kết nối vẫn nằm trong backlog, không bị hủy và không được báo đã hoàn tất.
+
+======================================================================
+02. VẤN ĐỀ HIỆN TẠI CẦN CHỨNG MINH TRONG SOURCE
+======================================================================
+Trang quản trị hiện báo:
+- Chưa có registration phù hợp được xác minh.
+- Chưa kết nối tài khoản; chưa được cấp quyền inference.
+- Phạm vi nhiều người chưa xác minh.
+- Callback host chưa cấu hình.
+- Nút Kết nối chưa mở.
+- Kiểm tra cấu hình chỉ trả “Đã kiểm tra cấu hình tại Galaxy. Chưa xác minh kết nối với OpenAI”.
+
+Nhận định từ báo cáo: hiện mới có UI/status/policy/contract; đường đăng nhập và gọi model còn thiếu. Phải trace source để xác nhận điều kiện nào disable nút và middleware nào chặn begin-auth. Không coi trạng thái cấu hình nội bộ là một lần OpenAI từ chối.
+
+Điều tra khả năng phụ thuộc vòng tròn:
+- Muốn bấm đăng nhập lại bị yêu cầu đã có issued client ID, inference grant hoặc verified multiuser scope.
+- Trong route đăng ký động phù hợp, registration và grant chính là kết quả nhận được sau OAuth.
+- Vì vậy, điều kiện bắt đầu đăng nhập, điều kiện suy luận cho chủ kết nối và điều kiện phục vụ nhiều người phải tách riêng.
+
+Không chỉ đổi disabled=false hoặc gán ELIGIBLE/CONNECTED trong DB. Phải xây đường thực thi và giữ kiểm quyền ở backend.
+
+======================================================================
+03. THIẾT KẾ VÀ PHẠM VI ĐỢT KẾT NỐI ĐẦU TIÊN
+======================================================================
+Luồng cần triển khai:
+Galaxy login → SYSTEM admin mở /settings/chatgpt-connection tại host → chuẩn bị callback → mở trang OpenAI → người dùng tự đăng nhập/MFA/đồng ý → callback → lưu registration và grant đã xác minh → lấy model → chat trong Project → gọi công cụ đọc được phép → trả kết quả.
+
+Chọn tích hợp tối thiểu vào AI service hiện có:
+- Backend Galaxy quản lý connection, OAuth attempt, credential, model catalog và dispatch.
+- Frontend hiển thị trạng thái và mở URL đăng nhập; không xử lý token.
+- Tool executor hiện có giữ actor/Project/ACL.
+- Giữ Next.js/NestJS/Prisma/PostgreSQL/Redis, không tạo chat engine thứ hai.
+- Không dùng shared daemon Codex đang phát triển làm runtime backend Galaxy.
+
+Đích nghiệm thu ngay: pilot của chính tài khoản quản trị liên kết trên host, theo route thực sự phù hợp với deployment. Tạm chưa kích hoạt inference cho nhân viên dưới một gói Pro cá nhân khi chưa có quyền phục vụ đó. Vị trí quản lý vẫn chỉ dành cho SYSTEM admin; không chuyển thành mỗi nhân viên tự đăng nhập ChatGPT.
+
+Owner=SYSTEM là quyền quản lý cấu hình trong Galaxy, không tự chứng minh provider entitlement hoặc biến mọi SYSTEM admin thành chủ cùng một gói cá nhân. Phải ghi riêng actor liên kết, provider identity/registration và phạm vi được phép dùng.
+
+Thực hiện theo thiết kế trên trong phạm vi đã giao. Đối chiếu AGENTS.md; nếu có điểm review bắt buộc còn thiếu, trình ngay thiết kế/plan cụ thể của chính phần kết nối cùng lý do, không nhắc lại yêu cầu duyệt CAS ngoài phạm vi. Không giả rằng một thiết kế chưa trình đã được duyệt. Các thao tác đọc source/chuẩn bị/kiểm tài liệu được tiếp tục bình thường.
+
+======================================================================
+04. CHỌN ROUTE HỢP LỆ, KHÔNG YÊU CẦU “HỒ SƠ” CHUNG CHUNG
+======================================================================
+Đọc tài liệu OpenAI hiện hành ở mục 16 trước khi code protocol. Tài liệu cookbook nêu open-source, dự án cá nhân chạy local và selected private apps. Đối chiếu cách Galaxy đang vận hành; không gắn nhãn open-source/personal sai thực tế để vượt điều kiện.
+
+Phải trả lời riêng:
+1. Có route chính thức phù hợp cho phép bắt đầu đăng ký/đăng nhập của pilot tại host không?
+2. Code và callback đã sẵn sàng để thực hiện route đó chưa?
+3. Người dùng đã thực hiện consent chưa, kết quả thực tế là gì?
+4. Có quyền inference cho chủ kết nối không?
+5. Có quyền phục vụ nhiều người khác không? Câu hỏi này riêng với 1–4.
+
+Với route động được hỗ trợ, không yêu cầu tôi tự cung cấp issued client ID/client secret/hồ sơ partner trước khi bắt đầu. Host metadata do app tạo; client ID được OpenAI cấp qua flow. Không lấy ô thiếu metadata trong config làm bằng chứng bắt buộc nộp đơn.
+
+Nếu tài liệu hoặc kết quả provider thật sự yêu cầu xét duyệt cho deployment Galaxy:
+- Nêu đúng loại tích hợp, điều khoản/URL, response hoặc yêu cầu cụ thể còn thiếu, chủ thể phải thực hiện.
+- Phân biệt “code chưa có”, “người dùng chưa đăng nhập”, “consent chưa được cấp” và “provider không hỗ trợ/đòi phê duyệt”.
+- Hoàn thiện phần adapter/callback/UI có thể làm và không tuyên bố đã live.
+- Không lặp vô hạn việc thử đăng nhập khi đã có refusal rõ ràng; không bịa approval record hoặc tự đánh dấu approved.
+
+Không mặc định mọi private app đều bị chặn, cũng không mặc định cứ chạy localhost là đủ điều kiện. Không dùng việc thiếu phê duyệt dùng chung nhân viên để ngăn một flow riêng hợp lệ của chính chủ tài khoản.
+
+======================================================================
+05. TÁCH CÁC QUYẾT ĐỊNH KHỞI ĐĂNG NHẬP VÀ CHẠY AI
+======================================================================
+Tái sử dụng schema hiện tại; những tên sau là khái niệm, không ép tạo service/bảng trùng:
+
+canBeginAuth:
+- Galaxy actor đăng nhập và có quyền SYSTEM admin hiện hành;
+- đường local/registered route áp dụng đã xác định, không có policy refusal rõ;
+- listener/callback/credential store/network tối thiểu sẵn sàng;
+- attempt có bảo vệ session/CSRF và phạm vi host đúng.
+KHÔNG đòi sẵn grant, model catalog, issued registration mới hoặc multiuser approval khi đó là kết quả ở bước sau.
+
+canRunOwnerInference:
+- identity/registration/grant được xác minh;
+- model hợp lệ, connection còn hiệu lực;
+- actor chính là chủ thể Galaxy được gán cho pilot và nằm trong provider scope;
+- Project/source/field ACL và policy cho phép dispatch;
+- không bị quota/revocation/disable.
+
+canRunMemberInference:
+- mọi điều kiện inference liên quan, cộng bằng chứng route/provider cho phép phục vụ actor đó và quyền Galaxy tương ứng.
+- Nếu phạm vi nhiều người chưa xác minh thì false, ngay cả khi actor cố gọi API trực tiếp.
+
+Begin-auth phải đi được khi chưa có registration mới trong route động hợp lệ. Quyền dùng model chỉ mở sau kết quả thật. Không dùng một isConnected/isEligible duy nhất cho mọi bước.
+
+======================================================================
+06. OAUTH REGISTRATION VÀ CALLBACK THEO HỢP ĐỒNG CHÍNH THỨC
+======================================================================
+Tuân thủ đầy đủ guide Registration and sign-in; dưới đây là các điểm kiểm contract, không thay việc đọc guide:
+- Đăng ký đầu: client_id=dynamic_agent_client, tên app thật Galaxy OS, ext_agent_host_id ổn định do app tạo/lưu. Reauth dùng issued client ID đã nhận.
+- Bắt đầu listener trước khi mở browser. Callback HTTP loopback 127.0.0.1; giữ scheme/host/path ổn định, port theo attempt và khớp chính xác lúc exchange.
+- state, nonce, PKCE S256 mới cho mỗi attempt. Identity scopes và các quyền offline_access, resource.invoke, chatgpt.tokens.use.direct; resource https://api.openai.com/v1.
+- Validate callback/error/state; lưu issued client ID đúng attempt; không dùng dynamic_agent_client để exchange/refresh.
+- Xác minh ID token bằng JWKS/issuer/audience/expiry/nonce; dùng granted scopes từ token response để quyết định quyền gói.
+- Callback scope hoặc ID token hợp lệ đơn độc không chứng minh inference được phép.
+
+Không tự bịa endpoints, client secrets hay metadata của app khác. Dùng thư viện OAuth/JOSE đáng tin cậy trong stack đã có; không tự viết crypto.
+
+Ràng buộc của Galaxy:
+- Bind attempt với tenant, Galaxy admin actor/session, intended registration, exact callback và expiry; tiêu thụ một lần.
+- Begin-auth kiểm Origin/CSRF theo framework, không tin role/tenant do frontend tự gửi.
+- Callback phải kiểm admin còn quyền trước commit. Revoke role/logout/attempt hết hạn phải xử lý an toàn; không gắn connection cho actor khác.
+- Một attempt mới không xóa connection đang hoạt động trước khi validate xong. Giải quyết race hai tab/callback lặp bằng transaction/CAS của chính connection, không phụ thuộc hạng mục Task CAS đang chờ.
+- Không merge account/registration chỉ bằng email; provider identity không tự tạo/cấp quyền admin Galaxy.
+- Callback trả trang hoàn tất tối thiểu rồi quay về route Galaxy được allowlist, không open redirect. Nếu session cookie không đi cùng callback do khác origin loopback, dùng attempt binding và kiểm phiên hiện hữu đúng cách; không tắt validation để cho qua.
+- Không để auth code/token vào analytics/access logs/referrer hoặc page resources. Cho phép code trên callback đúng protocol, sau xử lý phải làm sạch URL và không lưu credential trong frontend.
+
+======================================================================
+07. WINDOWS/WSL: LÀM XONG ĐĂNG NHẬP TẠI HOST TRƯỚC
+======================================================================
+Xác minh browser Windows và backend WSL có đúng trên cùng máy đang phục vụ Galaxy không. Pilot hiện tại phải có topology cụ thể, không suy từ chỉ localhost trong URL.
+
+- Chọn port callback còn trống và giữ listener bằng lifecycle do Galaxy quản lý; không chiếm port app hoặc listener của Codex. Không bắt buộc dùng port ví dụ 1455.
+- Bind tối thiểu loopback; kiểm Windows → listener WSL bằng probe không có credential trước khi mở OAuth.
+- Nếu forwarding không phù hợp, xác định nguyên nhân và phương án local được hỗ trợ. Không mở 0.0.0.0/public tunnel/WAN chỉ để nhận callback.
+- Listener nằm trong process/service ứng dụng quản lý hoặc cơ chế helper đã review, không process tạm phụ thuộc phiên Codex. Attempt hết hạn/cancel/server restart phải có cleanup.
+- UI “Kết nối tại máy chủ” phải khởi tạo từ host phù hợp. Kiểm backend topology đáng tin cậy; không chỉ nhìn window.location hoặc tin X-Forwarded-For không được proxy kiểm soát.
+- Với browser LAN/mobile khác host, không tự redirect về 127.0.0.1 rồi giả callback sẽ tới server. Hướng dẫn setup tại host nếu route chỉ hỗ trợ như vậy.
+
+Đăng nhập tại host và dùng cùng actor qua LAN sau khi liên kết là hai bài kiểm riêng. Chưa nghiệm thu LAN/mobile callback không chặn bài host hợp lệ. Không dùng host routing để mở quyền inference cho actor khác.
+
+======================================================================
+08. LƯU CREDENTIAL, REFRESH, ĐỔI VÀ NGẮT KẾT NỐI
+======================================================================
+Dùng credential store của Galaxy nếu phù hợp; bảo vệ secret ngoài Git/frontend/log/model context. Lưu metadata và secret tách biệt; thực thi permissions/encryption theo cơ chế sẵn có, không đưa khóa mã hóa vào NEXT_PUBLIC.
+
+Registration, identity, granted scopes, tokens, expiry và revision phải gắn đúng nhau. Tái sử dụng registration/host ID khi reconnect cùng account; account khác không được ghi đè hồ sơ cũ trước khi xác minh.
+Refresh theo guide Accounts and sessions, serialized theo connection với atomic replacement. API/worker/admin reconnect cạnh tranh phải giữ đúng revision; tuân thủ earliest_refresh_at nếu provider trả và tài liệu áp dụng.
+Lỗi refresh terminal khác lỗi mạng/5xx. Không xóa credentials hoặc bắt OAuth lại khi chỉ mất mạng tạm thời. Không tự đổi sang tài khoản khác.
+
+Ngắt kết nối:
+- Chặn dispatch mới ngay theo revision/policy.
+- Revoke phía provider theo cơ chế chính thức khi có thể; báo riêng việc ngắt local và kết quả revoke remote.
+- Stop/cancel hoặc cách ly kết quả run đang chạy theo ACL; không công bố output sau mất quyền.
+- Không xóa Project, task, history hoặc file chỉ vì ngắt ChatGPT.
+
+Actor giao việc vẫn là người dùng Galaxy thực; credential do admin quản lý không làm tool executor chạy với quyền hệ thống. Với pilot cá nhân, actor khác, kể cả admin khác, không tự được dùng cùng subscription.
+
+======================================================================
+09. UI PHẢI CHO BIẾT ĐANG Ở BƯỚC NÀO VÀ CÓ HÀNH ĐỘNG THẬT
+======================================================================
+Giữ menu Hệ thống → Kết nối ChatGPT tại /settings/chatgpt-connection, chỉ SYSTEM admin quản lý. Không sửa màn login Galaxy thành login ChatGPT.
+
+Tách trạng thái hiển thị từ sự kiện/bằng chứng:
+- Chưa chuẩn bị callback: thiếu bước kỹ thuật cụ thể, có diagnostic.
+- Sẵn sàng kết nối: có thể bấm nút để mở OAuth thật.
+- Đang chờ đăng nhập: attempt còn hiệu lực, có hủy và thời hạn.
+- Đã xác thực, chưa có quyền dùng gói: chỉ khi OAuth đã trả identity nhưng thiếu grant.
+- Đã có quyền gói, đang tải model / chưa kiểm câu trả lời.
+- Đã kiểm câu trả lời thật: thời gian, model và request reference đã che dữ liệu nhạy cảm.
+- Cần đăng nhập lại / hết hạn mức / lỗi tạm thời / bị provider từ chối: phân loại theo evidence.
+
+Khi chưa từng OAuth, dùng “Chưa thực hiện đăng nhập/cấp quyền”, không tạo ấn tượng OpenAI đã từ chối. ELIGIBILITY_UNCONFIRMED không được trình bày như một vendor denial.
+“Kiểm tra cấu hình” chỉ nói rõ phạm vi local preflight. Nếu nút này không gọi OpenAI, không đổi dòng “Lần xác minh với OpenAI”. Hiển thị checkedAt và providerVerifiedAt riêng.
+Sau có grant, có hành động kiểm model/kết nối thực. Một test inference tiêu hao hạn mức chỉ chạy theo thao tác được yêu cầu, không mỗi lần mở trang hoặc polling.
+Ngắt kết nối disabled nếu không có connection; chưa có model thì không hiện model giả. Lỗi giữ thông tin hữu ích đã redacted cho admin, không lộ token.
+Scope nhiều người là thẻ trạng thái riêng, có thể vẫn UNCONFIRMED khi owner pilot đã hoạt động. Không dùng nó để che nút kết nối cá nhân hợp lệ.
+Nhân viên vẫn không thấy CTA kết nối/API key; nếu chưa được phục vụ AI thì hiện thông báo ngắn và vẫn dùng nghiệp vụ không phụ thuộc model.
+Sửa chỗ launcher che nội dung trang quản trị 375px nếu tái hiện trong đúng trang đang sửa; không mở một đợt redesign P04 khác.
+
+======================================================================
+10. MODEL CATALOG VÀ DISPATCHER THẬT
+======================================================================
+Triển khai adapter vào đường chat Project hiện tại. Tìm nơi routing đang trả CHATGPT_NOT_CONFIGURED và thay bằng dispatch có kiểm quyền/kết nối thực, không chỉ sửa badge.
+
+Theo Models and inference:
+- Lấy catalog bằng cùng OAuth grant; dùng models[]/visibility/display_name/slug đúng schema tài liệu, giữ thứ tự phù hợp và cache theo connection revision.
+- Gọi POST https://api.openai.com/v1/responses bằng access token hợp lệ; không dùng backend-api của ChatGPT hoặc key/provider cũ.
+- store=false, stream=true; lịch sử cần thiết do Galaxy chuẩn bị từ nguồn được phép.
+- Thành công chỉ khi nhận terminal response.completed; token đầu tiên hoặc model picker có dữ liệu chưa đủ.
+
+Đọc Preview limitations để xây serializer allowlist riêng. Không gửi các fields/system role/hosted tools của API-key adapter nếu route không hỗ trợ. Unsupported capability phải báo thật; không thêm key trả phí để bù.
+
+Yêu cầu tích hợp của Galaxy:
+- Context và run lưu tenant/Project/actor/connection revision/model/policy revision; reauthorize trước dispatch và công bố.
+- Ghi requested/returned model, latency, terminal/error/request ID; không credential.
+- Model catalog rỗng/mất quyền: giữ draft và báo rõ, không thay bằng danh sách mẫu PDF hoặc model vendor đã pause.
+- Refresh trang/chat mới lấy lại session/source đúng quyền. Không phụ thuộc provider giữ lịch sử trên server.
+- Không tự gọi model lặp khi stream dở; output dở có trạng thái, retry có kiểm soát, không lặp tool mutation.
+- Không coi dùng OAuth trong tham số SDK tên api_key là đã bật API-key billing: kiểm authMode và credential source thật; tuyệt đối không fallback sang secret API key cũ.
+
+======================================================================
+11. CHỨNG MINH MỘT VÒNG TOOL THẬT VỚI CONTRACT ĐÃ CÓ
+======================================================================
+Registry hiện có 12 contract là đầu vào, không phải bằng chứng handlers đã chạy. Kiểm source handler và chọn task_list làm hành trình đọc đầu tiên; calculate có thể là bài phụ nhỏ nếu task_list gặp thiếu dữ liệu, nhưng không thay việc xác minh đọc Project.
+
+Hành trình main cần đạt:
+1. Admin owner đang ở một Project được phép, có dữ liệu test nhận diện được hoặc dữ liệu thật được phép đọc.
+2. Gửi yêu cầu “Liệt kê các công việc của Project này, phân biệt đã hoàn thành và còn phải làm”.
+3. Model phát function/custom call phù hợp.
+4. Galaxy kiểm actor/Project/input và gọi Task domain thật.
+5. Kết quả tool quay lại model theo contract SIWC; model trả câu trả lời hoàn tất.
+6. Count/trạng thái/source refs đối chiếu với Task domain; reload vẫn thấy lịch sử đúng.
+
+Tool definitions phải serialize theo namespace/additional_tools hoặc dạng hiện hành được guide hỗ trợ; không sao nguyên hosted MCP/tool_search schema. Không bật công cụ chỉ vì có tên trong registry.
+Không hoàn thành Task write/CAS hay tự duyệt nghiệp vụ trong bài này. Model có gửi write tool ngoài phạm vi thì executor từ chối rõ, không chạy shell/SQL tự do.
+Các tools chưa nghiệm thu live vẫn giữ trạng thái tương ứng. Không đổi cả 12 contract sang LIVE vì một task_list thành công.
+search_web cần capability được phép và nguồn cấp phù hợp; không bật Tavily/provider API key cũ. Không để search_web chưa configured chặn text inference/task_list.
+Tách handler tồn tại, sẵn sàng thực thi, actor được phép và đã có live evidence. Không coi model chưa nối nghĩa toàn bộ nghiệp vụ đọc Task thông thường bị khóa.
+
+======================================================================
+12. LỖI, CONSENT VÀ HẠN MỨC
+======================================================================
+Dựa vào HTTP status, response body thực, error.code nếu có và request ID; không suy ra nghĩa chỉ từ một 403 hoặc nhãn Galaxy.
+Nếu identity có nhưng thiếu quyền dùng gói: giữ trạng thái sign-in riêng; cho admin chủ động mở lại consent với registration đã lưu và đủ scopes theo guide. Không tự force consent mỗi lần login; không dùng force_reconsent trước khi integration được hỗ trợ.
+Nếu người dùng hủy: kết thúc attempt, không gọi inference, không xóa nhầm connection cũ.
+Nếu quota bị giới hạn: dừng gọi mới và hướng dẫn Usage. Không mặc định hết toàn bộ gói hoặc bịa giờ reset.
+Nếu provider xác nhận user/workspace/route/capability không hợp lệ: ghi chính xác, không lặp login/dispatch vô hạn.
+Lỗi mạng/503: bounded backoff, giữ credentials và phân loại temporary; không tự bật provider khác.
+Không tự cho phép dùng purchased credits, mua gói, auto-topup hay chuyển sang API key. Khi chưa có usage telemetry chính thức, ghi UNKNOWN; không hiển thị 0 hoặc vô hạn như dữ liệu đã xác minh.
+
+======================================================================
+13. THỨ TỰ TRIỂN KHAI VÀ ĐIỂM CẦN NGƯỜI DÙNG
+======================================================================
+S0 — Đọc source và báo nguyên nhân:
+Chỉ rõ file/function/condition đang khóa nút; phần OAuth/callback/store/catalog/dispatcher nào thiếu. Xác nhận route chính thức phù hợp hoặc blocker cụ thể. Không chỉ nhắc lại text màn hình.
+
+S1 — Hoàn thiện trước đăng nhập:
+Implement connection flow, callback host, credential lifecycle, catalog/dispatcher, UI state và tests. Dùng fixture chỉ cho contract/security tests, không seed “đã cấp quyền” vào main.
+Kiểm callback bằng probe an toàn, quyền SYSTEM/member, token redaction và route main dự kiến. Build/cutover qua runtime đã phục hồi trong phạm vi ứng dụng; giữ rollback và dữ liệu.
+
+S2 — Chỉ yêu cầu tôi thực hiện đăng nhập khi mọi phần nhận kết quả đã sẵn sàng:
+Cho đúng URL trên host, menu, nút, điều gì tôi sẽ thấy và cách xác nhận đã quay lại Galaxy. Tôi tự nhập mật khẩu/MFA/consent trên trang OpenAI. Không yêu cầu paste token/code/auth.json vào chat.
+Nếu không thể tiếp tục tự động qua bước người dùng, lưu checkpoint USER_AUTH_PENDING cùng release/URL/attempt timeout và hướng dẫn tiếp tục. Đây là bước tương tác thực tế, không phải một báo cáo “thiếu hồ sơ” chung chung.
+
+S3 — Sau khi tôi đăng nhập:
+Kiểm granted scope, catalog, response thật trong Project và task_list live; kiểm reconnect/reload và quyền actor khác. Ghi lỗi provider thực nếu có. Không dừng ở badge Connected.
+
+S4 — Bàn giao:
+Release và evidence main mới, owner pilot status và multiuser scope riêng. Cập nhật memory/handoff để không quay lại checkpoint runtime cũ.
+
+Không cài Graphify/plugins mới, không xử lý CAS/task writes, không đổi thiết kế toàn hệ thống hoặc điều tra daemon ngoài phạm vi nếu không thật sự chặn kết nối này.
+
+======================================================================
+14. NGHIỆM THU — 20 BÀI CẦN CÓ EVIDENCE ĐÚNG LỚP
+======================================================================
+L01. Source trace xác định vì sao nút khóa; test ngăn điều kiện “phải có grant/registration mới trước begin-auth” quay lại trên route động hợp lệ.
+L02. SYSTEM admin có thể bắt đầu; member/Project admin/API trực tiếp bị chặn. Admin role bị revoke trước callback không thể commit connection.
+L03. Khi chưa từng OAuth, UI ghi NOT_STARTED/NOT_REQUESTED tương ứng; local preflight không tăng providerVerifiedAt.
+L04. Listener Windows/WSL tại host nhận probe, port không tranh app/Codex; vòng đời/timeout/cleanup không phụ thuộc process agent tạm.
+L05. Request đăng ký đầu đúng tên/host/scopes/PKCE/state/nonce; issued client ID sau callback được dùng đúng; không giả client ID.
+L06. Denied consent, wrong state, replay, expired attempt, concurrent tabs và wrong identity/tenant xử lý đúng; secret không ra logs/UI.
+L07. ID token hợp lệ nhưng thiếu quyền gói không gọi inference; chủ động reconsent đi qua luồng chính thức và kiểm lại quyền thật.
+L08. Registration/grant hợp lệ lưu được qua reload/restart ứng dụng; registration/host ID không đổi tùy tiện và account không merge bằng email.
+L09. Refresh đồng thời API/worker và reconnect/revoke giữ revision; lỗi mạng không xóa credential; lỗi terminal được xử lý đúng.
+L10. Catalog chính tài khoản lấy thật; tên/slug khớp, cache invalidation đúng, model giả/cũ không xuất hiện.
+L11. Project chat dispatch thật và nhận response.completed; dở stream/lỗi không ghi success hoặc LIVE.
+L12. task_list được model gọi qua executor, kết quả Task domain quay lại model và trả lời đúng; có evidence callId/runId/source/terminal, không lộ dữ liệu riêng.
+L13. Chủ pilot không đọc được Project/source/field ngoài quyền; Project A/B không trộn dù đều có quyền.
+L14. Khi multiuser scope còn UNCONFIRMED, actor khác không dùng token owner, kể cả cố gọi API hoặc giả connectionId; UI admin pilot vẫn hoạt động nếu đủ điều kiện riêng.
+L15. Quyền quản lý SYSTEM không tự biến actor thành chủ subscription; công cụ chạy theo actor thật.
+L16. Disconnect/revoke chặn dispatch và output trái quyền, giữ dữ liệu nghiệp vụ; trạng thái remote revoke báo chính xác.
+L17. 401/403/429/503/unsupported input theo evidence, retry có giới hạn; không fallback key/account/provider hoặc mua credit.
+L18. Main release Web/API khớp sau cutover; provider-key pause còn hiệu lực; route /settings/chatgpt-connection và Project chat thật được Chrome kiểm.
+L19. Local host login và cùng owner dùng qua LAN là kiểm riêng. LAN/mobile callback chưa hỗ trợ phải nói đúng; không chứng minh bằng localhost fixture.
+L20. Trang quản trị desktop/mobile dùng được, không launcher che nút/chữ; registry chỉ đánh dấu live các tools thật đã chạy; memory/handoff cập nhật checkpoint mới.
+
+Lập ma trận CODE/UNIT/INTEGRATION/FIXTURE/MAIN/PROVIDER_LIVE, kèm PASS/FAIL/PARTIAL/NOT_RUN/BLOCKED. Không đủ user consent thì phần live USER_AUTH_PENDING, không fixture thay live.
+Chạy test cần thiết cho OAuth/security/dispatcher và regression gate của repo. Không lặp full suite nhiều lần trên cùng cây code chỉ để tăng bằng chứng. Không làm hỏng dữ liệu main khi test.
+
+======================================================================
+15. BÁO CÁO CUỐI VÀ BỘ NHỚ
+======================================================================
+Phải báo bằng evidence, không chỉ con số test:
+- CODE_SHA, TESTED_SHA, TESTED_TREE, DEPLOYED_LOCAL_RELEASE, API_WEB_RELEASE_MATCH.
+- BUTTON_BEGIN_AUTH / HOST_CALLBACK_READY / OAUTH_ATTEMPT_STARTED.
+- DYNAMIC_REGISTRATION / VERIFIED_IDENTITY / GRANTED_PLAN_SCOPE.
+- CREDENTIAL_PERSISTENCE / TOKEN_REFRESH / DISCONNECT_REVOKE.
+- ACCOUNT_MODEL_CATALOG_LIVE / OWNER_PROJECT_CHAT_LIVE / TASK_LIST_TOOL_LOOP_LIVE.
+- MEMBER_PROVIDER_SCOPE và MEMBER_INFERENCE_ENFORCEMENT tách riêng.
+- API_KEY_PROVIDERS_PAUSED / NO_FALLBACK / MAIN_UI_VERIFIED.
+- USER_ACTION_REQUIRED, nếu có: đúng URL/nút, bước đăng nhập và checkpoint để tiếp tục.
+
+Nếu chưa kết nối được, trả rõ:
+1. Đã có request nào thực sự tới OpenAI chưa?
+2. Đang dừng trước OAuth, callback, exchange, grant, catalog hay inference?
+3. Lỗi do code/config/network, người dùng chưa thao tác hay provider refusal?
+4. Evidence đã redacted và bước sửa tiếp theo cụ thể?
+Không ghi “chưa có hồ sơ chấp thuận” nếu đó chỉ là field config chưa được điền và chưa xác định route thật sự yêu cầu phê duyệt.
+
+Cập nhật docs/galaxy-os/PROJECT_MEMORY.md và handoff theo convention hiện có, ghi checkpoint USER_REPORTED và VERIFIED_THIS_RUN riêng. Lưu quyết định pilot owner tại host, multiuser chưa tự bật, provider-key pause, kết quả live và giới hạn còn lại. Không ghi token vào memory/evidence.
+
+======================================================================
+16. TÀI LIỆU CHÍNH THỨC CẦN ĐỌC THEO VERSION HIỆN HÀNH
+======================================================================
+- https://developers.openai.com/cookbook/articles/sign-in-with-chatgpt
+- https://developers.openai.com/siwc/quickstart
+- https://developers.openai.com/siwc/token-sharing-open-source
+- https://developers.openai.com/siwc/token-sharing-open-source/sign-in
+- https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions
+- https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference
+- https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations
+- https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery
+
+Ghi ngày đọc, route áp dụng và khác biệt nếu contract thay đổi. Không áp schema API-key/website identity-only/Codex enterprise gateway sang route này một cách máy móc. Tên SDK/devkit trong cookbook phải được xác minh nguồn/khả năng cài; không tự cài package trùng tên từ registry không rõ provenance.
+
+ĐÍCH ĐỢT NÀY: TỪ NÚT KẾT NỐI ĐANG KHÓA ĐẾN ĐĂNG NHẬP CHÍNH THỨC, MODEL THẬT VÀ MỘT VÒNG ĐỌC TASK THẬT CỦA CHỦ KẾT NỐI; NẾU BỊ CHẶN PHẢI CÓ NGUYÊN NHÂN VÀ EVIDENCE CỤ THỂ, KHÔNG CHỈ MỘT TRANG THÔNG BÁO.
