@@ -33,7 +33,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Admin\GalaxyOS
 
 Giữ cửa sổ mở. Script xác minh Administrator, cmdlet, checksum script và backup D trước khi pause. Các bước hiện hữu: drain/chặn nhận việc mới → flush/dừng cùng DB/Redis và API/Web/Edge → fstrim → xác minh pause thật → terminate riêng Ubuntu → compact VHDX offline/read-only → dismount → resume cùng runtime/data và kiểm tra public trong finally. Mật khẩu sudo Linux nhập tại terminal, không qua chat; có thể hỏi lại sau Ubuntu restart. WSL tắt sẽ ngắt Codex; script chạy từ Windows tiếp tục độc lập. Không chạy Codex dưới root.
 
-Chỉ báo xong khi có `RESUMED_PUBLIC_VERIFIED` và `OFFLINE_COMPACT_AND_GALAXY_RESUME_PASSED`. Receipt Windows before/after thật mới xác định bytes C/VHDX thu hồi. Syntax và bốn mock flow (success/pausefail/compactfail/resumefail) đã PASS. Review độc lập SHIP_FOR_OWNER_OFFLINE_MAINTENANCE, không blocker; đã đối chiếu Windows copies,13backup hashes và132file. Entry SHA256 `e83c4760ec515ebe6fab74f99976121ff434498bb32e12d4597722d11343aadb`. Đây không thay phép thử offline thật.
+Chỉ báo xong khi có `RESUMED_PUBLIC_VERIFIED` và `OFFLINE_COMPACT_AND_GALAXY_RESUME_PASSED`. Receipt Windows before/after thật mới xác định bytes C/VHDX thu hồi. Final preflight: Mailpit restart=no sẽ không tự trở lại sau WSL; helper đã bổ sung vào cùng vòng pause/start/identity check. RED2newfail→GREEN6helpertests; actualaudit3containersREADY; reviewr2SHIP. PostgreSQL/Redis vẫn bắt buộc volume. HelperSHA `7278b39c1c6eccee86d987f8039de5b87fc52fa076c523cd131676b3d5df5742`. Latest scripts/review được lưu thêm trên D dưới maintenance-scripts.
+
+Syntax và bốn mock flow (success/pausefail/compactfail/resumefail) đã PASS. Review độc lập SHIP_FOR_OWNER_OFFLINE_MAINTENANCE, không blocker; đã đối chiếu Windows copies,13backup hashes và132file. Entry SHA256 `e83c4760ec515ebe6fab74f99976121ff434498bb32e12d4597722d11343aadb`. Đây không thay phép thử offline thật.
 
 Nếu resume lỗi, giữ receipt và mở Ubuntu bằng hailq_glx:
 
@@ -44,6 +46,6 @@ sudo -v
 
 Không tự restore/reset DB để xử lý lỗi resume. Không chạy helper R32 cũ. Helper mới chỉ nhận R41 `local-69a93613bb87`/schema98/v3; sau khi activate R42/release khác phải chuẩn bị lại pin, không sửa fingerprint để vượt guard. R42 chưa active; có thể triển khai sau compact/resume/public R41 đã PASS.
 
-[Windows README](/mnt/c/Users/Admin/GalaxyOS-Maintenance-20261015-R41/README.txt) giữ cả quy trình chi tiết và phục hồi thủ công. Evidence `.runtime/storage-cleanup-20261015-r41`: initial-candidate-cache.json, pnpm-prune-result.json, off-c-backup-target.json, app-data-after-cache-cleanup.json, entry-tests.json, maintenance-review.json; push receipt `.runtime/e05-reviewpatch-20261015/git-source-push-ssh.json`.
+[Windows README](/mnt/c/Users/Admin/GalaxyOS-Maintenance-20261015-R41/README.txt) giữ cả quy trình chi tiết và phục hồi thủ công. Evidence `.runtime/storage-cleanup-20261015-r41`: initial-candidate-cache.json, pnpm-prune-result.json, off-c-backup-target.json, app-data-after-cache-cleanup.json, entry-tests.json, maintenance-review-r2.json; push receipt `.runtime/e05-reviewpatch-20261015/git-source-push-ssh.json`.
 
 Microsoft: [Optimize-VHD](https://learn.microsoft.com/en-us/powershell/module/hyper-v/optimize-vhd) yêu cầu disk offline hoặc read-only và không bảo đảm giảm một lượng cụ thể; [WSL disk space](https://learn.microsoft.com/en-us/windows/wsl/disk-space) phân biệt capacity Linux và host disk. Không zero-fill, resize, export toàn distro, copy VHDX lên C hoặc xóa data volumes.

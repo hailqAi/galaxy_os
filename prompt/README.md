@@ -1,3 +1,5 @@
+Latest E05 CP-r33: source SSH-pushed, off-C current app backup verified; final helper includes Mailpit restoration (RED2/GREEN6, actual3container audit, independent reviewr2 SHIP). Owner Admin ready; one-command offline entry WAITING_OWNER_EXECUTION, no pause/compact yet. R41 active/R42 not active.
+
 Latest E05 CP-r32: SSH push f9943b9 verified; cache-only cleanup done, appdata protected on D with132Files/schema98 dump checked. R41 active; owner Admin console ready, single-entry offline compact prepared/tested but NOT_EXECUTED. See STORAGE_RECLAIM_20261015.md. Git auth blocker superseded.
 
 Latest E05 CP-r31: full source committed f9943b9 (329 paths, worktree clean); actual push blocked by GitHub authentication. R42 frozen/local/review/stage PASS, R41 active. Safe R41-only offline compact prepared on Windows; no Admin/pause/compact yet. Owner Git login is next.
